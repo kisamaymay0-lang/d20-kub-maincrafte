@@ -80,17 +80,14 @@ public class DiceRollListener implements Listener, CommandExecutor {
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
 
-        // ЖЕСТКИЙ БАН: Если на одном из предметов есть "Бросок I", а на другом Заговор Огня (FIRE_ASPECT) — блокируем наковальню
         if ((leftHasD20 && right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT)) ||
             (rightHasD20 && left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT))) {
             event.setResult(null);
             return;
         }
 
-        // Если это обычное скрещивание двух ванильных чаров (без участия "Броска") — плагин не вмешивается
         if (!leftHasD20 && !rightHasD20) return;
 
-        // Ситуация: Книга "Бросок I" накладывается на обычный меч
         if (right.getType() == Material.ENCHANTED_BOOK && rightHasD20 && left.getType().name().endsWith("_SWORD")) {
             ItemStack result = left.clone();
             ItemMeta meta = result.getItemMeta();
@@ -100,7 +97,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
                     lore.add(CHAR_LORE);
                     meta.setLore(lore);
                     
-                    // Сохраняем скрытое сияние
                     meta.addEnchant(Enchantment.UNBREAKING, 1, true);
                     meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
                     
@@ -112,22 +108,21 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return;
         }
 
-        // Ситуация: Меч с "Броском" улучшается в наковальне другой ванильной книгой (например, Остротой)
         if (leftHasD20 && !rightHasD20) {
-            ItemStack result = event.getResult(); // Берем ванильный просчитанный результат (где наложилась Острота)
+            ItemStack result = event.getResult();
             if (result == null || result.getType() == Material.AIR) return;
 
             ItemMeta meta = result.getItemMeta();
             if (meta != null) {
                 List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
                 if (!lore.contains(CHAR_LORE)) {
-                    lore.add(CHAR_LORE); // Гарантируем, что лор не сотрется ванильным результатом
+                    lore.add(CHAR_LORE);
                     meta.setLore(lore);
                 }
                 meta.addEnchant(Enchantment.UNBREAKING, 1, true);
                 meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
                 result.setItemMeta(meta);
-                event.setResult(result); // Возвращаем меч со всеми новыми чарами + сохраненным "Броском I"
+                event.setResult(result);
             }
         }
     }
