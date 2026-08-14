@@ -69,7 +69,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 player.sendMessage(ChatColor.RED + "§lЧит-режим отключен. Роллы снова случайны.");
             } else {
                 activeCheaters.add(uuid);
-                player.sendMessage(ChatColor.GREEN + "§lЧит-режим включен! Ваш СЛЕДУЮЩИЙ бросок гарантированно выдаст [20]!");
+                player.sendMessage(ChatColor.GREEN + "§lЧит-режим включен! Ваш СЛЕДУЮЩИЙ бросок гарантированно выдаст 20!");
             }
             return true;
         }
@@ -328,7 +328,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (roll == 1) {
             event.setDamage(0); 
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, 40, 0));
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ZOMBIE_ATTACK_IRON_DOOR, 1f, 1.2f);
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ZOMBIE_ATTACK_IRON_DOOR, 1f, 1.3f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 0.8f, 0.7f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.6f, 1.5f);
             victim.getWorld().spawnParticle(Particle.EXPLOSION_EMITTER, victim.getLocation().add(0, 1, 0), 1, 0, 0, 0, 0);
@@ -346,7 +346,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 12, 0.2, 0.2, 0.2, 0.01);
         } else if (roll <= 13) {
             event.setDamage(event.getDamage() * 1.50); 
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_ANVIL_PLACE, 0.7f, 1.8f);
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_ANVIL_PLACE, 0.6f, 1.7f);
             victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.3, 0.3, 0.1);
         } else if (roll <= 17) {
             event.setDamage(event.getDamage() * 2.00); 
@@ -366,14 +366,24 @@ public class DiceRollListener implements Listener, CommandExecutor {
             attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_BELL_USE, 0.5f, 1.6f);
             
             victim.getWorld().spawnParticle(Particle.SOUL_FIRE_FLAME, victim.getLocation().add(0, 1, 0), 45, 0.4, 0.6, 0.4, 0.05);
-            victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 30, 0.3, 0.5, 0.3, 0.1);
+            victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 35, 0.3, 0.5, 0.3, 0.1);
             
-            Vector launchDirection = victim.getLocation().toVector().subtract(attacker.getLocation().toVector()).normalize();
-            launchDirection.setY(0.75); 
-            launchDirection.multiply(1.1); 
+            victim.setVelocity(new Vector(0, 0, 0)); 
+            
+            Vector launchDirection = victim.getLocation().toVector().subtract(attacker.getLocation().toVector());
+            if (launchDirection.lengthSquared() == 0) {
+                launchDirection = new Vector(1, 0, 0);
+            } else {
+                launchDirection.normalize();
+            }
+            
+            launchDirection.setY(1.25); 
+            launchDirection.setX(launchDirection.getX() * 2.1); 
+            launchDirection.setZ(launchDirection.getZ() * 2.1);
+            
             victim.setVelocity(launchDirection);
 
-            attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Ударная волна отбросила врага, Скорость II и х4.0 урон!");
+            attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага на 8х8 блоков, Скорость II и х4.0 урон!");
         }
     }
 
