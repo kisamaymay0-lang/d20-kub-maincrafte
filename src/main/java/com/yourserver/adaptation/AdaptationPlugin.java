@@ -44,6 +44,8 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
     private final Map<UUID, Double> activeTimesLeft = new HashMap<>();
     private final Map<UUID, Double> activeMaxTimes = new HashMap<>();
     private final Map<UUID, Long> cooldownEndTimes = new HashMap<>();
+        private DiceRollListener diceRollListener;
+
 
     @Override
     public void onEnable() {
@@ -52,15 +54,30 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         if (getCommand("adaptation") != null) {
             getCommand("adaptation").setExecutor(this);
         }
-        getLogger().info("Плагин AdaptationPlugin [COOLDOWN-UPDATE] успешно запущен!");
+        
+        // Активация механики кубика D20 ("Бросок I")
+        this.diceRollListener = new DiceRollListener(this);
+        getServer().getPluginManager().registerEvents(this.diceRollListener, this);
+        if (getCommand("d20") != null) {
+            getCommand("d20").setExecutor(this.diceRollListener);
+        }
+
+        getLogger().info("Плагин AdaptationPlugin [COOLDOWN-UPDATE + D20] успешно запущен!");
     }
 
     @Override
     public void onDisable() {
+        // Очистка данных Адаптации
         activeTimers.values().forEach(BukkitTask::cancel);
         activeBossBars.values().forEach(BossBar::removeAll);
         damageCounters.clear(); superDamageCounters.clear(); activeTimers.clear(); activeAdaptations.clear(); superAdaptations.clear(); lastHitTime.clear(); activeBossBars.clear(); activeTimesLeft.clear(); activeMaxTimes.clear(); cooldownEndTimes.clear();
+        
+        // Очистка данных кубика D20 при выключении/перезагрузке
+        if (this.diceRollListener != null) {
+            this.diceRollListener.disable();
+        }
     }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!sender.hasPermission("adaptation.admin")) {
