@@ -122,12 +122,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
             meta.setEnchantmentGlintOverride(true);
             result.setItemMeta(meta);
             event.setResult(result);
-            if (inv.getRepairCost() == 0) {
+            try {
                 inv.setRepairCost(5);
-            }
+            } catch (Exception ignored) {}
         }
     }
-
     @EventHandler
     public void onGrindstonePrepare(PrepareGrindstoneEvent event) {
         GrindstoneInventory inv = event.getInventory();
@@ -145,13 +144,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
             vanillaEnchantsCount = ((EnchantmentStorageMeta) meta).getStoredEnchants().size();
         }
         
-        // Если ванильных чар больше нет — точило блокируется, "Бросок" нельзя стереть
         if (vanillaEnchantsCount == 0) {
             event.setResult(null);
             return;
         }
 
-        // Если чары есть — позволяем их стереть, но возвращаем Бросок и его сияние
         ItemStack result = targetItem.clone();
         ItemMeta resultMeta = result.getItemMeta();
         if (resultMeta != null) {
@@ -173,46 +170,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         }
     }
 
-    @EventHandler
-    public void onGrindstonePrepare(PrepareGrindstoneEvent event) {
-        GrindstoneInventory inv = event.getInventory();
-        ItemStack top = inv.getItem(0);
-        ItemStack bottom = inv.getItem(1);
-        
-        ItemStack targetItem = (top != null) ? top : bottom;
-        if (targetItem == null || !hasD20Lore(targetItem)) return;
-
-        ItemMeta meta = targetItem.getItemMeta();
-        if (meta == null) return;
-
-        int vanillaEnchantsCount = meta.getEnchants().size();
-        
-        if (meta.hasEnchant(Enchantment.UNBREAKING) && vanillaEnchantsCount == 1) {
-            event.setResult(null);
-            return;
-        }
-        
-        if (vanillaEnchantsCount == 0) {
-            event.setResult(null);
-            return;
-        }
-
-        ItemStack result = targetItem.clone();
-        ItemMeta resultMeta = result.getItemMeta();
-        if (resultMeta != null) {
-            for (Enchantment geom : new ArrayList<>(resultMeta.getEnchants().keySet())) {
-                resultMeta.removeEnchant(geom);
-            }
-            resultMeta.addEnchant(Enchantment.UNBREAKING, 1, true);
-            
-            List<String> lore = resultMeta.hasLore() ? new ArrayList<>(resultMeta.getLore()) : new ArrayList<>();
-            if (!lore.contains(CHAR_LORE)) {
-                lore.add(CHAR_LORE);
-            }
-            resultMeta.setLore(lore);
-            event.setResult(result);
-        }
-    }
     @EventHandler(priority = EventPriority.HIGH)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         if (event.isCancelled() || !(event.getDamager() instanceof Player)) return;
