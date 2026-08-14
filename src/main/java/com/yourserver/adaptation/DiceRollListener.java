@@ -50,11 +50,13 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length < 2 || !args.equalsIgnoreCase("give")) {
+        // ИСПРАВЛЕНИЕ ОШИБКИ: Проверяем конкретно первый аргумент args[0] вместо всего массива
+        if (args.length < 2 || !args[0].equalsIgnoreCase("give")) {
             sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>");
             return true;
         }
-        Player target = Bukkit.getPlayer(args);
+        // ИСПРАВЛЕНИЕ ОШИБКИ: Извлекаем имя игрока из строки args[1]
+        Player target = Bukkit.getPlayer(args[1]);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден.");
             return true;
@@ -80,15 +82,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemStack right = inv.getItem(1);
         if (left == null || right == null) return;
 
-        // ОФИЦИАЛЬНАЯ ПРОВЕРКА ДЛЯ 1.21+: Только Мечи, Топоры, Булавы и ванильные Копья
+        // ТОЛЬКО МЕЧИ: Проверяем предмет на соответствие официальному тегу мечей Майнкрафта
         Material mat = left.getType();
-        String matName = mat.name().toUpperCase();
+        boolean isAllowedWeapon = Tag.ITEMS_SWORDS.isTagged(mat);
         
-        boolean isAllowedWeapon = Tag.ITEMS_SWORDS.isTagged(mat) || 
-                                  Tag.ITEMS_AXES.isTagged(mat) || 
-                                  mat == Material.MACE || 
-                                  matName.contains("SPEAR"); // Авто-распознавание всех типов ванильных копий по тегу материала
-        
+        // Если предмет слева — это НЕ МЕЧ И НЕ КНИГА, то наложение чара "Бросок I" полностью блокируется
         if (!isAllowedWeapon && left.getType() != Material.ENCHANTED_BOOK) {
             event.setResult(null);
             return;
