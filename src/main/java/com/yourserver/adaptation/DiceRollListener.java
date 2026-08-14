@@ -351,7 +351,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
         } else if (roll <= 17) {
             event.setDamage(event.getDamage() * 2.00); 
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 1.2f, 0.9f);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_KNOWN_TO_BE_CRIT, 1f, 1.2f);
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_STRONG, 1f, 1.2f);
             victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 20, 0.3, 0.4, 0.3, 0.05);
         } else if (roll <= 19) {
             event.setDamage(event.getDamage() * 2.50); 
