@@ -23,7 +23,6 @@ import org.bukkit.event.inventory.PrepareGrindstoneEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.GrindstoneInventory;
-import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -41,7 +40,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private final Map<UUID, BukkitTask> rollingTasks = new HashMap<>();
     private final Map<UUID, Integer> waitingForHit = new HashMap<>();
     private final Map<UUID, BossBar> playerBossBars = new HashMap<>();
-    private final String CHAR_LORE = ChatColor.LIGHT_PURPLE + "Бросок I";
+    
+    // Текст чара теперь жирный и бирюзовый (§b)
+    private final String CHAR_LORE = "§b§lБросок I";
 
     public DiceRollListener(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -61,8 +62,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemStack book = new ItemStack(Material.ENCHANTED_BOOK);
         ItemMeta meta = book.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(ChatColor.GOLD + "Зачарованная книга");
+            // Книга теперь называется "Чародейская книга" и имеет бирюзовый текст
+            meta.setDisplayName("§b§lЧародейская книга");
             meta.setLore(Collections.singletonList(CHAR_LORE));
+            
+            // Чтобы книга изначально сама по себе переливалась, накинем пустышку
+            meta.addEnchant(Enchantment.UNBREAKING, 1, true);
             book.setItemMeta(meta);
         }
         target.getInventory().addItem(book);
@@ -97,8 +102,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
                     lore.add(CHAR_LORE);
                     meta.setLore(lore);
                     
+                    // Оставляем чар для свечения, но НЕ прячем его флагом HIDE_ENCHANTS, чтобы не ломать список остальных чар
                     meta.addEnchant(Enchantment.UNBREAKING, 1, true);
-                    meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
                     
                     result.setItemMeta(meta);
                     event.setResult(result);
@@ -120,7 +125,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
                     meta.setLore(lore);
                 }
                 meta.addEnchant(Enchantment.UNBREAKING, 1, true);
-                meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
                 result.setItemMeta(meta);
                 event.setResult(result);
             }
@@ -158,7 +162,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 resultMeta.removeEnchant(ench);
             }
             resultMeta.addEnchant(Enchantment.UNBREAKING, 1, true);
-            resultMeta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
             
             List<String> lore = resultMeta.hasLore() ? new ArrayList<>(resultMeta.getLore()) : new ArrayList<>();
             if (!lore.contains(CHAR_LORE)) {
