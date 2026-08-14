@@ -40,8 +40,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private final Map<UUID, BukkitTask> rollingTasks = new HashMap<>();
     private final Map<UUID, Integer> waitingForHit = new HashMap<>();
     private final Map<UUID, BossBar> playerBossBars = new HashMap<>();
-    
-    // Текст чара теперь светло-пурпурный (§d) и обычный (не жирный)
     private final String CHAR_LORE = "§dБросок I";
 
     public DiceRollListener(JavaPlugin plugin) {
@@ -50,10 +48,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length < 2 || !args.equalsIgnoreCase("give")) {
+        // Проверяем, что введено достаточно аргументов и первый из них — "give"
+        if (args.length < 2 || !args[0].equalsIgnoreCase("give")) {
             sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>");
             return true;
         }
+        // Извлекаем игрока из второго аргумента массива
         Player target = Bukkit.getPlayer(args[1]);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден.");
@@ -62,10 +62,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemStack book = new ItemStack(Material.ENCHANTED_BOOK);
         ItemMeta meta = book.getItemMeta();
         if (meta != null) {
-            // "Чародейская книга" обычным бирюзовым цветом (§b)
             meta.setDisplayName("§bЧародейская книга");
             meta.setLore(Collections.singletonList(CHAR_LORE));
-            
             meta.addEnchant(Enchantment.UNBREAKING, 1, true);
             book.setItemMeta(meta);
         }
@@ -84,11 +82,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
 
-        // ЖЕСТКИЙ ЗАПРЕТ: Проверяем наличие Заговора огня на обоих предметах в наковальне
         boolean leftHasFire = left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
         boolean rightHasFire = right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
         
-        // Если пытаемся объединить Бросок и Заговор огня в любых комбинациях — полностью блокируем
         if ((leftHasD20 && rightHasFire) || (rightHasD20 && leftHasFire) || 
             (leftHasD20 && right.getType() == Material.ENCHANTED_BOOK && right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT))) {
             event.setResult(null);
@@ -97,12 +93,10 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
         if (!leftHasD20 && !rightHasD20) return;
 
-        // Наложение бирюзовой книги "Бросок I" на ванильный меч
         if (right.getType() == Material.ENCHANTED_BOOK && rightHasD20 && left.getType().name().endsWith("_SWORD")) {
             ItemStack result = left.clone();
             ItemMeta meta = result.getItemMeta();
             if (meta != null) {
-                // Если на мече УЖЕ есть заговор огня — прерываем
                 if (meta.hasEnchant(Enchantment.FIRE_ASPECT)) {
                     event.setResult(null);
                     return;
@@ -121,14 +115,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return;
         }
 
-        // Улучшение меча с Броском при помощи других ванильных книг (Острота, Добыча и т.д.)
         if (leftHasD20 && !rightHasD20) {
             ItemStack result = event.getResult();
             if (result == null || result.getType() == Material.AIR) return;
 
             ItemMeta meta = result.getItemMeta();
             if (meta != null) {
-                // Двойная проверка: если ванильный расчет наковальни пытается пропихнуть Заговор огня — обнуляем
                 if (meta.hasEnchant(Enchantment.FIRE_ASPECT)) {
                     event.setResult(null);
                     return;
