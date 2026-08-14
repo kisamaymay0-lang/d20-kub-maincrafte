@@ -49,11 +49,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length < 2 || !args.equalsIgnoreCase("give")) {
+        if (args.length < 2 || !args[0].equalsIgnoreCase("give")) {
             sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>");
             return true;
         }
-        Player target = Bukkit.getPlayer(args);
+        Player target = Bukkit.getPlayer(args[1]);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден.");
             return true;
@@ -109,31 +109,24 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemMeta meta = targetItem.getItemMeta();
         if (meta == null) return;
 
-        // Считаем количество ванильных чаров на предмете
         int vanillaEnchantsCount = meta.getEnchants().size();
         
-        // Если из чаров есть только наш скрытый Неразрушимость (поддерживающий сияние),
-        // значит других ванильных чаров нет. Блокируем обработку в точиле.
         if (meta.hasEnchant(Enchantment.UNBREAKING) && vanillaEnchantsCount == 1) {
             event.setResult(null);
             return;
         }
         
-        // Если вообще нет ванильных чаров (чистый меч с лором) — тоже блокируем
         if (vanillaEnchantsCount == 0) {
             event.setResult(null);
             return;
         }
 
-        // Если есть другие чары — позволяем точилу их снять, но насильно возвращаем "Бросок I" и сияние
         ItemStack result = targetItem.clone();
         ItemMeta resultMeta = result.getItemMeta();
         if (resultMeta != null) {
-            // Удаляем старые ванильные чары, которые точило должно снять
             for (Enchantment ench : new ArrayList<>(resultMeta.getEnchants().keySet())) {
                 resultMeta.removeEnchant(ench);
             }
-            // Возвращаем обязательное скрытое сияние и лор чара
             resultMeta.addEnchant(Enchantment.UNBREAKING, 1, true);
             resultMeta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
             
@@ -143,8 +136,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
             resultMeta.setLore(lore);
             result.setItemMeta(resultMeta);
-            
-            // Задаем кастомный результат для точила
             event.setResult(result);
         }
     }
@@ -269,12 +260,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
         } else if (roll <= 19) {
             event.setDamage(event.getDamage() * 1.3);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_DRAGON_FIREBALL_EXPLODE, 0.7f, 1.4f);
-            victim.getWorld().spawnParticle(Particle.TRIAL_SPARKS, victim.getLocation().add(0, 1, 0), 25, 0.3, 0.5, 0.3, 0.15);
+            victim.getWorld().spawnParticle(Particle.FLAME, victim.getLocation().add(0, 1, 0), 20, 0.3, 0.4, 0.3, 0.05);
         } else {
             event.setDamage(event.getDamage() * 1.8);
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 80, 1));
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.8f, 1.6f);
-            victim.getWorld().spawnParticle(Particle.TRIAL_SPARKS, victim.getLocation().add(0, 1, 0), 40, 0.4, 0.6, 0.4, 0.2);
+            victim.getWorld().spawnParticle(Particle.SOUL_FIRE_FLAME, victim.getLocation().add(0, 1, 0), 35, 0.4, 0.5, 0.4, 0.05);
             attacker.sendMessage("§e§lКРИТИЧЕСКИЙ УСПЕХ! Скорость II и х1.8 урон!");
         }
     }
