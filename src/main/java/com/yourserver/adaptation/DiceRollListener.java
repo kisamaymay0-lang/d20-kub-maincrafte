@@ -71,7 +71,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         sender.sendMessage(ChatColor.GREEN + "Книга выдана игроку " + target.getName());
         return true;
     }
-
     @EventHandler(priority = EventPriority.LOWEST)
     public void onAnvilPrepare(PrepareAnvilEvent event) {
         AnvilInventory inv = event.getInventory();
@@ -127,6 +126,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             } catch (Exception ignored) {}
         }
     }
+
     @EventHandler
     public void onGrindstonePrepare(PrepareGrindstoneEvent event) {
         GrindstoneInventory inv = event.getInventory();
@@ -169,9 +169,18 @@ public class DiceRollListener implements Listener, CommandExecutor {
             event.setResult(result);
         }
     }
-
     @EventHandler(priority = EventPriority.HIGH)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
+        if (event.getEntity() instanceof Player) {
+            Player victimPlayer = (Player) event.getEntity();
+            UUID victimUUID = victimPlayer.getUniqueId();
+            if (rollingTasks.containsKey(victimUUID) && !waitingForHit.containsKey(victimUUID)) {
+                event.setDamage(event.getDamage() * 0.70);
+                victimPlayer.getWorld().spawnParticle(Particle.CRIT, victimPlayer.getLocation().add(0, 1, 0), 3, 0.2, 0.2, 0.2, 0.01);
+                return;
+            }
+        }
+
         if (event.isCancelled() || !(event.getDamager() instanceof Player)) return;
         Player attacker = (Player) event.getDamager();
         ItemStack hand = attacker.getInventory().getItemInMainHand();
@@ -233,7 +242,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         }.runTaskTimer(plugin, 0L, 2L);
         rollingTasks.put(uuid, task);
     }
-
     private void startWaitingForHitPhase(Player player, BossBar bossBar, int finalRoll) {
         UUID uuid = player.getUniqueId();
         bossBar.setProgress(1.0);
@@ -270,40 +278,42 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (!(event.getEntity() instanceof LivingEntity)) return;
         LivingEntity victim = (LivingEntity) event.getEntity();
 
-        // Если выпало 18, 19 или 20 — цель гарантированно поджигается
         if (roll >= 18) {
             victim.setFireTicks(60);
         }
 
-        // НОВЫЙ БАЛАНС: 1-10 уменьшает урон, 11-20 увеличивает урон
         if (roll == 1) {
-            event.setDamage(0); // Критический промах
+            event.setDamage(0); 
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, 30, 0));
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ITEM_BREAK, 1f, 0.8f);
-            attacker.getWorld().spawnParticle(Particle.SMOKE, attacker.getLocation().add(0, 1, 0), 25, 0.3, 0.3, 0.3, 0.05);
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ZOMBIE_ATTACK_IRON_DOOR, 1f, 1.3f);
+            victim.getWorld().spawnParticle(Particle.LARGE_SMOKE, victim.getLocation().add(0, 1, 0), 20, 0.3, 0.4, 0.3, 0.02);
             attacker.sendMessage("§c§lКРИТИЧЕСКИЙ ПРОВАЛ! Текущий удар нанес 0 урона.");
-        } else if (roll <= 10) {
-            // Весь промежуток от 2 до 10 уменьшает урон (снижение на 25%)
-            event.setDamage(event.getDamage() * 0.75);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1f, 0.6f);
-            victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 12, 0.2, 0.2, 0.2, 0.02);
-        } else if (roll <= 14) {
-            // Небольшой успех (11-14): урон увеличен на 15%
-            event.setDamage(event.getDamage() * 1.15);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_CRIT, 1f, 1.1f);
+        } else if (roll <= 5) {
+            event.setDamage(event.getDamage() * 0.50); 
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_SLIME_ATTACK, 1f, 0.7f);
+            victim.getWorld().spawnParticle(Particle.ASH, victim.getLocation().add(0, 1, 0), 15, 0.2, 0.3, 0.2, 0.01);
+        } else if (roll <= 9) {
+            event.setDamage(event.getDamage() * 0.75); 
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BLOCK, 0.9f, 0.8f);
+            victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 10, 0.2, 0.2, 0.2, 0.01);
+        } else if (roll <= 13) {
+            event.setDamage(event.getDamage() * 1.50); 
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_ANVIL_PLACE, 0.6f, 1.7f);
             victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.3, 0.3, 0.1);
+        } else if (roll <= 17) {
+            event.setDamage(event.getDamage() * 2.00); 
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 1.1f, 0.9f);
+            victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.4, 0.3, 0.05);
         } else if (roll <= 19) {
-            // Хороший успех (15-19): урон увеличен на 35%
-            event.setDamage(event.getDamage() * 1.35);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_DRAGON_FIREBALL_EXPLODE, 0.7f, 1.4f);
-            victim.getWorld().spawnParticle(Particle.FLAME, victim.getLocation().add(0, 1, 0), 20, 0.3, 0.4, 0.3, 0.05);
+            event.setDamage(event.getDamage() * 2.50); 
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_DRAGON_FIREBALL_EXPLODE, 0.8f, 1.3f);
+            victim.getWorld().spawnParticle(Particle.FLAME, victim.getLocation().add(0, 1, 0), 30, 0.4, 0.5, 0.4, 0.05);
         } else {
-            // Критический успех (20): урон увеличен на 75% (х1.75)
-            event.setDamage(event.getDamage() * 1.75);
+            event.setDamage(event.getDamage() * 4.00); 
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 80, 1));
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.8f, 1.6f);
-            victim.getWorld().spawnParticle(Particle.SOUL_FIRE_FLAME, victim.getLocation().add(0, 1, 0), 35, 0.4, 0.5, 0.4, 0.05);
-            attacker.sendMessage("§e§lКРИТИЧЕСКИЙ УСПЕХ! Скорость II и х1.75 урон!");
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.8f, 1.5f);
+            victim.getWorld().spawnParticle(Particle.SOUL_FIRE_FLAME, victim.getLocation().add(0, 1, 0), 45, 0.4, 0.6, 0.4, 0.05);
+            attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Скорость II и х4.0 урон!");
         }
     }
 
