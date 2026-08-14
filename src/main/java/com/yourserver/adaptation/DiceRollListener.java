@@ -19,8 +19,10 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
+import org.bukkit.event.inventory.PrepareGrindstoneEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.AnvilInventory;
+import org.bukkit.inventory.GrindstoneInventory;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -47,11 +49,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length < 2 || !args[0].equalsIgnoreCase("give")) {
+        if (args.length < 2 || !args.equalsIgnoreCase("give")) {
             sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>");
             return true;
         }
-        Player target = Bukkit.getPlayer(args[1]);
+        Player target = Bukkit.getPlayer(args);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден.");
             return true;
@@ -94,6 +96,58 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
         }
     }
+
+    @EventHandler
+    public void onGrindstonePrepare(PrepareGrindstoneEvent event) {
+        GrindstoneInventory inv = event.getInventory();
+        ItemStack top = inv.getItem(0);
+        ItemStack bottom = inv.getItem(1);
+        
+        ItemStack targetItem = (top != null) ? top : bottom;
+        if (targetItem == null || !hasD20Lore(targetItem)) return;
+
+        ItemMeta meta = targetItem.getItemMeta();
+        if (meta == null) return;
+
+        // Считаем количество ванильных чаров на предмете
+        int vanillaEnchantsCount = meta.getEnchants().size();
+        
+        // Если из чаров есть только наш скрытый Неразрушимость (поддерживающий сияние),
+        // значит других ванильных чаров нет. Блокируем обработку в точиле.
+        if (meta.hasEnchant(Enchantment.UNBREAKING) && vanillaEnchantsCount == 1) {
+            event.setResult(null);
+            return;
+        }
+        
+        // Если вообще нет ванильных чаров (чистый меч с лором) — тоже блокируем
+        if (vanillaEnchantsCount == 0) {
+            event.setResult(null);
+            return;
+        }
+
+        // Если есть другие чары — позволяем точилу их снять, но насильно возвращаем "Бросок I" и сияние
+        ItemStack result = targetItem.clone();
+        ItemMeta resultMeta = result.getItemMeta();
+        if (resultMeta != null) {
+            // Удаляем старые ванильные чары, которые точило должно снять
+            for (Enchantment ench : new ArrayList<>(resultMeta.getEnchants().keySet())) {
+                resultMeta.removeEnchant(ench);
+            }
+            // Возвращаем обязательное скрытое сияние и лор чара
+            resultMeta.addEnchant(Enchantment.UNBREAKING, 1, true);
+            resultMeta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+            
+            List<String> lore = resultMeta.hasLore() ? new ArrayList<>(resultMeta.getLore()) : new ArrayList<>();
+            if (!lore.contains(CHAR_LORE)) {
+                lore.add(CHAR_LORE);
+            }
+            resultMeta.setLore(lore);
+            result.setItemMeta(resultMeta);
+            
+            // Задаем кастомный результат для точила
+            event.setResult(result);
+        }
+    }
     @EventHandler(priority = EventPriority.HIGH)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         if (event.isCancelled() || !(event.getDamager() instanceof Player)) return;
@@ -110,7 +164,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
         }
 
         if (rollingTasks.containsKey(uuid)) {
-            rollingTasks.remove(uuid).cancel();
+            rollingTasks.get(uuid).cancel();
             rollingTasks.remove(uuid);
         }
         startDiceRoll(attacker);
@@ -146,14 +200,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 double progress = (double) ticks / 80.0;
                 bossBar.setProgress(Math.max(0.0, Math.min(1.0, progress)));
                 int randomNum = ThreadLocalRandom.current().nextInt(1, 21);
-                String color = (ticks % 4 == 0) ? "§e" : "§f";
-                bossBar.setTitle("§fВыпало: " + color + "[" + randomNum + "]");
+                String color = (ticks % 4 == 0) ? "§e§l" : "§f§l";
+                bossBar.setTitle("§f§lВыпало: " + color + "[" + randomNum + "]");
                 
-if (ticks % 4 == 0) {
-    player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.3f, 1.5f);
-}
-
-
+                if (ticks % 4 == 0) {
+                    player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.3f, 1.5f);
+                }
                 ticks -= 2;
             }
         }.runTaskTimer(plugin, 0L, 2L);
@@ -163,7 +215,7 @@ if (ticks % 4 == 0) {
     private void startWaitingForHitPhase(Player player, BossBar bossBar, int finalRoll) {
         UUID uuid = player.getUniqueId();
         bossBar.setProgress(1.0);
-        bossBar.setTitle("§fВыпало: §e[" + finalRoll + "] §fВремя для §eУДАРА!");
+        bossBar.setTitle("§f§lВыпало: §e§l[" + finalRoll + "] §f§lВремя для §e§lУДАРА!");
         waitingForHit.put(uuid, finalRoll);
         player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_CHIME, 0.8f, 1.2f);
 
@@ -181,7 +233,7 @@ if (ticks % 4 == 0) {
                 }
                 if (ticks <= 0) {
                     cleanup(uuid);
-                    player.sendMessage("§cВремя для удара истекло!");
+                    player.sendMessage("§c§lВремя для удара истекло!");
                     return;
                 }
                 double progress = (double) ticks / 100.0;
@@ -196,31 +248,34 @@ if (ticks % 4 == 0) {
         if (!(event.getEntity() instanceof LivingEntity)) return;
         LivingEntity victim = (LivingEntity) event.getEntity();
 
+        if (roll >= 18) {
+            victim.setFireTicks(60);
+        }
+
         if (roll == 1) {
             event.setDamage(0);
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, 30, 0));
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ITEM_BREAK, 1f, 0.8f);
-            attacker.getWorld().spawnParticle(Particle.SMOKE, attacker.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.05);
-            attacker.sendMessage("§c§lКРИТИЧЕСКИЙ ПРОВАЛ! Следующий удар нанес 0 урона.");
+            attacker.getWorld().spawnParticle(Particle.SMOKE, attacker.getLocation().add(0, 1, 0), 25, 0.3, 0.3, 0.3, 0.05);
+            attacker.sendMessage("§c§lКРИТИЧЕСКИЙ ПРОВАЛ! Текущий удар нанес 0 урона.");
         } else if (roll <= 9) {
-            event.setDamage(event.getDamage() * 0.6);
+            event.setDamage(event.getDamage() * 0.8);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1f, 0.6f);
-            victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 10, 0.2, 0.2, 0.2, 0.02);
+            victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 12, 0.2, 0.2, 0.2, 0.02);
         } else if (roll <= 14) {
-            event.setDamage(event.getDamage() + 2.0);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_CRIT, 1f, 1f);
+            event.setDamage(event.getDamage() + 1.5);
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_CRIT, 1f, 1.1f);
             victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.3, 0.3, 0.1);
         } else if (roll <= 19) {
-            event.setDamage(event.getDamage() * 1.5);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_DRAGON_FIREBALL_EXPLODE, 0.8f, 1.3f);
-            victim.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, victim.getLocation().add(0, 1, 0), 25, 0.4, 0.4, 0.4, 0.1);
+            event.setDamage(event.getDamage() * 1.3);
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_DRAGON_FIREBALL_EXPLODE, 0.7f, 1.4f);
+            victim.getWorld().spawnParticle(Particle.TRIAL_SPARKS, victim.getLocation().add(0, 1, 0), 25, 0.3, 0.5, 0.3, 0.15);
         } else {
-            event.setDamage(event.getDamage() * 2.5);
-            victim.setFireTicks(60);
+            event.setDamage(event.getDamage() * 1.8);
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 80, 1));
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.9f, 1.5f);
-            victim.getWorld().spawnParticle(Particle.EXPLOSION, victim.getLocation().add(0, 1, 0), 1, 0, 0, 0, 0);
-            attacker.sendMessage("§e§lКРИТИЧЕСКИЙ УСПЕХ! Скорость II и х2.5 урон!");
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.8f, 1.6f);
+            victim.getWorld().spawnParticle(Particle.TRIAL_SPARKS, victim.getLocation().add(0, 1, 0), 40, 0.4, 0.6, 0.4, 0.2);
+            attacker.sendMessage("§e§lКРИТИЧЕСКИЙ УСПЕХ! Скорость II и х1.8 урон!");
         }
     }
 
