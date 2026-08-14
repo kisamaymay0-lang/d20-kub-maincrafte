@@ -76,24 +76,101 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemStack left = inv.getItem(0);
         ItemStack right = inv.getItem(1);
         if (left == null || right == null) return;
-        if (right.getType() != Material.ENCHANTED_BOOK || !hasD20Lore(right)) return;
-        if (!left.getType().name().endsWith("_SWORD")) return;
-        
-        ItemStack result = left.clone();
-        ItemMeta meta = result.getItemMeta();
-        if (meta != null) {
-            List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
-            if (!lore.contains(CHAR_LORE)) {
-                lore.add(CHAR_LORE);
-                meta.setLore(lore);
-                
+
+        boolean leftHasD20 = hasD20Lore(left);
+        boolean rightHasD20 = hasD20Lore(right);
+
+        // ЖЕСТКИЙ БАН: Если на одном из предметов есть "Бросок I", а на другом Заговор Огня (FIRE_ASPECT) — блокируем наковальню
+        if ((leftHasD20 && right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT)) ||
+            (rightHasD20 && left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT))) {
+            event.setResult(null);
+            return;
+        }
+
+        // Если это обычное скрещивание двух ванильных чаров (без участия "Броска") — плагин не вмешивается
+        if (!leftHasD20 && !rightHasD20) return;
+
+        // Ситуация: Книга "Бросок I" накладывается на обычный меч
+        if (right.getType() == Material.ENCHANTED_BOOK && rightHasD20 && left.getType().name().endsWith("_SWORD")) {
+            ItemStack result = left.clone();
+            ItemMeta meta = result.getItemMeta();
+            if (meta != null) {
+                List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
+                if (!lore.contains(CHAR_LORE)) {
+                    lore.add(CHAR_LORE);
+                    meta.setLore(lore);
+                    
+                    // Сохраняем скрытое сияние
+                    meta.addEnchant(Enchantment.UNBREAKING, 1, true);
+                    meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+                    
+                    result.setItemMeta(meta);
+                    event.setResult(result);
+                    inv.setRepairCost(5);
+                }
+            }
+            return;
+        }
+
+        // Ситуация: Меч с "Броском" улучшается в наковальне другой ванильной книгой (например, Остротой)
+        if (leftHasD20 && !rightHasD20) {
+            ItemStack result = event.getResult(); // Берем ванильный просчитанный результат (где наложилась Острота)
+            if (result == null || result.getType() == Material.AIR) return;
+
+            ItemMeta meta = result.getItemMeta();
+            if (meta != null) {
+                List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
+                if (!lore.contains(CHAR_LORE)) {
+                    lore.add(CHAR_LORE); // Гарантируем, что лор не сотрется ванильным результатом
+                    meta.setLore(lore);
+                }
                 meta.addEnchant(Enchantment.UNBREAKING, 1, true);
                 meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
-                
                 result.setItemMeta(meta);
-                event.setResult(result);
-                inv.setRepairCost(5);
+                event.setResult(result); // Возвращаем меч со всеми новыми чарами + сохраненным "Броском I"
             }
+        }
+    }
+
+    @EventHandler
+    public void onGrindstonePrepare(PrepareGrindstoneEvent event) {
+        GrindstoneInventory inv = event.getInventory();
+        ItemStack top = inv.getItem(0);
+        ItemStack bottom = inv.getItem(1);
+        
+        ItemStack targetItem = (top != null) ? top : bottom;
+        if (targetItem == null || !hasD20Lore(targetItem)) return;
+
+        ItemMeta meta = targetItem.getItemMeta();
+        if (meta == null) return;
+
+        int vanillaEnchantsCount = meta.getEnchants().size();
+        
+        if (meta.hasEnchant(Enchantment.UNBREAKING) && vanillaEnchantsCount == 1) {
+            event.setResult(null);
+            return;
+        }
+        
+        if (vanillaEnchantsCount == 0) {
+            event.setResult(null);
+            return;
+        }
+
+        ItemStack result = targetItem.clone();
+        ItemMeta resultMeta = result.getItemMeta();
+        if (resultMeta != null) {
+            for (Enchantment ench : new ArrayList<>(resultMeta.getEnchants().keySet())) {
+                resultMeta.removeEnchant(ench);
+            }
+            resultMeta.addEnchant(Enchantment.UNBREAKING, 1, true);
+            resultMeta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+            
+            List<String> lore = resultMeta.hasLore() ? new ArrayList<>(resultMeta.getLore()) : new ArrayList<>();
+            if (!lore.contains(CHAR_LORE)) {
+                lore.add(CHAR_LORE);
+            }
+            resultMeta.setLore(lore);
+            event.setResult(result);
         }
     }
 
