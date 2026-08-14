@@ -24,6 +24,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.GrindstoneInventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
@@ -48,23 +49,21 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        // Проверяем, что введено достаточно аргументов и первый из них — "give"
         if (args.length < 2 || !args[0].equalsIgnoreCase("give")) {
             sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>");
             return true;
         }
-        // Извлекаем игрока из второго аргумента массива
         Player target = Bukkit.getPlayer(args[1]);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден.");
             return true;
         }
+        // Возвращаем Зачарованную книгу, но БЕЗ наложения ванильных чар
         ItemStack book = new ItemStack(Material.ENCHANTED_BOOK);
         ItemMeta meta = book.getItemMeta();
         if (meta != null) {
             meta.setDisplayName("§bЧародейская книга");
             meta.setLore(Collections.singletonList(CHAR_LORE));
-            meta.addEnchant(Enchantment.UNBREAKING, 1, true);
             book.setItemMeta(meta);
         }
         target.getInventory().addItem(book);
@@ -84,16 +83,22 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
         boolean leftHasFire = left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
         boolean rightHasFire = right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
+
+        if (left.getType() == Material.ENCHANTED_BOOK && left.getItemMeta() instanceof EnchantmentStorageMeta) {
+            leftHasFire = ((EnchantmentStorageMeta) left.getItemMeta()).hasStoredEnchant(Enchantment.FIRE_ASPECT);
+        }
+        if (right.getType() == Material.ENCHANTED_BOOK && right.getItemMeta() instanceof EnchantmentStorageMeta) {
+            rightHasFire = ((EnchantmentStorageMeta) right.getItemMeta()).hasStoredEnchant(Enchantment.FIRE_ASPECT);
+        }
         
-        if ((leftHasD20 && rightHasFire) || (rightHasD20 && leftHasFire) || 
-            (leftHasD20 && right.getType() == Material.ENCHANTED_BOOK && right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT))) {
+        if ((leftHasD20 && rightHasFire) || (rightHasD20 && leftHasFire)) {
             event.setResult(null);
             return;
         }
 
         if (!leftHasD20 && !rightHasD20) return;
 
-        if (right.getType() == Material.ENCHANTED_BOOK && rightHasD20 && left.getType().name().endsWith("_SWORD")) {
+        if (rightHasD20 && left.getType().name().endsWith("_SWORD")) {
             ItemStack result = left.clone();
             ItemMeta meta = result.getItemMeta();
             if (meta != null) {
@@ -165,8 +170,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemStack result = targetItem.clone();
         ItemMeta resultMeta = result.getItemMeta();
         if (resultMeta != null) {
-            for (Enchantment ench : new ArrayList<>(resultMeta.getEnchants().keySet())) {
-                resultMeta.removeEnchant(ench);
+            for (Enchantment geom : new ArrayList<>(resultMeta.getEnchants().keySet())) {
+                resultMeta.removeEnchant(geom);
             }
             resultMeta.addEnchant(Enchantment.UNBREAKING, 1, true);
             
