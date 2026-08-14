@@ -49,11 +49,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length < 2 || !args.equalsIgnoreCase("give")) {
+        if (args.length < 2 || !args[0].equalsIgnoreCase("give")) {
             sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>");
             return true;
         }
-        Player target = Bukkit.getPlayer(args);
+        Player target = Bukkit.getPlayer(args[1]);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден.");
             return true;
@@ -82,7 +82,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
 
-        // Проверяем Заговор огня
         boolean leftHasFire = left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
         boolean rightHasFire = right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
 
@@ -93,7 +92,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             rightHasFire = ((EnchantmentStorageMeta) right.getItemMeta()).hasStoredEnchant(Enchantment.FIRE_ASPECT);
         }
         
-        // Моментальный крестик, если пытаются совместить с Заговором огня
         if ((leftHasD20 && rightHasFire) || (rightHasD20 && leftHasFire)) {
             event.setResult(null);
             return;
@@ -102,20 +100,16 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (!leftHasD20 && !rightHasD20) return;
 
         ItemStack result = event.getResult();
-        
-        // ИСПРАВЛЕНИЕ: Если ванильная наковальня выдает null (так как на книге нет ванильных чар),
-        // плагин насильно создает клон меча и позволяет провести скрещивание!
         if (result == null || result.getType() == Material.AIR) {
             if (left.getType().name().endsWith("_SWORD")) {
                 result = left.clone();
             } else if (right.getType().name().endsWith("_SWORD")) {
                 result = right.clone();
             } else {
-                result = left.clone(); // Для скрещивания двух книг
+                result = left.clone();
             }
         }
 
-        // Если скрещиваем Книгу Броска с Любой Другой Книгой чар (Острота и т.д.)
         if (right.getType() == Material.ENCHANTED_BOOK && right.getItemMeta() instanceof EnchantmentStorageMeta && result.getType() == Material.ENCHANTED_BOOK) {
             EnchantmentStorageMeta resultStorage = (EnchantmentStorageMeta) result.getItemMeta();
             EnchantmentStorageMeta rightStorage = (EnchantmentStorageMeta) right.getItemMeta();
@@ -132,11 +126,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 lore.add(CHAR_LORE);
                 meta.setLore(lore);
             }
-            meta.setEnchantmentGlintOverride(true); // Чистое сияние 1.21
+            meta.setEnchantmentGlintOverride(true);
             result.setItemMeta(meta);
             event.setResult(result);
             try {
-                inv.setRepairCost(5); // Устанавливаем цену опыта за кастомный чар
+                inv.setRepairCost(5);
             } catch (Exception ignored) {}
         }
     }
@@ -361,4 +355,3 @@ public class DiceRollListener implements Listener, CommandExecutor {
         }
     }
 }
-
