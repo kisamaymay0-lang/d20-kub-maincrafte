@@ -49,11 +49,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length < 2 || !args.equalsIgnoreCase("give")) {
+        if (args.length < 2 || !args[0].equalsIgnoreCase("give")) {
             sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>");
             return true;
         }
-        Player target = Bukkit.getPlayer(args);
+        Player target = Bukkit.getPlayer(args[1]);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден.");
             return true;
@@ -64,8 +64,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (meta != null) {
             meta.setDisplayName("§bЧародейская книга");
             meta.setLore(Collections.singletonList(CHAR_LORE));
-            
-            // Включаем чистое визуальное свечение через компоненты 1.21 БЕЗ добавления Прочности
             meta.setEnchantmentGlintOverride(true);
             book.setItemMeta(meta);
         }
@@ -84,7 +82,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
 
-        // Проверяем наличие Заговора огня на предметах (с полным учетом обычных чар и книг)
         boolean leftHasFire = left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
         boolean rightHasFire = right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
 
@@ -95,19 +92,15 @@ public class DiceRollListener implements Listener, CommandExecutor {
             rightHasFire = ((EnchantmentStorageMeta) right.getItemMeta()).hasStoredEnchant(Enchantment.FIRE_ASPECT);
         }
         
-        // СТРОГИЙ ЗАПРЕТ: Если скрещивается Бросок и Заговор огня — моментальный крестик в наковальне
         if ((leftHasD20 && rightHasFire) || (rightHasD20 && leftHasFire)) {
             event.setResult(null);
             return;
         }
 
-        // Если Броска вообще нет в наковальне, отдаем управление ванильной логике сервера
         if (!leftHasD20 && !rightHasD20) return;
 
-        // Вариант 1: Скрещиваем книгу Броска с мечом, или Книгу Броска с Любой Другой Книгой
         ItemStack result = event.getResult();
         if (result == null || result.getType() == Material.AIR) {
-            // Если ванильный калькулятор не выдал результат автоматически (например, при скрещивании кастомных лор-книг)
             result = left.clone();
             if (right.getType() == Material.ENCHANTED_BOOK && right.getItemMeta() instanceof EnchantmentStorageMeta) {
                 EnchantmentStorageMeta resultStorage = (EnchantmentStorageMeta) result.getItemMeta();
@@ -119,7 +112,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
         }
 
-        // Записываем наш лор и накладываем чистое свечение на финальный предмет
         ItemMeta meta = result.getItemMeta();
         if (meta != null) {
             List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
@@ -127,7 +119,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 lore.add(CHAR_LORE);
                 meta.setLore(lore);
             }
-            // Гарантируем переливание через современный метод компонентов 1.21
             meta.setEnchantmentGlintOverride(true);
             result.setItemMeta(meta);
             event.setResult(result);
