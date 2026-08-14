@@ -5,6 +5,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.Particle;
+import org.bukkit.Tag;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
@@ -49,11 +50,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length < 2 || !args[0].equalsIgnoreCase("give")) {
+        if (args.length < 2 || !args.equalsIgnoreCase("give")) {
             sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>");
             return true;
         }
-        Player target = Bukkit.getPlayer(args[1]);
+        Player target = Bukkit.getPlayer(args);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден.");
             return true;
@@ -79,6 +80,20 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemStack right = inv.getItem(1);
         if (left == null || right == null) return;
 
+        // ОФИЦИАЛЬНАЯ ПРОВЕРКА ДЛЯ 1.21+: Только Мечи, Топоры, Булавы и ванильные Копья
+        Material mat = left.getType();
+        String matName = mat.name().toUpperCase();
+        
+        boolean isAllowedWeapon = Tag.ITEMS_SWORDS.isTagged(mat) || 
+                                  Tag.ITEMS_AXES.isTagged(mat) || 
+                                  mat == Material.MACE || 
+                                  matName.contains("SPEAR"); // Авто-распознавание всех типов ванильных копий по тегу материала
+        
+        if (!isAllowedWeapon && left.getType() != Material.ENCHANTED_BOOK) {
+            event.setResult(null);
+            return;
+        }
+
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
 
@@ -101,13 +116,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
         ItemStack result = event.getResult();
         if (result == null || result.getType() == Material.AIR) {
-            if (left.getType().name().endsWith("_SWORD")) {
-                result = left.clone();
-            } else if (right.getType().name().endsWith("_SWORD")) {
-                result = right.clone();
-            } else {
-                result = left.clone();
-            }
+            result = left.clone();
         }
 
         if (right.getType() == Material.ENCHANTED_BOOK && right.getItemMeta() instanceof EnchantmentStorageMeta && result.getType() == Material.ENCHANTED_BOOK) {
@@ -121,6 +130,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
         ItemMeta meta = result.getItemMeta();
         if (meta != null) {
+            if (meta.hasEnchant(Enchantment.FIRE_ASPECT)) {
+                event.setResult(null);
+                return;
+            }
+            
             List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
             if (!lore.contains(CHAR_LORE)) {
                 lore.add(CHAR_LORE);
@@ -212,8 +226,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private void startDiceRoll(Player player) {
         UUID uuid = player.getUniqueId();
         if (playerBossBars.containsKey(uuid)) {
-            playerBossBars.get(uuid).removeAll();
-            playerBossBars.remove(uuid);
+            playerBossBars.remove(uuid).removeAll();
         }
         
         BossBar bossBar = Bukkit.createBossBar("", BarColor.YELLOW, BarStyle.SOLID);
@@ -231,8 +244,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
                 if (ticks <= 0) {
                     int finalRoll = ThreadLocalRandom.current().nextInt(1, 21);
-                    this.cancel();
                     rollingTasks.remove(uuid);
+                    this.cancel();
                     startWaitingForHitPhase(player, bossBar, finalRoll);
                     return;
                 }
@@ -355,3 +368,4 @@ public class DiceRollListener implements Listener, CommandExecutor {
         }
     }
 }
+
