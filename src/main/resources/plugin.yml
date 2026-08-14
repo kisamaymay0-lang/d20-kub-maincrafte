@@ -7,7 +7,7 @@ commands:
   d20:
     description: Выдать книгу с чаром Бросок I
     permission: diceroll.admin
-    usage: /d20 give <игрок>
+    usage: /d20 give <игрок> или /d20 cheat
   adaptation:
     description: управление плагином f9-daptation-sosika-bobr551
     permission: adaptation.admin
