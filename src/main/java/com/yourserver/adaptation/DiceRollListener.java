@@ -43,7 +43,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private final Map<UUID, BukkitTask> rollingTasks = new HashMap<>();
     private final Map<UUID, Integer> waitingForHit = new HashMap<>();
     private final Map<UUID, BossBar> playerBossBars = new HashMap<>();
-    private final Set<UUID> activeCheaters = new HashSet<>();
+    
+    // Хранит точное кастомное число, которое должно выпасть конкретному игроку
+    private final Map<UUID, Integer> activeCheaters = new HashMap<>();
     private final String CHAR_LORE = "§dБросок I";
 
     public DiceRollListener(JavaPlugin plugin) {
@@ -53,10 +55,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок> или /d20 cheat");
+            sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>, /d20 cheat <1-20> или /d20 enchant <ID>");
             return true;
         }
 
+        // Обновленная команда /d20 cheat <число>
         if (args[0].equalsIgnoreCase("cheat")) {
             if (!(sender instanceof Player)) {
                 sender.sendMessage(ChatColor.RED + "Эту команду может использовать только игрок.");
@@ -64,16 +67,66 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
             Player player = (Player) sender;
             UUID uuid = player.getUniqueId();
-            if (activeCheaters.contains(uuid)) {
-                activeCheaters.remove(uuid);
-                player.sendMessage(ChatColor.RED + "§lЧит-режим отключен. Роллы снова случайны.");
-            } else {
-                activeCheaters.add(uuid);
-                player.sendMessage(ChatColor.GREEN + "§lЧит-режим включен! Ваш СЛЕДУЮЩИЙ бросок гарантированно выдаст 20!");
+
+            if (args.length < 2) {
+                if (activeCheaters.containsKey(uuid)) {
+                    activeCheaters.remove(uuid);
+                    player.sendMessage(ChatColor.RED + "§lЧит-режим отключен. Роллы снова случайны.");
+                } else {
+                    player.sendMessage(ChatColor.RED + "Укажите число! Пример: /d20 cheat 20");
+                }
+                return true;
+            }
+
+            try {
+                int targetRoll = Integer.parseInt(args[1]);
+                if (targetRoll < 1 || targetRoll > 20) {
+                    player.sendMessage(ChatColor.RED + "Число кубика должно быть строго от 1 до 20!");
+                    return true;
+                }
+                activeCheaters.put(uuid, targetRoll);
+                player.sendMessage(ChatColor.GREEN + "§lЧит-режим активирован! Следующий удар гарантированно выдаст: §e§l[" + targetRoll + "]");
+            } catch (NumberFormatException e) {
+                player.sendMessage(ChatColor.RED + "Некорректное число! Пример: /d20 cheat 7");
             }
             return true;
         }
 
+        // Новая команда /d20 enchant <ID_предмета> для выдачи любой вещи с чаром
+        if (args[0].equalsIgnoreCase("enchant")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage(ChatColor.RED + "Эту команду может использовать только игрок.");
+                return true;
+            }
+            Player player = (Player) sender;
+            if (args.length < 2) {
+                player.sendMessage(ChatColor.RED + "Укажите ID предмета! Пример: /d20 enchant mace");
+                return true;
+            }
+
+            String matName = args[1].toUpperCase();
+            Material material = Material.getMaterial(matName);
+            if (material == null || material == Material.AIR) {
+                player.sendMessage(ChatColor.RED + "Предмет с ID '" + args[1] + "' не найден в базе Minecraft!");
+                return true;
+            }
+
+            ItemStack item = new ItemStack(material);
+            ItemMeta meta = item.getItemMeta();
+            if (meta != null) {
+                List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
+                lore.add(CHAR_LORE);
+                meta.setLore(lore);
+                meta.setEnchantmentGlintOverride(true);
+                item.setItemMeta(meta);
+            }
+            
+            player.getInventory().addItem(item);
+            player.sendMessage(ChatColor.GREEN + "§lВам успешно выдан предмет " + material.name() + " с чаром Бросок I!");
+            return true;
+        }
+
+        // Стандартная выдача книги /d20 give <игрок>
         if (args[0].equalsIgnoreCase("give") && args.length >= 2) {
             Player target = Bukkit.getPlayer(args[1]);
             if (target == null) {
@@ -93,7 +146,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return true;
         }
 
-        sender.sendMessage(ChatColor.RED + "Неизвестный аргумент. Используйте give или cheat.");
+        sender.sendMessage(ChatColor.RED + "Неизвестный аргумент. Используйте give, cheat или enchant.");
         return true;
     }
     @EventHandler(priority = EventPriority.LOWEST)
@@ -153,7 +206,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
             
             List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
-            if (!lore.contains(CHAR_LORE)) {
+            if (!hasD20Lore(result)) {
                 lore.add(CHAR_LORE);
                 meta.setLore(lore);
             }
@@ -199,7 +252,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
             
             List<String> lore = resultMeta.hasLore() ? new ArrayList<>(resultMeta.getLore()) : new ArrayList<>();
-            if (!lore.contains(CHAR_LORE)) {
+            if (!hasD20Lore(result)) {
                 lore.add(CHAR_LORE);
             }
             resultMeta.setLore(lore);
@@ -259,10 +312,10 @@ public class DiceRollListener implements Listener, CommandExecutor {
                     return;
                 }
                 if (ticks <= 0) {
+                    // ПРИМЕНЕНИЕ ЧИТА: если в мапе сохранен точный выбор, берем его, иначе — рандом
                     int finalRoll;
-                    if (activeCheaters.contains(uuid)) {
-                        finalRoll = 20;
-                        activeCheaters.remove(uuid);
+                    if (activeCheaters.containsKey(uuid)) {
+                        finalRoll = activeCheaters.remove(uuid); // Извлекаем число и сбрасываем чит
                     } else {
                         finalRoll = ThreadLocalRandom.current().nextInt(1, 21);
                     }
@@ -342,7 +395,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         } else if (roll <= 9) {
             event.setDamage(event.getDamage() * 0.75); 
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BLOCK, 1f, 0.8f);
-            // ИСПРАВЛЕНИЕ: Заменили несуществующую переменную звука на ванильный аналог
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_WEAK, 0.6f, 1.2f);
             victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 50, 0.4, 0.4, 0.4, 0.02);
         } else if (roll <= 13) {
@@ -385,7 +437,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             new BukkitRunnable() {
                 @Override
                 public void run() {
-                    // ИСПРАВЛЕНИЕ: Добавлен строгий чек, что цель является игроком перед вызовом .isOnline()
                     if (victim instanceof Player) {
                         Player vp = (Player) victim;
                         if (!vp.isOnline() || vp.isDead()) return;
@@ -401,7 +452,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 int timer = 30; 
                 @Override
                 public void run() {
-                    // ИСПРАВЛЕНИЕ: Аналогично изолируем проверку .isOnline() только для игроков
                     if (victim instanceof Player) {
                         Player vp = (Player) victim;
                         if (!vp.isOnline()) {
@@ -425,7 +475,15 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private boolean hasD20Lore(ItemStack item) {
         if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) return false;
         ItemMeta meta = item.getItemMeta();
-        return meta != null && meta.hasLore() && meta.getLore().contains(CHAR_LORE);
+        if (meta == null || !meta.hasLore()) return false;
+        
+        for (String line : meta.getLore()) {
+            String cleanLine = ChatColor.stripColor(line).trim();
+            if (cleanLine.equals("Бросок I")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void cleanup(UUID uuid) {
