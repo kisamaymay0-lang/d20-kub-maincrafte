@@ -151,13 +151,23 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemStack right = inv.getItem(1);
         if (left == null || right == null) return;
 
+        Material mat = left.getType();
+        boolean isSword = Tag.ITEMS_SWORDS.isTagged(mat);
+        boolean isBook = left.getType() == Material.ENCHANTED_BOOK;
+
+        // ЖЕСТКИЙ ФИЛЬТР: Если предмет слева НЕ МЕЧ и НЕ КНИГА — плагин делает моментальный выход.
+        // Броня, топоры, луки и кирки будут чароваться в 100% ванильном режиме Paper, плагин их не тронет.
+        if (!isSword && !isBook) {
+            return;
+        }
+
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
 
-        // Если в наковальне ВООБЩЕ НЕТ чара Бросок I, плагин полностью игнорирует её! (Починка бага с бронёй)
+        // Если в наковальне вообще нет чара Бросок I — плагин тоже полностью пропускает это событие
         if (!leftHasD20 && !rightHasD20) return;
 
-        // Если Бросок I присутствует, проверяем запрет на Заговор огня
+        // Проверка несовместимости с Заговором огня
         boolean leftHasFire = left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
         boolean rightHasFire = right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
 
@@ -173,11 +183,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return;
         }
 
-        // Фильтр оружия: Бросок I разрешено накладывать СТРОГО только на мечи
-        Material mat = left.getType();
-        boolean isAllowedWeapon = Tag.ITEMS_SWORDS.isTagged(mat);
-
-        if (!isAllowedWeapon && left.getType() != Material.ENCHANTED_BOOK) {
+        // Если пытаются наложить Бросок на предмет, который не является мечом — блокируем
+        if (!isSword && left.getType() != Material.ENCHANTED_BOOK) {
             event.setResult(null);
             return;
         }
@@ -508,3 +515,4 @@ public class DiceRollListener implements Listener, CommandExecutor {
         activeCheaters.clear();
     }
 }
+
