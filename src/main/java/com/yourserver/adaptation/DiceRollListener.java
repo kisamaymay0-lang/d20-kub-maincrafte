@@ -270,34 +270,40 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (!(event.getEntity() instanceof LivingEntity)) return;
         LivingEntity victim = (LivingEntity) event.getEntity();
 
+        // Если выпало 18, 19 или 20 — цель гарантированно поджигается
         if (roll >= 18) {
             victim.setFireTicks(60);
         }
 
+        // НОВЫЙ БАЛАНС: 1-10 уменьшает урон, 11-20 увеличивает урон
         if (roll == 1) {
-            event.setDamage(0);
+            event.setDamage(0); // Критический промах
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, 30, 0));
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ITEM_BREAK, 1f, 0.8f);
             attacker.getWorld().spawnParticle(Particle.SMOKE, attacker.getLocation().add(0, 1, 0), 25, 0.3, 0.3, 0.3, 0.05);
             attacker.sendMessage("§c§lКРИТИЧЕСКИЙ ПРОВАЛ! Текущий удар нанес 0 урона.");
-        } else if (roll <= 9) {
-            event.setDamage(event.getDamage() * 0.8);
+        } else if (roll <= 10) {
+            // Весь промежуток от 2 до 10 уменьшает урон (снижение на 25%)
+            event.setDamage(event.getDamage() * 0.75);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1f, 0.6f);
             victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 12, 0.2, 0.2, 0.2, 0.02);
         } else if (roll <= 14) {
-            event.setDamage(event.getDamage() + 1.5);
+            // Небольшой успех (11-14): урон увеличен на 15%
+            event.setDamage(event.getDamage() * 1.15);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_CRIT, 1f, 1.1f);
             victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.3, 0.3, 0.1);
         } else if (roll <= 19) {
-            event.setDamage(event.getDamage() * 1.3);
+            // Хороший успех (15-19): урон увеличен на 35%
+            event.setDamage(event.getDamage() * 1.35);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_DRAGON_FIREBALL_EXPLODE, 0.7f, 1.4f);
             victim.getWorld().spawnParticle(Particle.FLAME, victim.getLocation().add(0, 1, 0), 20, 0.3, 0.4, 0.3, 0.05);
         } else {
-            event.setDamage(event.getDamage() * 1.8);
+            // Критический успех (20): урон увеличен на 75% (х1.75)
+            event.setDamage(event.getDamage() * 1.75);
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 80, 1));
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.8f, 1.6f);
             victim.getWorld().spawnParticle(Particle.SOUL_FIRE_FLAME, victim.getLocation().add(0, 1, 0), 35, 0.4, 0.5, 0.4, 0.05);
-            attacker.sendMessage("§e§lКРИТИЧЕСКИЙ УСПЕХ! Скорость II и х1.8 урон!");
+            attacker.sendMessage("§e§lКРИТИЧЕСКИЙ УСПЕХ! Скорость II и х1.75 урон!");
         }
     }
 
