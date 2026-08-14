@@ -168,49 +168,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             event.setResult(result);
         }
     }
-
-    @EventHandler
-    public void onGrindstonePrepare(PrepareGrindstoneEvent event) {
-        GrindstoneInventory inv = event.getInventory();
-        ItemStack top = inv.getItem(0);
-        ItemStack bottom = inv.getItem(1);
-        
-        ItemStack targetItem = (top != null) ? top : bottom;
-        if (targetItem == null || !hasD20Lore(targetItem)) return;
-
-        ItemMeta meta = targetItem.getItemMeta();
-        if (meta == null) return;
-
-        int vanillaEnchantsCount = meta.getEnchants().size();
-        
-        if (meta.hasEnchant(Enchantment.UNBREAKING) && vanillaEnchantsCount == 1) {
-            event.setResult(null);
-            return;
-        }
-        
-        if (vanillaEnchantsCount == 0) {
-            event.setResult(null);
-            return;
-        }
-
-        ItemStack result = targetItem.clone();
-        ItemMeta resultMeta = result.getItemMeta();
-        if (resultMeta != null) {
-            for (Enchantment ench : new ArrayList<>(resultMeta.getEnchants().keySet())) {
-                resultMeta.removeEnchant(ench);
-            }
-            resultMeta.addEnchant(Enchantment.UNBREAKING, 1, true);
-            resultMeta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
-            
-            List<String> lore = resultMeta.hasLore() ? new ArrayList<>(resultMeta.getLore()) : new ArrayList<>();
-            if (!lore.contains(CHAR_LORE)) {
-                lore.add(CHAR_LORE);
-            }
-            resultMeta.setLore(lore);
-            result.setItemMeta(resultMeta);
-            event.setResult(result);
-        }
-    }
     @EventHandler(priority = EventPriority.HIGH)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         if (event.isCancelled() || !(event.getDamager() instanceof Player)) return;
