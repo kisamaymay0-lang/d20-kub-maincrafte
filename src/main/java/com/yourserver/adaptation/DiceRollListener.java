@@ -50,12 +50,10 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        // ИСПРАВЛЕНИЕ ОШИБКИ: Проверяем конкретно первый аргумент args[0] вместо всего массива
         if (args.length < 2 || !args[0].equalsIgnoreCase("give")) {
             sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>");
             return true;
         }
-        // ИСПРАВЛЕНИЕ ОШИБКИ: Извлекаем имя игрока из строки args[1]
         Player target = Bukkit.getPlayer(args[1]);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден.");
@@ -82,11 +80,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemStack right = inv.getItem(1);
         if (left == null || right == null) return;
 
-        // ТОЛЬКО МЕЧИ: Проверяем предмет на соответствие официальному тегу мечей Майнкрафта
         Material mat = left.getType();
         boolean isAllowedWeapon = Tag.ITEMS_SWORDS.isTagged(mat);
         
-        // Если предмет слева — это НЕ МЕЧ И НЕ КНИГА, то наложение чара "Бросок I" полностью блокируется
         if (!isAllowedWeapon && left.getType() != Material.ENCHANTED_BOOK) {
             event.setResult(null);
             return;
@@ -191,13 +187,13 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
+        // ИСПРАВЛЕННЫЙ ЩИТ: убрали коварный return, который блокировал остальных игроков
         if (event.getEntity() instanceof Player) {
             Player victimPlayer = (Player) event.getEntity();
             UUID victimUUID = victimPlayer.getUniqueId();
             if (rollingTasks.containsKey(victimUUID) && !waitingForHit.containsKey(victimUUID)) {
                 event.setDamage(event.getDamage() * 0.70);
                 victimPlayer.getWorld().spawnParticle(Particle.CRIT, victimPlayer.getLocation().add(0, 1, 0), 3, 0.2, 0.2, 0.2, 0.01);
-                return;
             }
         }
 
@@ -366,4 +362,3 @@ public class DiceRollListener implements Listener, CommandExecutor {
         }
     }
 }
-
