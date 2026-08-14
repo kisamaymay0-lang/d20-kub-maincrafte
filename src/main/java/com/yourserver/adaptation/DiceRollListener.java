@@ -149,9 +149,10 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 String color = (ticks % 4 == 0) ? "§e" : "§f";
                 bossBar.setTitle("§fВыпало: " + color + "[" + randomNum + "]");
                 
-  if (ticks % 4 == 0) {
-    player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HIT, 0.3f, 1.5f);
+if (ticks % 4 == 0) {
+    player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.3f, 1.5f);
 }
+
 
                 ticks -= 2;
             }
