@@ -43,8 +43,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private final Map<UUID, BukkitTask> rollingTasks = new HashMap<>();
     private final Map<UUID, Integer> waitingForHit = new HashMap<>();
     private final Map<UUID, BossBar> playerBossBars = new HashMap<>();
-    
-    // Хранит точное кастомное число, которое должно выпасть конкретному игроку
     private final Map<UUID, Integer> activeCheaters = new HashMap<>();
     private final String CHAR_LORE = "§dБросок I";
 
@@ -59,7 +57,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return true;
         }
 
-        // Обновленная команда /d20 cheat <число>
         if (args[0].equalsIgnoreCase("cheat")) {
             if (!(sender instanceof Player)) {
                 sender.sendMessage(ChatColor.RED + "Эту команду может использовать только игрок.");
@@ -92,7 +89,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return true;
         }
 
-        // Новая команда /d20 enchant <ID_предмета> для выдачи любой вещи с чаром
         if (args[0].equalsIgnoreCase("enchant")) {
             if (!(sender instanceof Player)) {
                 sender.sendMessage(ChatColor.RED + "Эту команду может использовать только игрок.");
@@ -126,7 +122,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return true;
         }
 
-        // Стандартная выдача книги /d20 give <игрок>
         if (args[0].equalsIgnoreCase("give") && args.length >= 2) {
             Player target = Bukkit.getPlayer(args[1]);
             if (target == null) {
@@ -156,17 +151,13 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemStack right = inv.getItem(1);
         if (left == null || right == null) return;
 
-        Material mat = left.getType();
-        boolean isAllowedWeapon = Tag.ITEMS_SWORDS.isTagged(mat);
-        
-        if (!isAllowedWeapon && left.getType() != Material.ENCHANTED_BOOK) {
-            event.setResult(null);
-            return;
-        }
-
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
 
+        // Если в наковальне ВООБЩЕ НЕТ чара Бросок I, плагин полностью игнорирует её! (Починка бага с бронёй)
+        if (!leftHasD20 && !rightHasD20) return;
+
+        // Если Бросок I присутствует, проверяем запрет на Заговор огня
         boolean leftHasFire = left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
         boolean rightHasFire = right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
 
@@ -182,7 +173,14 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return;
         }
 
-        if (!leftHasD20 && !rightHasD20) return;
+        // Фильтр оружия: Бросок I разрешено накладывать СТРОГО только на мечи
+        Material mat = left.getType();
+        boolean isAllowedWeapon = Tag.ITEMS_SWORDS.isTagged(mat);
+
+        if (!isAllowedWeapon && left.getType() != Material.ENCHANTED_BOOK) {
+            event.setResult(null);
+            return;
+        }
 
         ItemStack result = event.getResult();
         if (result == null || result.getType() == Material.AIR) {
@@ -312,10 +310,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
                     return;
                 }
                 if (ticks <= 0) {
-                    // ПРИМЕНЕНИЕ ЧИТА: если в мапе сохранен точный выбор, берем его, иначе — рандом
                     int finalRoll;
                     if (activeCheaters.containsKey(uuid)) {
-                        finalRoll = activeCheaters.remove(uuid); // Извлекаем число и сбрасываем чит
+                        finalRoll = activeCheaters.remove(uuid);
                     } else {
                         finalRoll = ThreadLocalRandom.current().nextInt(1, 21);
                     }
