@@ -49,21 +49,24 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length < 2 || !args[0].equalsIgnoreCase("give")) {
+        if (args.length < 2 || !args.equalsIgnoreCase("give")) {
             sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>");
             return true;
         }
-        Player target = Bukkit.getPlayer(args[1]);
+        Player target = Bukkit.getPlayer(args);
         if (target == null) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден.");
             return true;
         }
-        // Возвращаем Зачарованную книгу, но БЕЗ наложения ванильных чар
+        
         ItemStack book = new ItemStack(Material.ENCHANTED_BOOK);
         ItemMeta meta = book.getItemMeta();
         if (meta != null) {
             meta.setDisplayName("§bЧародейская книга");
             meta.setLore(Collections.singletonList(CHAR_LORE));
+            
+            // Включаем чистое визуальное свечение через компоненты 1.21 БЕЗ добавления Прочности
+            meta.setEnchantmentGlintOverride(true);
             book.setItemMeta(meta);
         }
         target.getInventory().addItem(book);
@@ -81,6 +84,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
 
+        // Проверяем наличие Заговора огня на предметах (с полным учетом обычных чар и книг)
         boolean leftHasFire = left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
         boolean rightHasFire = right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
 
@@ -91,55 +95,90 @@ public class DiceRollListener implements Listener, CommandExecutor {
             rightHasFire = ((EnchantmentStorageMeta) right.getItemMeta()).hasStoredEnchant(Enchantment.FIRE_ASPECT);
         }
         
+        // СТРОГИЙ ЗАПРЕТ: Если скрещивается Бросок и Заговор огня — моментальный крестик в наковальне
         if ((leftHasD20 && rightHasFire) || (rightHasD20 && leftHasFire)) {
             event.setResult(null);
             return;
         }
 
+        // Если Броска вообще нет в наковальне, отдаем управление ванильной логике сервера
         if (!leftHasD20 && !rightHasD20) return;
 
-        if (rightHasD20 && left.getType().name().endsWith("_SWORD")) {
-            ItemStack result = left.clone();
-            ItemMeta meta = result.getItemMeta();
-            if (meta != null) {
-                if (meta.hasEnchant(Enchantment.FIRE_ASPECT)) {
-                    event.setResult(null);
-                    return;
-                }
-                
-                List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
-                if (!lore.contains(CHAR_LORE)) {
-                    lore.add(CHAR_LORE);
-                    meta.setLore(lore);
-                    meta.addEnchant(Enchantment.UNBREAKING, 1, true);
-                    result.setItemMeta(meta);
-                    event.setResult(result);
-                    inv.setRepairCost(5);
+        // Вариант 1: Скрещиваем книгу Броска с мечом, или Книгу Броска с Любой Другой Книгой
+        ItemStack result = event.getResult();
+        if (result == null || result.getType() == Material.AIR) {
+            // Если ванильный калькулятор не выдал результат автоматически (например, при скрещивании кастомных лор-книг)
+            result = left.clone();
+            if (right.getType() == Material.ENCHANTED_BOOK && right.getItemMeta() instanceof EnchantmentStorageMeta) {
+                EnchantmentStorageMeta resultStorage = (EnchantmentStorageMeta) result.getItemMeta();
+                EnchantmentStorageMeta rightStorage = (EnchantmentStorageMeta) right.getItemMeta();
+                if (resultStorage != null && rightStorage != null) {
+                    rightStorage.getStoredEnchants().forEach((ench, lvl) -> resultStorage.addStoredEnchant(ench, lvl, true));
+                    result.setItemMeta(resultStorage);
                 }
             }
+        }
+
+        // Записываем наш лор и накладываем чистое свечение на финальный предмет
+        ItemMeta meta = result.getItemMeta();
+        if (meta != null) {
+            List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
+            if (!lore.contains(CHAR_LORE)) {
+                lore.add(CHAR_LORE);
+                meta.setLore(lore);
+            }
+            // Гарантируем переливание через современный метод компонентов 1.21
+            meta.setEnchantmentGlintOverride(true);
+            result.setItemMeta(meta);
+            event.setResult(result);
+            if (inv.getRepairCost() == 0) {
+                inv.setRepairCost(5);
+            }
+        }
+    }
+
+    @EventHandler
+    public void onGrindstonePrepare(PrepareGrindstoneEvent event) {
+        GrindstoneInventory inv = event.getInventory();
+        ItemStack top = inv.getItem(0);
+        ItemStack bottom = inv.getItem(1);
+        
+        ItemStack targetItem = (top != null) ? top : bottom;
+        if (targetItem == null || !hasD20Lore(targetItem)) return;
+
+        ItemMeta meta = targetItem.getItemMeta();
+        if (meta == null) return;
+
+        int vanillaEnchantsCount = meta.getEnchants().size();
+        if (targetItem.getType() == Material.ENCHANTED_BOOK && meta instanceof EnchantmentStorageMeta) {
+            vanillaEnchantsCount = ((EnchantmentStorageMeta) meta).getStoredEnchants().size();
+        }
+        
+        // Если ванильных чар больше нет — точило блокируется, "Бросок" нельзя стереть
+        if (vanillaEnchantsCount == 0) {
+            event.setResult(null);
             return;
         }
 
-        if (leftHasD20 && !rightHasD20) {
-            ItemStack result = event.getResult();
-            if (result == null || result.getType() == Material.AIR) return;
-
-            ItemMeta meta = result.getItemMeta();
-            if (meta != null) {
-                if (meta.hasEnchant(Enchantment.FIRE_ASPECT)) {
-                    event.setResult(null);
-                    return;
-                }
-                
-                List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
-                if (!lore.contains(CHAR_LORE)) {
-                    lore.add(CHAR_LORE);
-                    meta.setLore(lore);
-                }
-                meta.addEnchant(Enchantment.UNBREAKING, 1, true);
-                result.setItemMeta(meta);
-                event.setResult(result);
+        // Если чары есть — позволяем их стереть, но возвращаем Бросок и его сияние
+        ItemStack result = targetItem.clone();
+        ItemMeta resultMeta = result.getItemMeta();
+        if (resultMeta != null) {
+            if (resultMeta instanceof EnchantmentStorageMeta) {
+                EnchantmentStorageMeta sm = (EnchantmentStorageMeta) resultMeta;
+                new ArrayList<>(sm.getStoredEnchants().keySet()).forEach(sm::removeStoredEnchant);
+            } else {
+                new ArrayList<>(resultMeta.getEnchants().keySet()).forEach(resultMeta::removeEnchant);
             }
+            
+            List<String> lore = resultMeta.hasLore() ? new ArrayList<>(resultMeta.getLore()) : new ArrayList<>();
+            if (!lore.contains(CHAR_LORE)) {
+                lore.add(CHAR_LORE);
+            }
+            resultMeta.setLore(lore);
+            resultMeta.setEnchantmentGlintOverride(true);
+            result.setItemMeta(resultMeta);
+            event.setResult(result);
         }
     }
 
