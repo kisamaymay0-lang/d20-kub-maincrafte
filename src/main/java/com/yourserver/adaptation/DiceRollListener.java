@@ -331,8 +331,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ZOMBIE_ATTACK_IRON_DOOR, 1f, 1.2f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 0.8f, 0.7f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.6f, 1.5f);
-            
-            // ГОРАЗДО БОЛЬШЕ ЧАСТИЦ: Огромный взрыв дыма и облако
             victim.getWorld().spawnParticle(Particle.EXPLOSION_EMITTER, victim.getLocation().add(0, 1, 0), 2, 0.1, 0.1, 0.1, 0);
             victim.getWorld().spawnParticle(Particle.LARGE_SMOKE, victim.getLocation().add(0, 1, 0), 85, 0.5, 0.6, 0.5, 0.03);
             attacker.sendMessage("§c§lКРИТИЧЕСКИЙ ПРОВАЛ! Текущий удар нанес 0 урона.");
@@ -340,15 +338,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
             event.setDamage(event.getDamage() * 0.50); 
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_SLIME_ATTACK, 1f, 0.7f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_GRAVEL_BREAK, 0.8f, 0.5f);
-            
-            // ГОРАЗДО БОЛЬШЕ ЧАСТИЦ: Густой дождь из пепла (65 штук вместо 20)
             victim.getWorld().spawnParticle(Particle.ASH, victim.getLocation().add(0, 1, 0), 65, 0.4, 0.5, 0.4, 0.02);
         } else if (roll <= 9) {
             event.setDamage(event.getDamage() * 0.75); 
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BLOCK, 1f, 0.8f);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_STONE_HIT, 0.6f, 1.2f);
-            
-            // ГОРАЗДО БОЛЬШЕ ЧАСТИЦ: Огромная вспышка белого дыма (50 штук вместо 12)
+            // ИСПРАВЛЕНИЕ: Заменили несуществующую переменную звука на ванильный аналог
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_WEAK, 0.6f, 1.2f);
             victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 50, 0.4, 0.4, 0.4, 0.02);
         } else if (roll <= 13) {
             event.setDamage(event.getDamage() * 1.50); 
@@ -357,7 +352,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
         } else if (roll <= 17) {
             event.setDamage(event.getDamage() * 2.00); 
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 1.2f, 0.9f);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.SOUND_BLOCK_GENERIC_HIT, 1f, 1.2f);
+            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_STRONG, 1f, 1.2f);
             victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 20, 0.3, 0.4, 0.3, 0.05);
         } else if (roll <= 19) {
             event.setDamage(event.getDamage() * 2.50); 
@@ -390,7 +385,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
             new BukkitRunnable() {
                 @Override
                 public void run() {
-                    if (victim.isOnline() && !victim.isDead()) {
+                    // ИСПРАВЛЕНИЕ: Добавлен строгий чек, что цель является игроком перед вызовом .isOnline()
+                    if (victim instanceof Player) {
+                        Player vp = (Player) victim;
+                        if (!vp.isOnline() || vp.isDead()) return;
+                    }
+                    if (!victim.isDead()) {
                         victim.setVelocity(new Vector(0, 0, 0)); 
                         victim.setVelocity(finalVector); 
                     }
@@ -401,7 +401,15 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 int timer = 30; 
                 @Override
                 public void run() {
-                    if (!victim.isOnline() || victim.isDead() || timer <= 0 || victim.isOnGround()) {
+                    // ИСПРАВЛЕНИЕ: Аналогично изолируем проверку .isOnline() только для игроков
+                    if (victim instanceof Player) {
+                        Player vp = (Player) victim;
+                        if (!vp.isOnline()) {
+                            this.cancel();
+                            return;
+                        }
+                    }
+                    if (victim.isDead() || timer <= 0 || victim.isOnGround()) {
                         this.cancel();
                         return;
                     }
