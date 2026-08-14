@@ -11,6 +11,7 @@ import org.bukkit.boss.BossBar;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -20,6 +21,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.AnvilInventory;
+import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -82,13 +84,16 @@ public class DiceRollListener implements Listener, CommandExecutor {
             if (!lore.contains(CHAR_LORE)) {
                 lore.add(CHAR_LORE);
                 meta.setLore(lore);
+                
+                meta.addEnchant(Enchantment.UNBREAKING, 1, true);
+                meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+                
                 result.setItemMeta(meta);
                 event.setResult(result);
                 inv.setRepairCost(5);
             }
         }
     }
-
     @EventHandler(priority = EventPriority.HIGH)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         if (event.isCancelled() || !(event.getDamager() instanceof Player)) return;
@@ -99,29 +104,29 @@ public class DiceRollListener implements Listener, CommandExecutor {
         UUID uuid = attacker.getUniqueId();
         if (waitingForHit.containsKey(uuid)) {
             int roll = waitingForHit.remove(uuid);
-            if (playerBossBars.containsKey(uuid)) {
-                playerBossBars.remove(uuid).removeAll();
-            }
+            cleanup(uuid);
             applyDiceEffects(attacker, event, roll);
             return;
         }
 
         if (rollingTasks.containsKey(uuid)) {
             rollingTasks.remove(uuid).cancel();
-            if (playerBossBars.containsKey(uuid)) {
-                playerBossBars.get(uuid).setProgress(1.0);
-            }
+            rollingTasks.remove(uuid);
         }
         startDiceRoll(attacker);
     }
 
     private void startDiceRoll(Player player) {
         UUID uuid = player.getUniqueId();
-        BossBar bossBar = playerBossBars.computeIfAbsent(uuid, k -> 
-            Bukkit.createBossBar("", BarColor.YELLOW, BarStyle.SOLID)
-        );
+        if (playerBossBars.containsKey(uuid)) {
+            playerBossBars.get(uuid).removeAll();
+            playerBossBars.remove(uuid);
+        }
+        
+        BossBar bossBar = Bukkit.createBossBar("", BarColor.YELLOW, BarStyle.SOLID);
         bossBar.addPlayer(player);
         bossBar.setVisible(true);
+        playerBossBars.put(uuid, bossBar);
 
         BukkitTask task = new BukkitRunnable() {
             int ticks = 80;
@@ -133,6 +138,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
                 if (ticks <= 0) {
                     int finalRoll = ThreadLocalRandom.current().nextInt(1, 21);
+                    this.cancel();
                     rollingTasks.remove(uuid);
                     startWaitingForHitPhase(player, bossBar, finalRoll);
                     return;
@@ -141,7 +147,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 bossBar.setProgress(Math.max(0.0, Math.min(1.0, progress)));
                 int randomNum = ThreadLocalRandom.current().nextInt(1, 21);
                 String color = (ticks % 4 == 0) ? "§e" : "§f";
-                bossBar.setTitle("§fВыпало: " + color + randomNum);
+                bossBar.setTitle("§fВыпало: " + color + "[" + randomNum + "]");
+                
+                if (ticks % 4 == 0) {
+                    player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_CLICK, 0.3f, 1.5f);
+                }
                 ticks -= 2;
             }
         }.runTaskTimer(plugin, 0L, 2L);
@@ -151,15 +161,19 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private void startWaitingForHitPhase(Player player, BossBar bossBar, int finalRoll) {
         UUID uuid = player.getUniqueId();
         bossBar.setProgress(1.0);
-        bossBar.setTitle("§fВыпало: §e" + finalRoll + " §fВремя для §eУДАРА!");
+        bossBar.setTitle("§fВыпало: §e[" + finalRoll + "] §fВремя для §eУДАРА!");
         waitingForHit.put(uuid, finalRoll);
-        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_CHIME, 1f, 1.2f);
+        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_CHIME, 0.8f, 1.2f);
 
         BukkitTask task = new BukkitRunnable() {
             int ticks = 100;
             @Override
             public void run() {
-                if (!player.isOnline() || !waitingForHit.containsKey(uuid) || !hasD20Lore(player.getInventory().getItemInMainHand())) {
+                if (!player.isOnline() || !waitingForHit.containsKey(uuid)) {
+                    cleanup(uuid);
+                    return;
+                }
+                if (!hasD20Lore(player.getInventory().getItemInMainHand())) {
                     cleanup(uuid);
                     return;
                 }
@@ -217,10 +231,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private void cleanup(UUID uuid) {
         waitingForHit.remove(uuid);
         if (rollingTasks.containsKey(uuid)) {
-            rollingTasks.remove(uuid).cancel();
+            rollingTasks.get(uuid).cancel();
+            rollingTasks.remove(uuid);
         }
         if (playerBossBars.containsKey(uuid)) {
-            playerBossBars.remove(uuid).removeAll();
+            playerBossBars.get(uuid).removeAll();
+            playerBossBars.remove(uuid);
         }
     }
 
@@ -230,9 +246,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
     }
     
     public void disable() {
-      for (UUID uuid : new ArrayList<>(playerBossBars.keySet())) {
-        cleanup(uuid);
+        for (UUID uuid : new ArrayList<>(playerBossBars.keySet())) {
+            cleanup(uuid);
         }
-      }
-  }
-  
+    }
+}
