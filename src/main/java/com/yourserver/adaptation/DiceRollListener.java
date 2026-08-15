@@ -506,8 +506,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
             particleOffsetZ = 0.5;
             particleSpeed = 0.15;
             
-            // Немного магии для среднего удара
-            victim.getWorld().spawnParticle(Particle.ENCHANTMENT_TABLE, victim.getLocation().add(0, 1, 0), 10, 0.3, 0.3, 0.3, 0.05);
+            // Ведьмины искры для среднего удара (доступны в Paper)
+            victim.getWorld().spawnParticle(Particle.SPELL_WITCH, victim.getLocation().add(0, 1, 0), 10, 0.3, 0.3, 0.3, 0.05);
             
         // ХОРОШИЕ УДАРЫ (14-16) - много искр + эффекты
         } else if (roll <= 16) {
@@ -520,7 +520,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             particleOffsetZ = 0.5;
             particleSpeed = 0.2;
             
-            victim.getWorld().spawnParticle(Particle.ENCHANTMENT_TABLE, victim.getLocation().add(0, 1, 0), 20, 0.4, 0.4, 0.4, 0.08);
+            victim.getWorld().spawnParticle(Particle.SPELL_WITCH, victim.getLocation().add(0, 1, 0), 20, 0.4, 0.4, 0.4, 0.08);
             
         // СИЛЬНЫЕ УДАРЫ (17-19) - огонь + искры
         } else if (roll <= 19) {
@@ -534,7 +534,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             particleSpeed = 0.08;
             
             victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 20, 0.4, 0.4, 0.4, 0.05);
-            victim.getWorld().spawnParticle(Particle.ENCHANTMENT_TABLE, victim.getLocation().add(0, 1, 0), 25, 0.5, 0.5, 0.5, 0.1);
+            victim.getWorld().spawnParticle(Particle.SPELL_WITCH, victim.getLocation().add(0, 1, 0), 25, 0.5, 0.5, 0.5, 0.1);
             
         // КРИТИЧЕСКАЯ УДАЧА (20)
         } else {
@@ -553,7 +553,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             
             victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 35, 0.6, 0.6, 0.6, 0.08);
             victim.getWorld().spawnParticle(Particle.EXPLOSION_EMITTER, victim.getLocation().add(0, 1, 0), 1, 0.3, 0.3, 0.3, 0);
-            victim.getWorld().spawnParticle(Particle.ENCHANTMENT_TABLE, victim.getLocation().add(0, 1, 0), 40, 0.7, 0.7, 0.7, 0.15);
+            victim.getWorld().spawnParticle(Particle.SPELL_WITCH, victim.getLocation().add(0, 1, 0), 40, 0.7, 0.7, 0.7, 0.15);
             
             Vector launchDirection = victim.getLocation().toVector().subtract(attacker.getLocation().toVector());
             if (launchDirection.lengthSquared() == 0) {
