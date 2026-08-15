@@ -48,12 +48,10 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
     private final Map<UUID, Long> cooldownEndTimes = new HashMap<>();
     private DiceRollListener diceRollListener;
 
-    // Кешированные объекты для частиц
     private final Particle.DustOptions meleeDust = new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
     private final Particle.DustOptions rangedDust = new Particle.DustOptions(Color.fromRGB(0, 255, 0), 1.2f);
     private final Particle.DustOptions magicDust = new Particle.DustOptions(Color.fromRGB(200, 0, 255), 1.2f);
 
-    // Константы для опознавания чаров в lore
     private final String ADAPTATION_LORE = "§dАдаптация";
     private final String D20_LORE = "§dБросок I";
 
@@ -132,7 +130,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         return true;
     }
 
-    // ===== ПУБЛИЧНЫЙ МЕТОД ДЛЯ ЛОМКИ АДАПТАЦИИ (ВЫЗЫВАЕТСЯ ИЗ D20) =====
     public void breakAdaptation(Player player) {
         if (player == null) return;
         UUID uuid = player.getUniqueId();
@@ -162,7 +159,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         cooldownEndTimes.put(uuid, System.currentTimeMillis() + 4000L);
     }
 
-    // ===== ПРОВЕРКА НАЛИЧИЯ ЧАРА В ЛОРЕ =====
     private boolean hasAdaptationLore(ItemStack item) {
         if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) return false;
         ItemMeta meta = item.getItemMeta();
@@ -223,7 +219,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                name.contains("LEGGINGS") || name.contains("BOOTS");
     }
 
-    // ===== НАКОВАЛЬНЯ С ЗАПРЕТОМ ОБЪЕДИНЕНИЯ АДАПТАЦИИ И БРОСКА =====
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onAnvilPrepare(PrepareAnvilEvent event) {
         AnvilInventory inv = event.getInventory();
@@ -302,13 +297,13 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         event.setResult(null);
     }
 
-    // ===== ОСТАЛЬНАЯ ЛОГИКА ПЛАГИНА =====
     @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerDamage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player)) return;
         Player player = (Player) event.getEntity();
         UUID uuid = player.getUniqueId();
 
+        // Проверяем, можно ли считать удары
         boolean canCountHits = true;
 
         if (superAdaptations.containsKey(uuid) && superAdaptations.get(uuid)) {
@@ -323,14 +318,17 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             canCountHits = false;
         }
 
+        // ===== ВСЕГДА применяем эффекты адаптации, если она активна =====
         if (activeAdaptations.containsKey(uuid)) {
             applyAdaptationEffects(player, event, uuid);
         }
 
+        // Если нельзя считать удары — выходим (но эффекты уже применены)
         if (!canCountHits) {
             return;
         }
 
+        // ===== СЧЕТ УДАРОВ ДЛЯ АКТИВАЦИИ АДАПТАЦИИ =====
         int totalLvl = 0, pieceCount = 0;
         for (ItemStack armor : player.getInventory().getArmorContents()) {
             int lvl = getAdaptationLevel(armor);
@@ -377,6 +375,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         if (pieceCount == 0) return;
 
         if (type.equals(activeAdaptations.get(uuid))) {
+            // Совпадает — защита + добавление времени
             spawnAdaptationParticles(player, type);
 
             if (superAdaptations.getOrDefault(uuid, false)) {
@@ -384,7 +383,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                 double perPieceSuper = getConfig().getDouble("settings.super-protection-per-piece", 0.125);
                 event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceSuper)));
 
-                // ===== ДОБАВЛЯЕМ ВРЕМЯ ПРИ УДАРЕ (СУПЕР) =====
+                // ===== ДОБАВЛЯЕМ ВРЕМЯ =====
                 if (activeTimesLeft.containsKey(uuid)) {
                     double currentLeft = activeTimesLeft.get(uuid);
                     double maxTime = activeMaxTimes.getOrDefault(uuid, 40.0);
@@ -397,7 +396,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                 double perPieceNormal = getConfig().getDouble("settings.normal-protection-per-piece", 0.075);
                 event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceNormal)));
 
-                // ===== ДОБАВЛЯЕМ ВРЕМЯ ПРИ УДАРЕ (ОБЫЧНАЯ) =====
+                // ===== ДОБАВЛЯЕМ ВРЕМЯ =====
                 if (activeTimesLeft.containsKey(uuid)) {
                     double currentLeft = activeTimesLeft.get(uuid);
                     double maxTime = activeMaxTimes.getOrDefault(uuid, 100.0);
