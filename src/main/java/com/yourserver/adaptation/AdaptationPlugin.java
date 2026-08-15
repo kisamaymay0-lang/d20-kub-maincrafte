@@ -137,35 +137,28 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         if (player == null) return;
         UUID uuid = player.getUniqueId();
 
-        // Проверяем, есть ли у игрока активная адаптация
         if (!activeAdaptations.containsKey(uuid)) return;
 
-        // Останавливаем таймер
         if (activeTimers.containsKey(uuid)) {
             activeTimers.get(uuid).cancel();
             activeTimers.remove(uuid);
         }
 
-        // Убираем босс-бар
         if (activeBossBars.containsKey(uuid)) {
             activeBossBars.get(uuid).removeAll();
             activeBossBars.remove(uuid);
         }
 
-        // Удаляем адаптацию (любую)
         activeAdaptations.remove(uuid);
         superAdaptations.remove(uuid);
         superDamageCounters.remove(uuid);
         damageCounters.remove(uuid);
 
-        // Звук стекла (как при окончании адаптации)
         player.getWorld().playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 1.0f, 0.8f);
         player.getWorld().spawnParticle(Particle.SMOKE, player.getLocation().add(0, 1, 0), 10, 0.2, 0.3, 0.2, 0.05);
 
-        // Сообщение игроку (без указания типа)
         player.sendMessage(ChatColor.RED + "Бафф чара \"Адаптация\" был разбит критическим ударом врага!");
 
-        // Начинаем перезарядку (4 секунды, как у супер-адаптации)
         cooldownEndTimes.put(uuid, System.currentTimeMillis() + 4000L);
     }
 
@@ -244,13 +237,11 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
 
-        // ===== ГЛАВНАЯ ПРОВЕРКА: нельзя объединять адаптацию и бросок =====
         if ((leftHasAdaptation && rightHasD20) || (leftHasD20 && rightHasAdaptation)) {
             event.setResult(null);
             return;
         }
 
-        // Если чара адаптации нет — выходим
         if (!leftHasAdaptation && !rightHasAdaptation) return;
 
         boolean isArmor = isArmorItem(left.getType());
@@ -389,9 +380,11 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             spawnAdaptationParticles(player, type);
 
             if (superAdaptations.getOrDefault(uuid, false)) {
+                // ===== СУПЕР-АДАПТАЦИЯ =====
                 double perPieceSuper = getConfig().getDouble("settings.super-protection-per-piece", 0.125);
                 event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceSuper)));
 
+                // ===== ДОБАВЛЯЕМ ВРЕМЯ ПРИ УДАРЕ (СУПЕР) =====
                 if (activeTimesLeft.containsKey(uuid)) {
                     double currentLeft = activeTimesLeft.get(uuid);
                     double maxTime = activeMaxTimes.getOrDefault(uuid, 40.0);
@@ -400,9 +393,11 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                     activeTimesLeft.put(uuid, newLeft);
                 }
             } else {
+                // ===== ОБЫЧНАЯ АДАПТАЦИЯ =====
                 double perPieceNormal = getConfig().getDouble("settings.normal-protection-per-piece", 0.075);
                 event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceNormal)));
 
+                // ===== ДОБАВЛЯЕМ ВРЕМЯ ПРИ УДАРЕ (ОБЫЧНАЯ) =====
                 if (activeTimesLeft.containsKey(uuid)) {
                     double currentLeft = activeTimesLeft.get(uuid);
                     double maxTime = activeMaxTimes.getOrDefault(uuid, 100.0);
@@ -411,6 +406,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                     activeTimesLeft.put(uuid, newLeft);
                 }
 
+                // ===== СЧЕТЧИК ДЛЯ СУПЕР-АДАПТАЦИИ =====
                 superDamageCounters.putIfAbsent(uuid, new HashMap<>());
                 int sHits = superDamageCounters.get(uuid).getOrDefault(type, 0) + 1;
                 superDamageCounters.get(uuid).put(type, sHits);
@@ -421,6 +417,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                 }
             }
         } else {
+            // ===== ШТРАФ =====
             double penaltyPerPiece;
             if (superAdaptations.getOrDefault(uuid, false)) {
                 penaltyPerPiece = getConfig().getDouble("settings.super-penalty-per-piece", 0.125);
