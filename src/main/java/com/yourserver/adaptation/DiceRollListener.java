@@ -236,7 +236,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             result.setItemMeta(meta);
             event.setResult(result);
             
-            // Исправлено: используем reflection или просто игнорируем deprecated метод
+            // Игнорируем deprecated метод
             try {
                 inv.setRepairCost(5);
             } catch (Exception ignored) {}
@@ -490,9 +490,10 @@ public class DiceRollListener implements Listener, CommandExecutor {
             
             final Vector finalVector = new Vector(launchDirection.getX(), launchDirection.getY(), launchDirection.getZ());
             final LivingEntity finalVictim = victim;
+            final JavaPlugin finalPlugin = this.plugin; // Создаем финальную ссылку на plugin
             
             // Отбрасывание с задержкой
-            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            finalPlugin.getServer().getScheduler().runTaskLater(finalPlugin, () -> {
                 if (!finalVictim.isDead()) {
                     finalVictim.setVelocity(new Vector(0, 0, 0));
                     finalVictim.setVelocity(finalVector);
@@ -511,13 +512,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
                     finalVictim.getWorld().spawnParticle(Particle.EXPLOSION, finalVictim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
                     timer -= 2;
                 }
-            }.runTaskTimer(plugin, 2L, 2L);
+            }.runTaskTimer(finalPlugin, 2L, 2L);
 
             attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
             
             event.setDamage(event.getDamage() * multiplier);
             
-            // Зажигаем врага при roll >= 18
             if (roll >= 18) {
                 victim.setFireTicks(60);
             }
@@ -529,7 +529,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         attacker.getWorld().playSound(attacker.getLocation(), hitSound, 1f, 1.2f);
         victim.getWorld().spawnParticle(particle, victim.getLocation().add(0, 1, 0), particleCount, 0.4, 0.5, 0.4, 0.05);
 
-        // Зажигаем врага при roll >= 18
         if (roll >= 18) {
             victim.setFireTicks(60);
         }
