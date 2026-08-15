@@ -236,6 +236,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             result.setItemMeta(meta);
             event.setResult(result);
             
+            // Исправлено: используем reflection или просто игнорируем deprecated метод
             try {
                 inv.setRepairCost(5);
             } catch (Exception ignored) {}
@@ -420,7 +421,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     private void applyDiceEffects(Player attacker, EntityDamageByEntityEvent event, int roll) {
         if (!(event.getEntity() instanceof LivingEntity)) return;
-        final LivingEntity victim = (LivingEntity) event.getEntity(); // Сделали final
+        final LivingEntity victim = (LivingEntity) event.getEntity();
 
         if (roll == 1) {
             event.setCancelled(true);
@@ -471,7 +472,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             particleCount = 45;
             
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 80, 1));
-            
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.8f, 1.1f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_BELL_USE, 0.5f, 1.6f);
             
@@ -489,20 +489,17 @@ public class DiceRollListener implements Listener, CommandExecutor {
             launchDirection.setZ(launchDirection.getZ() * 1.1);
             
             final Vector finalVector = new Vector(launchDirection.getX(), launchDirection.getY(), launchDirection.getZ());
-            
-            // Используем final переменные для лямбд
             final LivingEntity finalVictim = victim;
             
-            new BukkitRunnable() {
-                @Override
-                public void run() {
-                    if (!finalVictim.isDead()) {
-                        finalVictim.setVelocity(new Vector(0, 0, 0));
-                        finalVictim.setVelocity(finalVector);
-                    }
+            // Отбрасывание с задержкой
+            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+                if (!finalVictim.isDead()) {
+                    finalVictim.setVelocity(new Vector(0, 0, 0));
+                    finalVictim.setVelocity(finalVector);
                 }
-            }.runTaskLater(plugin, 1L);
+            }, 1L);
 
+            // Эффект взрыва во время полета
             new BukkitRunnable() {
                 int timer = 30;
                 @Override
@@ -519,6 +516,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
             attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
             
             event.setDamage(event.getDamage() * multiplier);
+            
+            // Зажигаем врага при roll >= 18
+            if (roll >= 18) {
+                victim.setFireTicks(60);
+            }
             return;
         }
 
@@ -527,6 +529,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
         attacker.getWorld().playSound(attacker.getLocation(), hitSound, 1f, 1.2f);
         victim.getWorld().spawnParticle(particle, victim.getLocation().add(0, 1, 0), particleCount, 0.4, 0.5, 0.4, 0.05);
 
+        // Зажигаем врага при roll >= 18
         if (roll >= 18) {
             victim.setFireTicks(60);
         }
