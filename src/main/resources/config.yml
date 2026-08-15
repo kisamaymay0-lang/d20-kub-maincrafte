@@ -1,32 +1,16 @@
-# ============================================
-# AdaptationPlugin - Конфигурация
-# ============================================
-
 settings:
-  # ===== ЗАЩИТА =====
-  normal-protection-per-piece: 0.075   # 7.5% за предмет (30% за сет)
-  super-protection-per-piece: 0.125    # 12.5% за предмет (50% за сет)
-
-  # ===== ШТРАФЫ =====
-  penalty-per-piece: 0.10              # 10% за предмет (40% за сет)
-  super-penalty-per-piece: 0.125       # 12.5% за предмет (50% за сет)
-
-  # ===== БОНУСЫ ЗА ПОЛУЧЕНИЕ УРОНА (в секундах) =====
-  hit-bonus-normal: 0.2
-  hit-bonus-super: 0.4
-
-  # ===== ДЛИТЕЛЬНОСТЬ (в секундах) =====
+  normal-protection-per-piece: 0.075
+  super-protection-per-piece: 0.125
+  penalty-per-piece: 0.10
+  super-penalty-per-piece: 0.125
+  hit-bonus-normal: 0.2      # 0.2 секунды за удар в обычной адаптации
+  hit-bonus-super: 0.4       # 0.4 секунды за удар в супер даптации
   duration-normal: 10
   duration-super: 4
-
-  # ===== КУЛДАУН (в секундах) =====
-  cooldown-normal: 4
-  cooldown-super: 8
-
-  # ===== ТРЕБОВАНИЯ ДЛЯ АКТИВАЦИИ =====
+  cooldown-normal: 2
+  cooldown-super: 4
   required-hits:
     lvl1: 10
     lvl2: 8
     lvl3: 6
-
   required-super-hits: 8
