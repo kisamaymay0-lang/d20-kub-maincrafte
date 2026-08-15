@@ -236,7 +236,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             result.setItemMeta(meta);
             event.setResult(result);
             
-            // Игнорируем deprecated метод
             try {
                 inv.setRepairCost(5);
             } catch (Exception ignored) {}
@@ -489,30 +488,30 @@ public class DiceRollListener implements Listener, CommandExecutor {
             launchDirection.setZ(launchDirection.getZ() * 1.1);
             
             final Vector finalVector = new Vector(launchDirection.getX(), launchDirection.getY(), launchDirection.getZ());
-            final LivingEntity finalVictim = victim;
-            final JavaPlugin finalPlugin = this.plugin; // Создаем финальную ссылку на plugin
             
-            // Отбрасывание с задержкой
-            finalPlugin.getServer().getScheduler().runTaskLater(finalPlugin, () -> {
-                if (!finalVictim.isDead()) {
-                    finalVictim.setVelocity(new Vector(0, 0, 0));
-                    finalVictim.setVelocity(finalVector);
+            // Используем BukkitRunnable вместо лямбды
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    if (!victim.isDead()) {
+                        victim.setVelocity(new Vector(0, 0, 0));
+                        victim.setVelocity(finalVector);
+                    }
                 }
-            }, 1L);
+            }.runTaskLater(plugin, 1L);
 
-            // Эффект взрыва во время полета
             new BukkitRunnable() {
                 int timer = 30;
                 @Override
                 public void run() {
-                    if (finalVictim.isDead() || timer <= 0 || finalVictim.isOnGround()) {
+                    if (victim.isDead() || timer <= 0 || victim.isOnGround()) {
                         this.cancel();
                         return;
                     }
-                    finalVictim.getWorld().spawnParticle(Particle.EXPLOSION, finalVictim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
+                    victim.getWorld().spawnParticle(Particle.EXPLOSION, victim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
                     timer -= 2;
                 }
-            }.runTaskTimer(finalPlugin, 2L, 2L);
+            }.runTaskTimer(plugin, 2L, 2L);
 
             attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
             
