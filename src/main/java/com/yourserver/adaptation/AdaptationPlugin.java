@@ -137,14 +137,17 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
         if (left == null || right == null) return;
 
+        // ===== ПРОВЕРКА: является ли книга адаптацией =====
         boolean leftIsAdaptation = isAdaptationBook(left);
         boolean rightIsAdaptation = isAdaptationBook(right);
         
+        // ===== ЗАПРЕЩАЕМ ОБЪЕДИНЯТЬ АДАПТАЦИЮ С ДРУГИМИ КНИГАМИ =====
         if ((leftIsAdaptation && !rightIsAdaptation) || (!leftIsAdaptation && rightIsAdaptation)) {
             event.setResult(null);
             return;
         }
         
+        // ===== ОБЪЕДИНЕНИЕ ДВУХ КНИГ АДАПТАЦИИ (повышение уровня) =====
         if (leftIsAdaptation && rightIsAdaptation) {
             int lvlLeft = getLvlFromLore(left);
             int lvlRight = getLvlFromLore(right);
@@ -171,14 +174,25 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             }
         }
 
+        // ===== ДАЛЬШЕ ТОЛЬКО ЕСЛИ КНИГА НЕ АДАПТАЦИЯ =====
         int lvlLeft = getLvlFromLore(left);
         int lvlRight = getLvlFromLore(right);
 
-        if (lvlLeft == 0 && lvlRight == 0) return;
+        // Если есть адаптация на предмете (не на книге) — блокируем объединение с другими чарами
+        if ((lvlLeft > 0 || lvlRight > 0) && left.getType() != Material.ENCHANTED_BOOK) {
+            // Проверяем, есть ли на правой книге другие чары (кроме адаптации)
+            if (right.getType() == Material.ENCHANTED_BOOK && !rightIsAdaptation) {
+                // Если правая книга НЕ адаптация — блокируем
+                event.setResult(null);
+                return;
+            }
+        }
 
+        // ===== ОБЫЧНАЯ ЛОГИКА НАКОВАЛЬНИ (починка, объединение чар) =====
         int finalLvl = (lvlLeft == lvlRight && lvlLeft < 3) ? lvlLeft + 1 : Math.max(lvlLeft, lvlRight);
         ItemStack result = left.clone();
 
+        // Починка
         if (left.getType() != Material.ENCHANTED_BOOK && result.getItemMeta() instanceof Damageable) {
             Damageable targetDamageMeta = (Damageable) result.getItemMeta();
             int currentDamage = targetDamageMeta.getDamage();
@@ -214,6 +228,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             }
         }
 
+        // Объединение зачарований для книг (не адаптация)
         if (result.getType() == Material.ENCHANTED_BOOK && right.getType() == Material.ENCHANTED_BOOK) {
             if (!leftIsAdaptation && !rightIsAdaptation) {
                 if (result.getItemMeta() instanceof EnchantmentStorageMeta && right.getItemMeta() instanceof EnchantmentStorageMeta) {
@@ -416,10 +431,10 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                 double perPieceSuper = getConfig().getDouble("settings.super-protection-per-piece", 0.125);
                 event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceSuper)));
 
-                // ===== ДОБАВЛЯЕМ ВРЕМЯ ПРИ УДАРЕ (СУПЕР) =====
+                // Добавляем время при ударе
                 if (activeTimesLeft.containsKey(uuid)) {
                     double currentLeft = activeTimesLeft.get(uuid);
-                    double maxTime = activeMaxTimes.getOrDefault(uuid, 40.0); // 4 сек в тиках
+                    double maxTime = activeMaxTimes.getOrDefault(uuid, 40.0);
                     double bonus = getConfig().getDouble("settings.hit-bonus-super", 0.4);
                     double newLeft = Math.min(maxTime, currentLeft + (bonus * 10.0));
                     activeTimesLeft.put(uuid, newLeft);
@@ -429,18 +444,25 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                 double perPieceNormal = getConfig().getDouble("settings.normal-protection-per-piece", 0.075);
                 event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceNormal)));
 
-                // ===== ДОБАВЛЯЕМ ВРЕМЯ ПРИ УДАРЕ (ОБЫЧНАЯ) =====
+                // Добавляем время при ударе
                 if (activeTimesLeft.containsKey(uuid)) {
                     double currentLeft = activeTimesLeft.get(uuid);
-                    double maxTime = activeMaxTimes.getOrDefault(uuid, 100.0); // 10 сек в тиках
+                    double maxTime = activeMaxTimes.getOrDefault(uuid, 100.0);
                     double bonus = getConfig().getDouble("settings.hit-bonus-normal", 0.2);
                     double newLeft = Math.min(maxTime, currentLeft + (bonus * 10.0));
                     activeTimesLeft.put(uuid, newLeft);
                 }
 
-                // Счетчик для супер-адаптации (накапливается ТОЛЬКО когда можно считать удары)
-                // Этот код не выполняется, потому что canCountHits = false,
-                // но оставляем для ясности
+                // ===== СЧЕТЧИК ДЛЯ СУПЕР-АДАПТАЦИИ =====
+                // Счетчик накапливается ТОЛЬКО во время обычной адаптации
+                superDamageCounters.putIfAbsent(uuid, new HashMap<>());
+                int sHits = superDamageCounters.get(uuid).getOrDefault(type, 0) + 1;
+                superDamageCounters.get(uuid).put(type, sHits);
+
+                int requiredSuperHits = getConfig().getInt("settings.required-super-hits", 8);
+                if (sHits >= requiredSuperHits) {
+                    activateSuper(player, type);
+                }
             }
         } else {
             // НЕ СОВПАДАЕТ — штраф
@@ -544,10 +566,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                     activeAdaptations.remove(uuid);
                     superAdaptations.remove(uuid);
                     superDamageCounters.remove(uuid);
-                    
-                    // ===== СБРАСЫВАЕМ СЧЕТЧИКИ УДАРОВ =====
                     damageCounters.remove(uuid);
-                    superDamageCounters.remove(uuid);
 
                     int cdSec = wasSuper ? getConfig().getInt("settings.cooldown-super", 4)
                             : getConfig().getInt("settings.cooldown-normal", 2);
@@ -563,7 +582,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
                 if (isCooldownMode) {
                     if (timeLeft >= maxTime) {
-                        // ===== ПО ОКОНЧАНИЮ ПЕРЕЗАРЯДКИ СБРАСЫВАЕМ СЧЕТЧИКИ =====
                         damageCounters.remove(uuid);
                         superDamageCounters.remove(uuid);
                         cleanupPlayerData(uuid, false);
