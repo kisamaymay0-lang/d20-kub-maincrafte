@@ -22,6 +22,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.inventory.PrepareGrindstoneEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.GrindstoneInventory;
 import org.bukkit.inventory.ItemStack;
@@ -44,7 +45,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private final Map<UUID, Integer> waitingForHit = new HashMap<>();
     private final Map<UUID, BossBar> playerBossBars = new HashMap<>();
     private final Map<UUID, Integer> activeCheaters = new HashMap<>();
+    private final Map<UUID, Long> cheatCooldowns = new HashMap<>(); // Для защиты от спама читом
     private final String CHAR_LORE = "§dБросок I";
+    private static final int CHEAT_COOLDOWN_SECONDS = 5; // Кулдаун на использование чита
 
     public DiceRollListener(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -65,9 +68,19 @@ public class DiceRollListener implements Listener, CommandExecutor {
             Player player = (Player) sender;
             UUID uuid = player.getUniqueId();
 
+            // Проверка кулдауна
+            if (cheatCooldowns.containsKey(uuid)) {
+                long timeLeft = (cheatCooldowns.get(uuid) + CHEAT_COOLDOWN_SECONDS * 1000L) - System.currentTimeMillis();
+                if (timeLeft > 0) {
+                    player.sendMessage(ChatColor.RED + "Подождите " + (timeLeft / 1000 + 1) + " секунд перед следующим использованием чита!");
+                    return true;
+                }
+            }
+
             if (args.length < 2) {
                 if (activeCheaters.containsKey(uuid)) {
                     activeCheaters.remove(uuid);
+                    cheatCooldowns.remove(uuid);
                     player.sendMessage(ChatColor.RED + "§lЧит-режим отключен. Роллы снова случайны.");
                 } else {
                     player.sendMessage(ChatColor.RED + "Укажите число! Пример: /d20 cheat 20");
@@ -82,6 +95,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                     return true;
                 }
                 activeCheaters.put(uuid, targetRoll);
+                cheatCooldowns.put(uuid, System.currentTimeMillis());
                 player.sendMessage(ChatColor.GREEN + "§lЧит-режим активирован! Следующий удар гарантированно выдаст: §e§l[" + targetRoll + "]");
             } catch (NumberFormatException e) {
                 player.sendMessage(ChatColor.RED + "Некорректное число! Пример: /d20 cheat 7");
@@ -144,72 +158,88 @@ public class DiceRollListener implements Listener, CommandExecutor {
         sender.sendMessage(ChatColor.RED + "Неизвестный аргумент. Используйте give, cheat или enchant.");
         return true;
     }
-    @EventHandler(priority = EventPriority.LOWEST)
+
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onAnvilPrepare(PrepareAnvilEvent event) {
         AnvilInventory inv = event.getInventory();
         ItemStack left = inv.getItem(0);
         ItemStack right = inv.getItem(1);
+        
         if (left == null || right == null) return;
 
-        Material mat = left.getType();
-        boolean isSword = Tag.ITEMS_SWORDS.isTagged(mat);
-        boolean isBook = left.getType() == Material.ENCHANTED_BOOK;
-
-        // ЖЕСТКИЙ ФИЛЬТР: Если предмет слева НЕ МЕЧ и НЕ КНИГА — плагин делает моментальный выход.
-        // Броня, топоры, луки и кирки будут чароваться в 100% ванильном режиме Paper, плагин их не тронет.
-        if (!isSword && !isBook) {
-            return;
-        }
-
+        // Проверяем, есть ли чар "Бросок I" хоть на одном из предметов
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
-
-        // Если в наковальне вообще нет чара Бросок I — плагин тоже полностью пропускает это событие
+        
+        // Если чара нет ни на одном предмете - выходим
         if (!leftHasD20 && !rightHasD20) return;
 
-        // Проверка несовместимости с Заговором огня
-        boolean leftHasFire = left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
-        boolean rightHasFire = right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
-
-        if (left.getType() == Material.ENCHANTED_BOOK && left.getItemMeta() instanceof EnchantmentStorageMeta) {
-            leftHasFire = ((EnchantmentStorageMeta) left.getItemMeta()).hasStoredEnchant(Enchantment.FIRE_ASPECT);
-        }
-        if (right.getType() == Material.ENCHANTED_BOOK && right.getItemMeta() instanceof EnchantmentStorageMeta) {
-            rightHasFire = ((EnchantmentStorageMeta) right.getItemMeta()).hasStoredEnchant(Enchantment.FIRE_ASPECT);
-        }
+        // Проверяем, что предмет слева - меч (задумка плагина)
+        boolean isSword = Tag.ITEMS_SWORDS.isTagged(left.getType());
+        boolean isBook = left.getType() == Material.ENCHANTED_BOOK;
         
-        if ((leftHasD20 && rightHasFire) || (rightHasD20 && leftHasFire)) {
+        // Если слева не меч и не книга - блокируем (книга нужна для переноса чара)
+        if (!isSword && !isBook) {
             event.setResult(null);
             return;
         }
 
-        // Если пытаются наложить Бросок на предмет, который не является мечом — блокируем
-        if (!isSword && left.getType() != Material.ENCHANTED_BOOK) {
+        // Проверка на Заговор огня (несовместимость)
+        boolean hasFireAspect = false;
+        if (leftHasD20 && right.getType() == Material.ENCHANTED_BOOK) {
+            if (right.getItemMeta() instanceof EnchantmentStorageMeta) {
+                hasFireAspect = ((EnchantmentStorageMeta) right.getItemMeta()).hasStoredEnchant(Enchantment.FIRE_ASPECT);
+            }
+        } else if (rightHasD20 && left.getType() == Material.ENCHANTED_BOOK) {
+            if (left.getItemMeta() instanceof EnchantmentStorageMeta) {
+                hasFireAspect = ((EnchantmentStorageMeta) left.getItemMeta()).hasStoredEnchant(Enchantment.FIRE_ASPECT);
+            }
+        } else {
+            // Проверяем обычные чары
+            if (leftHasD20) hasFireAspect = left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
+            if (!hasFireAspect && rightHasD20) hasFireAspect = right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
+        }
+
+        if (hasFireAspect) {
             event.setResult(null);
             return;
         }
 
+        // Создаем результат
         ItemStack result = event.getResult();
         if (result == null || result.getType() == Material.AIR) {
             result = left.clone();
         }
 
-        if (right.getType() == Material.ENCHANTED_BOOK && right.getItemMeta() instanceof EnchantmentStorageMeta && result.getType() == Material.ENCHANTED_BOOK) {
-            EnchantmentStorageMeta resultStorage = (EnchantmentStorageMeta) result.getItemMeta();
+        // Обработка зачарованных книг
+        if (right.getType() == Material.ENCHANTED_BOOK && right.getItemMeta() instanceof EnchantmentStorageMeta) {
             EnchantmentStorageMeta rightStorage = (EnchantmentStorageMeta) right.getItemMeta();
+            EnchantmentStorageMeta resultStorage = null;
+            
+            if (result.getItemMeta() instanceof EnchantmentStorageMeta) {
+                resultStorage = (EnchantmentStorageMeta) result.getItemMeta();
+            } else if (result.getType() == Material.ENCHANTED_BOOK) {
+                resultStorage = (EnchantmentStorageMeta) result.getItemMeta();
+            }
+            
             if (resultStorage != null && rightStorage != null) {
-                rightStorage.getStoredEnchants().forEach((ench, lvl) -> resultStorage.addStoredEnchant(ench, lvl, true));
+                // Переносим все чары с книги на результат
+                rightStorage.getStoredEnchants().forEach((ench, lvl) -> {
+                    resultStorage.addStoredEnchant(ench, lvl, true);
+                });
                 result.setItemMeta(resultStorage);
             }
         }
 
+        // Добавляем лор "Бросок I" к результату
         ItemMeta meta = result.getItemMeta();
         if (meta != null) {
+            // Убираем Заговор огня, если он есть
             if (meta.hasEnchant(Enchantment.FIRE_ASPECT)) {
-                event.setResult(null);
-                return;
+                meta.removeEnchant(Enchantment.FIRE_ASPECT);
             }
             
+            // Добавляем лор, если его нет
             List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
             if (!hasD20Lore(result)) {
                 lore.add(CHAR_LORE);
@@ -218,6 +248,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
             meta.setEnchantmentGlintOverride(true);
             result.setItemMeta(meta);
             event.setResult(result);
+            
+            // Устанавливаем стоимость починки
             try {
                 inv.setRepairCost(5);
             } catch (Exception ignored) {}
@@ -236,16 +268,19 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemMeta meta = targetItem.getItemMeta();
         if (meta == null) return;
 
+        // Считаем количество ванильных чар
         int vanillaEnchantsCount = meta.getEnchants().size();
         if (targetItem.getType() == Material.ENCHANTED_BOOK && meta instanceof EnchantmentStorageMeta) {
             vanillaEnchantsCount = ((EnchantmentStorageMeta) meta).getStoredEnchants().size();
         }
         
+        // Если нет ванильных чар - точило не работает
         if (vanillaEnchantsCount == 0) {
             event.setResult(null);
             return;
         }
 
+        // Снимаем все ванильные чары, оставляя только "Бросок I"
         ItemStack result = targetItem.clone();
         ItemMeta resultMeta = result.getItemMeta();
         if (resultMeta != null) {
@@ -256,6 +291,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 new ArrayList<>(resultMeta.getEnchants().keySet()).forEach(resultMeta::removeEnchant);
             }
             
+            // Сохраняем лор "Бросок I"
             List<String> lore = resultMeta.hasLore() ? new ArrayList<>(resultMeta.getLore()) : new ArrayList<>();
             if (!hasD20Lore(result)) {
                 lore.add(CHAR_LORE);
@@ -266,23 +302,32 @@ public class DiceRollListener implements Listener, CommandExecutor {
             event.setResult(result);
         }
     }
+
     @EventHandler(priority = EventPriority.HIGH)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
+        if (event.isCancelled()) return;
+        
+        // Защита от урона во время ролла (теперь правильно!)
         if (event.getEntity() instanceof Player) {
-            Player victimPlayer = (Player) event.getEntity();
-            UUID victimUUID = victimPlayer.getUniqueId();
+            Player victim = (Player) event.getEntity();
+            UUID victimUUID = victim.getUniqueId();
+            // Проверяем, что жертва крутит кубик и что урон наносит НЕ она сама
             if (rollingTasks.containsKey(victimUUID) && !waitingForHit.containsKey(victimUUID)) {
-                event.setDamage(event.getDamage() * 0.70);
-                victimPlayer.getWorld().spawnParticle(Particle.CRIT, victimPlayer.getLocation().add(0, 1, 0), 3, 0.2, 0.2, 0.2, 0.01);
+                if (!(event.getDamager() instanceof Player && event.getDamager().equals(victim))) {
+                    event.setDamage(event.getDamage() * 0.70);
+                    victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 3, 0.2, 0.2, 0.2, 0.01);
+                }
             }
         }
 
-        if (event.isCancelled() || !(event.getDamager() instanceof Player)) return;
+        if (!(event.getDamager() instanceof Player)) return;
         Player attacker = (Player) event.getDamager();
         ItemStack hand = attacker.getInventory().getItemInMainHand();
         if (!hasD20Lore(hand)) return;
 
         UUID uuid = attacker.getUniqueId();
+        
+        // Если есть ожидающий удар - применяем эффекты
         if (waitingForHit.containsKey(uuid)) {
             int roll = waitingForHit.remove(uuid);
             cleanup(uuid);
@@ -290,6 +335,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return;
         }
 
+        // Если идет ролл, но игрок ударил до его завершения - отменяем ролл и начинаем новый
         if (rollingTasks.containsKey(uuid)) {
             rollingTasks.get(uuid).cancel();
             rollingTasks.remove(uuid);
@@ -297,10 +343,28 @@ public class DiceRollListener implements Listener, CommandExecutor {
         startDiceRoll(attacker);
     }
 
+    @EventHandler
+    public void onPlayerItemHeld(PlayerItemHeldEvent event) {
+        Player player = event.getPlayer();
+        UUID uuid = player.getUniqueId();
+        
+        // Если игрок сменил слот во время ролла - отменяем
+        if (rollingTasks.containsKey(uuid) && !waitingForHit.containsKey(uuid)) {
+            ItemStack newHand = player.getInventory().getItem(event.getNewSlot());
+            if (!hasD20Lore(newHand)) {
+                cleanup(uuid);
+                player.sendMessage(ChatColor.RED + "§lРолл отменен, так как вы сменили предмет в руке!");
+            }
+        }
+    }
+
     private void startDiceRoll(Player player) {
         UUID uuid = player.getUniqueId();
+        
+        // Очищаем старую BossBar
         if (playerBossBars.containsKey(uuid)) {
-            playerBossBars.remove(uuid).removeAll();
+            playerBossBars.get(uuid).removeAll();
+            playerBossBars.remove(uuid);
         }
         
         BossBar bossBar = Bukkit.createBossBar("", BarColor.YELLOW, BarStyle.SOLID);
@@ -312,10 +376,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
             int ticks = 80;
             @Override
             public void run() {
+                // Проверяем, держит ли игрок предмет с лором
                 if (!player.isOnline() || !hasD20Lore(player.getInventory().getItemInMainHand())) {
                     cleanup(uuid);
                     return;
                 }
+                
                 if (ticks <= 0) {
                     int finalRoll;
                     if (activeCheaters.containsKey(uuid)) {
@@ -328,6 +394,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
                     startWaitingForHitPhase(player, bossBar, finalRoll);
                     return;
                 }
+                
+                // Обновляем BossBar
                 double progress = (double) ticks / 80.0;
                 bossBar.setProgress(Math.max(0.0, Math.min(1.0, progress)));
                 int randomNum = ThreadLocalRandom.current().nextInt(1, 21);
@@ -342,6 +410,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
         }.runTaskTimer(plugin, 0L, 2L);
         rollingTasks.put(uuid, task);
     }
+
     private void startWaitingForHitPhase(Player player, BossBar bossBar, int finalRoll) {
         UUID uuid = player.getUniqueId();
         bossBar.setProgress(1.0);
@@ -359,6 +428,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
                 if (!hasD20Lore(player.getInventory().getItemInMainHand())) {
                     cleanup(uuid);
+                    player.sendMessage("§c§lРолл отменен - предмет в руке изменен!");
                     return;
                 }
                 if (ticks <= 0) {
@@ -378,12 +448,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (!(event.getEntity() instanceof LivingEntity)) return;
         LivingEntity victim = (LivingEntity) event.getEntity();
 
-        if (roll >= 18) {
-            victim.setFireTicks(60);
-        }
-
+        // Критический провал (roll = 1)
         if (roll == 1) {
-            event.setDamage(0); 
+            event.setCancelled(true); // Теперь полностью отменяем урон
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, 40, 0));
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ZOMBIE_ATTACK_IRON_DOOR, 1f, 1.2f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 0.8f, 0.7f);
@@ -391,40 +458,55 @@ public class DiceRollListener implements Listener, CommandExecutor {
             victim.getWorld().spawnParticle(Particle.EXPLOSION_EMITTER, victim.getLocation().add(0, 1, 0), 2, 0.1, 0.1, 0.1, 0);
             victim.getWorld().spawnParticle(Particle.LARGE_SMOKE, victim.getLocation().add(0, 1, 0), 85, 0.5, 0.6, 0.5, 0.03);
             attacker.sendMessage("§c§lКРИТИЧЕСКИЙ ПРОВАЛ! Текущий удар нанес 0 урона.");
-        } else if (roll <= 5) {
-            event.setDamage(event.getDamage() * 0.50); 
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_SLIME_ATTACK, 1f, 0.7f);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_GRAVEL_BREAK, 0.8f, 0.5f);
-            victim.getWorld().spawnParticle(Particle.ASH, victim.getLocation().add(0, 1, 0), 65, 0.4, 0.5, 0.4, 0.02);
+            return;
+        }
+
+        // Применяем множители урона
+        double multiplier;
+        Sound hitSound;
+        Particle particle;
+        int particleCount;
+
+        if (roll <= 5) {
+            multiplier = 0.50;
+            hitSound = Sound.ENTITY_SLIME_ATTACK;
+            particle = Particle.ASH;
+            particleCount = 65;
         } else if (roll <= 9) {
-            event.setDamage(event.getDamage() * 0.75); 
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BLOCK, 1f, 0.8f);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_WEAK, 0.6f, 1.2f);
-            victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 50, 0.4, 0.4, 0.4, 0.02);
+            multiplier = 0.75;
+            hitSound = Sound.ITEM_SHIELD_BLOCK;
+            particle = Particle.WHITE_SMOKE;
+            particleCount = 50;
         } else if (roll <= 13) {
-            event.setDamage(event.getDamage() * 1.50); 
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_ANVIL_PLACE, 0.6f, 1.7f);
-            victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 18, 0.3, 0.3, 0.3, 0.1);
+            multiplier = 1.50;
+            hitSound = Sound.BLOCK_ANVIL_PLACE;
+            particle = Particle.CRIT;
+            particleCount = 18;
         } else if (roll <= 17) {
-            event.setDamage(event.getDamage() * 2.00); 
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 1.2f, 0.9f);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_STRONG, 1f, 1.2f);
-            victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 20, 0.3, 0.4, 0.3, 0.05);
+            multiplier = 2.00;
+            hitSound = Sound.ITEM_SHIELD_BREAK;
+            particle = Particle.LAVA;
+            particleCount = 20;
         } else if (roll <= 19) {
-            event.setDamage(event.getDamage() * 2.50); 
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_DRAGON_FIREBALL_EXPLODE, 0.8f, 1.3f);
-            victim.getWorld().spawnParticle(Particle.FLAME, victim.getLocation().add(0, 1, 0), 30, 0.4, 0.5, 0.4, 0.05);
-        } else {
-            event.setDamage(event.getDamage() * 4.00); 
+            multiplier = 2.50;
+            hitSound = Sound.ENTITY_DRAGON_FIREBALL_EXPLODE;
+            particle = Particle.FLAME;
+            particleCount = 30;
+        } else { // roll == 20
+            multiplier = 4.00;
+            hitSound = Sound.ENTITY_LIGHTNING_BOLT_THUNDER;
+            particle = Particle.SOUL_FIRE_FLAME;
+            particleCount = 45;
+            
+            // Особые эффекты для крита
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 80, 1));
             
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.9f, 1.4f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.8f, 1.1f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_BELL_USE, 0.5f, 1.6f);
             
-            victim.getWorld().spawnParticle(Particle.SOUL_FIRE_FLAME, victim.getLocation().add(0, 1, 0), 45, 0.4, 0.6, 0.4, 0.05);
             victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 35, 0.3, 0.5, 0.3, 0.1);
             
+            // Отбрасывание с оптимизированным вектором
             Vector launchDirection = victim.getLocation().toVector().subtract(attacker.getLocation().toVector());
             if (launchDirection.lengthSquared() == 0) {
                 launchDirection = new Vector(1, 0, 0);
@@ -432,37 +514,27 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 launchDirection.normalize();
             }
             
-            launchDirection.setY(1.25); 
-            launchDirection.setX(launchDirection.getX() * 1.1); 
+            launchDirection.setY(1.25);
+            launchDirection.setX(launchDirection.getX() * 1.1);
             launchDirection.setZ(launchDirection.getZ() * 1.1);
             
-            final Vector finalVector = launchDirection;
+            final Vector finalVector = launchDirection.clone();
             
             new BukkitRunnable() {
                 @Override
                 public void run() {
-                    if (victim instanceof Player) {
-                        Player vp = (Player) victim;
-                        if (!vp.isOnline() || vp.isDead()) return;
-                    }
                     if (!victim.isDead()) {
-                        victim.setVelocity(new Vector(0, 0, 0)); 
-                        victim.setVelocity(finalVector); 
+                        victim.setVelocity(new Vector(0, 0, 0));
+                        victim.setVelocity(finalVector);
                     }
                 }
             }.runTaskLater(plugin, 1L);
 
+            // Оптимизированный эффект взрыва во время полета
             new BukkitRunnable() {
-                int timer = 30; 
+                int timer = 30;
                 @Override
                 public void run() {
-                    if (victim instanceof Player) {
-                        Player vp = (Player) victim;
-                        if (!vp.isOnline()) {
-                            this.cancel();
-                            return;
-                        }
-                    }
                     if (victim.isDead() || timer <= 0 || victim.isOnGround()) {
                         this.cancel();
                         return;
@@ -473,6 +545,16 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }.runTaskTimer(plugin, 2L, 2L);
 
             attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
+        }
+
+        // Применяем урон и эффекты для не-критических роллов
+        event.setDamage(event.getDamage() * multiplier);
+        attacker.getWorld().playSound(attacker.getLocation(), hitSound, 1f, 1.2f);
+        victim.getWorld().spawnParticle(particle, victim.getLocation().add(0, 1, 0), particleCount, 0.4, 0.5, 0.4, 0.05);
+
+        // Зажигаем врага при roll >= 18
+        if (roll >= 18) {
+            victim.setFireTicks(60);
         }
     }
 
@@ -493,11 +575,17 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private void cleanup(UUID uuid) {
         waitingForHit.remove(uuid);
         if (rollingTasks.containsKey(uuid)) {
-            rollingTasks.get(uuid).cancel();
+            BukkitTask task = rollingTasks.get(uuid);
+            if (task != null) {
+                task.cancel();
+            }
             rollingTasks.remove(uuid);
         }
         if (playerBossBars.containsKey(uuid)) {
-            playerBossBars.get(uuid).removeAll();
+            BossBar bossBar = playerBossBars.get(uuid);
+            if (bossBar != null) {
+                bossBar.removeAll();
+            }
             playerBossBars.remove(uuid);
         }
     }
@@ -506,6 +594,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
     public void onQuit(PlayerQuitEvent event) {
         cleanup(event.getPlayer().getUniqueId());
         activeCheaters.remove(event.getPlayer().getUniqueId());
+        cheatCooldowns.remove(event.getPlayer().getUniqueId());
     }
     
     public void disable() {
@@ -513,6 +602,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             cleanup(uuid);
         }
         activeCheaters.clear();
+        cheatCooldowns.clear();
     }
 }
-
