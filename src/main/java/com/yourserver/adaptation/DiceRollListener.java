@@ -214,9 +214,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
             
             if (resultStorage != null && rightStorage != null) {
-                rightStorage.getStoredEnchants().forEach((ench, lvl) -> {
-                    resultStorage.addStoredEnchant(ench, lvl, true);
-                });
+                // Используем обычный цикл вместо лямбды
+                Map<Enchantment, Integer> enchants = rightStorage.getStoredEnchants();
+                for (Map.Entry<Enchantment, Integer> entry : enchants.entrySet()) {
+                    resultStorage.addStoredEnchant(entry.getKey(), entry.getValue(), true);
+                }
                 result.setItemMeta(resultStorage);
             }
         }
@@ -269,9 +271,17 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (resultMeta != null) {
             if (resultMeta instanceof EnchantmentStorageMeta) {
                 EnchantmentStorageMeta sm = (EnchantmentStorageMeta) resultMeta;
-                new ArrayList<>(sm.getStoredEnchants().keySet()).forEach(sm::removeStoredEnchant);
+                // Используем обычный цикл вместо лямбды
+                Set<Enchantment> enchants = new HashSet<>(sm.getStoredEnchants().keySet());
+                for (Enchantment ench : enchants) {
+                    sm.removeStoredEnchant(ench);
+                }
             } else {
-                new ArrayList<>(resultMeta.getEnchants().keySet()).forEach(resultMeta::removeEnchant);
+                // Используем обычный цикл вместо лямбды
+                Set<Enchantment> enchants = new HashSet<>(resultMeta.getEnchants().keySet());
+                for (Enchantment ench : enchants) {
+                    resultMeta.removeEnchant(ench);
+                }
             }
             
             List<String> lore = resultMeta.hasLore() ? new ArrayList<>(resultMeta.getLore()) : new ArrayList<>();
@@ -423,7 +433,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return;
         }
         
-        LivingEntity victim = (LivingEntity) event.getEntity();
+        final LivingEntity victim = (LivingEntity) event.getEntity();
 
         if (roll == 1) {
             event.setCancelled(true);
@@ -491,31 +501,33 @@ public class DiceRollListener implements Listener, CommandExecutor {
             launchDirection.setZ(launchDirection.getZ() * 1.1);
             
             final Vector finalVector = new Vector(launchDirection.getX(), launchDirection.getY(), launchDirection.getZ());
+            final JavaPlugin finalPlugin = this.plugin;
+            final LivingEntity finalVictim = victim;
             
-            // Создаем задачу для отбрасывания
-            new BukkitRunnable() {
+            // Отбрасывание
+            finalPlugin.getServer().getScheduler().runTaskLater(finalPlugin, new Runnable() {
                 @Override
                 public void run() {
-                    if (!victim.isDead()) {
-                        victim.setVelocity(new Vector(0, 0, 0));
-                        victim.setVelocity(finalVector);
+                    if (!finalVictim.isDead()) {
+                        finalVictim.setVelocity(new Vector(0, 0, 0));
+                        finalVictim.setVelocity(finalVector);
                     }
                 }
-            }.runTaskLater(plugin, 1L);
+            }, 1L);
 
-            // Создаем задачу для эффекта взрыва
-            new BukkitRunnable() {
+            // Эффект взрыва во время полета
+            finalPlugin.getServer().getScheduler().runTaskTimer(finalPlugin, new Runnable() {
                 int timer = 30;
                 @Override
                 public void run() {
-                    if (victim.isDead() || timer <= 0 || victim.isOnGround()) {
-                        this.cancel();
+                    if (finalVictim.isDead() || timer <= 0 || finalVictim.isOnGround()) {
+                        Bukkit.getScheduler().cancelTasks(finalPlugin);
                         return;
                     }
-                    victim.getWorld().spawnParticle(Particle.EXPLOSION, victim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
+                    finalVictim.getWorld().spawnParticle(Particle.EXPLOSION, finalVictim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
                     timer -= 2;
                 }
-            }.runTaskTimer(plugin, 2L, 2L);
+            }, 2L, 2L);
 
             attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
             
