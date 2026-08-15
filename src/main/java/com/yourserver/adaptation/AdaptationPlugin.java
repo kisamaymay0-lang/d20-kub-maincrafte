@@ -330,41 +330,36 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         Player player = (Player) event.getEntity();
         UUID uuid = player.getUniqueId();
 
-        // ===== НОВАЯ ЛОГИКА: проверяем, можно ли считать удары =====
+        // ===== ПРОВЕРКА: можно ли считать удары =====
         boolean canCountHits = true;
         
-        // 1. Если активна супер-адаптация — удары НЕ считаются
+        // Если активна супер-адаптация — удары НЕ считаются
         if (superAdaptations.containsKey(uuid) && superAdaptations.get(uuid)) {
             canCountHits = false;
         }
         
-        // 2. Если идет перезарядка — удары НЕ считаются
+        // Если идет перезарядка — удары НЕ считаются
         if (cooldownEndTimes.containsKey(uuid) && System.currentTimeMillis() < cooldownEndTimes.get(uuid)) {
             canCountHits = false;
         }
         
-        // 3. Если активна адаптация, но она в процессе (активна) — удары НЕ считаются
-        //    (мы не хотим набивать новую адаптацию пока текущая активна)
+        // Если активна адаптация — удары НЕ считаются
         if (activeAdaptations.containsKey(uuid)) {
             canCountHits = false;
         }
 
-        // Если удары нельзя считать — просто применяем защиту/штраф и выходим
+        // ===== ПРИМЕНЯЕМ ЭФФЕКТЫ АДАПТАЦИИ (ЕСЛИ ОНА АКТИВНА) =====
+        if (activeAdaptations.containsKey(uuid)) {
+            applyAdaptationEffects(player, event, uuid);
+        }
+
+        // ===== ЕСЛИ НЕЛЬЗЯ СЧИТАТЬ УДАРЫ — ВЫХОДИМ =====
         if (!canCountHits) {
-            // Применяем защиту/штраф если адаптация активна
-            if (activeAdaptations.containsKey(uuid)) {
-                applyAdaptationEffects(player, event, uuid);
-            }
             return;
         }
 
         // ===== ДАЛЬШЕ ТОЛЬКО ЕСЛИ МОЖНО СЧИТАТЬ УДАРЫ =====
         
-        // Проверяем кулдаун (уже проверили выше, но оставляем для страховки)
-        if (cooldownEndTimes.containsKey(uuid) && System.currentTimeMillis() < cooldownEndTimes.get(uuid)) {
-            return;
-        }
-
         int totalLvl = 0, pieceCount = 0;
         for (ItemStack armor : player.getInventory().getArmorContents()) {
             int lvl = getLvlFromLore(armor);
@@ -399,7 +394,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         }
     }
 
-    // ===== ВЫНЕСЕННАЯ ЛОГИКА ПРИМЕНЕНИЯ ЭФФЕКТОВ АДАПТАЦИИ =====
+    // ===== ПРИМЕНЕНИЕ ЭФФЕКТОВ АДАПТАЦИИ =====
     private void applyAdaptationEffects(Player player, EntityDamageEvent event, UUID uuid) {
         if (!activeAdaptations.containsKey(uuid)) return;
         
@@ -413,48 +408,42 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         if (pieceCount == 0) return;
 
         if (type.equals(activeAdaptations.get(uuid))) {
+            // СОВПАДАЕТ — защита + добавление времени
             spawnAdaptationParticles(player, type);
 
             if (superAdaptations.getOrDefault(uuid, false)) {
+                // СУПЕР-АДАПТАЦИЯ
                 double perPieceSuper = getConfig().getDouble("settings.super-protection-per-piece", 0.125);
                 event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceSuper)));
 
-                // Добавление времени при ударе (работает всегда, даже если удары не считаются)
+                // ===== ДОБАВЛЯЕМ ВРЕМЯ ПРИ УДАРЕ (СУПЕР) =====
                 if (activeTimesLeft.containsKey(uuid)) {
                     double currentLeft = activeTimesLeft.get(uuid);
-                    double maxTime = activeMaxTimes.getOrDefault(uuid, 40.0);
+                    double maxTime = activeMaxTimes.getOrDefault(uuid, 40.0); // 4 сек в тиках
                     double bonus = getConfig().getDouble("settings.hit-bonus-super", 0.4);
                     double newLeft = Math.min(maxTime, currentLeft + (bonus * 10.0));
                     activeTimesLeft.put(uuid, newLeft);
                 }
             } else {
+                // ОБЫЧНАЯ АДАПТАЦИЯ
                 double perPieceNormal = getConfig().getDouble("settings.normal-protection-per-piece", 0.075);
                 event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceNormal)));
 
+                // ===== ДОБАВЛЯЕМ ВРЕМЯ ПРИ УДАРЕ (ОБЫЧНАЯ) =====
                 if (activeTimesLeft.containsKey(uuid)) {
                     double currentLeft = activeTimesLeft.get(uuid);
-                    double maxTime = activeMaxTimes.getOrDefault(uuid, 100.0);
+                    double maxTime = activeMaxTimes.getOrDefault(uuid, 100.0); // 10 сек в тиках
                     double bonus = getConfig().getDouble("settings.hit-bonus-normal", 0.2);
                     double newLeft = Math.min(maxTime, currentLeft + (bonus * 10.0));
                     activeTimesLeft.put(uuid, newLeft);
                 }
 
                 // Счетчик для супер-адаптации (накапливается ТОЛЬКО когда можно считать удары)
-                // Сейчас этот код не выполняется, потому что мы вышли из canCountHits,
-                // но оставляем для страховки
-                if (!superAdaptations.getOrDefault(uuid, false)) {
-                    superDamageCounters.putIfAbsent(uuid, new HashMap<>());
-                    int sHits = superDamageCounters.get(uuid).getOrDefault(type, 0) + 1;
-                    superDamageCounters.get(uuid).put(type, sHits);
-
-                    int requiredSuperHits = getConfig().getInt("settings.required-super-hits", 8);
-                    if (sHits >= requiredSuperHits) {
-                        activateSuper(player, type);
-                    }
-                }
+                // Этот код не выполняется, потому что canCountHits = false,
+                // но оставляем для ясности
             }
         } else {
-            // Штраф
+            // НЕ СОВПАДАЕТ — штраф
             double penaltyPerPiece;
             if (superAdaptations.getOrDefault(uuid, false)) {
                 penaltyPerPiece = getConfig().getDouble("settings.super-penalty-per-piece", 0.125);
@@ -556,7 +545,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                     superAdaptations.remove(uuid);
                     superDamageCounters.remove(uuid);
                     
-                    // ===== ВАЖНО: СБРАСЫВАЕМ СЧЕТЧИКИ УДАРОВ =====
+                    // ===== СБРАСЫВАЕМ СЧЕТЧИКИ УДАРОВ =====
                     damageCounters.remove(uuid);
                     superDamageCounters.remove(uuid);
 
@@ -574,7 +563,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
                 if (isCooldownMode) {
                     if (timeLeft >= maxTime) {
-                        // ===== ВАЖНО: ПО ОКОНЧАНИЮ ПЕРЕЗАРЯДКИ СБРАСЫВАЕМ ВСЕ СЧЕТЧИКИ =====
+                        // ===== ПО ОКОНЧАНИЮ ПЕРЕЗАРЯДКИ СБРАСЫВАЕМ СЧЕТЧИКИ =====
                         damageCounters.remove(uuid);
                         superDamageCounters.remove(uuid);
                         cleanupPlayerData(uuid, false);
@@ -601,7 +590,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         activeAdaptations.remove(uuid);
         superAdaptations.remove(uuid);
         superDamageCounters.remove(uuid);
-        // damageCounters НЕ удаляем здесь, чтобы не сбрасывать прогресс при обычной очистке
 
         if (activeBossBars.containsKey(uuid)) {
             activeBossBars.get(uuid).removeAll();
