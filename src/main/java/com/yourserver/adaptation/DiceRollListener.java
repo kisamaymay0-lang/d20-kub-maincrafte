@@ -476,7 +476,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             particleOffsetZ = 0.6;
             particleSpeed = 0.04;
         } else if (roll <= 10) {
-            // Ниже среднего - искры
+            // Ниже среднего - искры + белый дым
             multiplier = 0.90;
             hitSound = Sound.ENTITY_PLAYER_ATTACK_WEAK;
             particle = Particle.CRIT;
@@ -485,8 +485,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
             particleOffsetY = 0.4;
             particleOffsetZ = 0.4;
             particleSpeed = 0.1;
+            
+            // Добавляем белый дым
+            victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 15, 0.4, 0.4, 0.4, 0.03);
         } else if (roll <= 13) {
-            // Средний удар - критические искры
+            // Средний удар - критические искры + белый дым
             multiplier = 1.30;
             hitSound = Sound.ENTITY_PLAYER_ATTACK_STRONG;
             particle = Particle.CRIT;
@@ -495,6 +498,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
             particleOffsetY = 0.5;
             particleOffsetZ = 0.5;
             particleSpeed = 0.15;
+            
+            // Добавляем белый дым
+            victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 20, 0.5, 0.5, 0.5, 0.04);
         } else if (roll <= 16) {
             // Хороший удар - искры + эффект
             multiplier = 1.80;
@@ -506,8 +512,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
             particleOffsetZ = 0.5;
             particleSpeed = 0.2;
             
-            // Дополнительные искры
-            victim.getWorld().spawnParticle(Particle.SPARK, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.3, 0.3, 0.1);
+            // Дополнительные искры (используем CRIT_MAGIC вместо SPARK)
+            victim.getWorld().spawnParticle(Particle.CRIT_MAGIC, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.3, 0.3, 0.1);
         } else if (roll <= 19) {
             // Сильный удар - огонь
             multiplier = 2.50;
@@ -519,9 +525,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
             particleOffsetZ = 0.6;
             particleSpeed = 0.08;
             
-            // Дополнительные искры
+            // Дополнительные эффекты
             victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.3, 0.3, 0.05);
-            victim.getWorld().spawnParticle(Particle.SPARK, victim.getLocation().add(0, 1, 0), 20, 0.4, 0.4, 0.4, 0.1);
+            victim.getWorld().spawnParticle(Particle.CRIT_MAGIC, victim.getLocation().add(0, 1, 0), 20, 0.4, 0.4, 0.4, 0.1);
         } else {
             // КРИТИЧЕСКАЯ УДАЧА - максимум эффектов
             multiplier = 4.00;
@@ -539,7 +545,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             
             victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 30, 0.5, 0.5, 0.5, 0.08);
             victim.getWorld().spawnParticle(Particle.EXPLOSION_EMITTER, victim.getLocation().add(0, 1, 0), 1, 0.3, 0.3, 0.3, 0);
-            victim.getWorld().spawnParticle(Particle.SPARK, victim.getLocation().add(0, 1, 0), 30, 0.6, 0.6, 0.6, 0.15);
+            victim.getWorld().spawnParticle(Particle.CRIT_MAGIC, victim.getLocation().add(0, 1, 0), 30, 0.6, 0.6, 0.6, 0.15);
             
             Vector launchDirection = victim.getLocation().toVector().subtract(attacker.getLocation().toVector());
             if (launchDirection.lengthSquared() == 0) {
