@@ -45,9 +45,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private final Map<UUID, Integer> waitingForHit = new HashMap<>();
     private final Map<UUID, BossBar> playerBossBars = new HashMap<>();
     private final Map<UUID, Integer> activeCheaters = new HashMap<>();
-    private final Map<UUID, Long> cheatCooldowns = new HashMap<>(); // Для защиты от спама читом
+    private final Map<UUID, Long> cheatCooldowns = new HashMap<>();
     private final String CHAR_LORE = "§dБросок I";
-    private static final int CHEAT_COOLDOWN_SECONDS = 5; // Кулдаун на использование чита
+    private static final int CHEAT_COOLDOWN_SECONDS = 5;
 
     public DiceRollListener(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -68,7 +68,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             Player player = (Player) sender;
             UUID uuid = player.getUniqueId();
 
-            // Проверка кулдауна
             if (cheatCooldowns.containsKey(uuid)) {
                 long timeLeft = (cheatCooldowns.get(uuid) + CHEAT_COOLDOWN_SECONDS * 1000L) - System.currentTimeMillis();
                 if (timeLeft > 0) {
@@ -167,24 +166,19 @@ public class DiceRollListener implements Listener, CommandExecutor {
         
         if (left == null || right == null) return;
 
-        // Проверяем, есть ли чар "Бросок I" хоть на одном из предметов
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
         
-        // Если чара нет ни на одном предмете - выходим
         if (!leftHasD20 && !rightHasD20) return;
 
-        // Проверяем, что предмет слева - меч (задумка плагина)
         boolean isSword = Tag.ITEMS_SWORDS.isTagged(left.getType());
         boolean isBook = left.getType() == Material.ENCHANTED_BOOK;
         
-        // Если слева не меч и не книга - блокируем (книга нужна для переноса чара)
         if (!isSword && !isBook) {
             event.setResult(null);
             return;
         }
 
-        // Проверка на Заговор огня (несовместимость)
         boolean hasFireAspect = false;
         if (leftHasD20 && right.getType() == Material.ENCHANTED_BOOK) {
             if (right.getItemMeta() instanceof EnchantmentStorageMeta) {
@@ -195,7 +189,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 hasFireAspect = ((EnchantmentStorageMeta) left.getItemMeta()).hasStoredEnchant(Enchantment.FIRE_ASPECT);
             }
         } else {
-            // Проверяем обычные чары
             if (leftHasD20) hasFireAspect = left.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
             if (!hasFireAspect && rightHasD20) hasFireAspect = right.getEnchantments().containsKey(Enchantment.FIRE_ASPECT);
         }
@@ -205,13 +198,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return;
         }
 
-        // Создаем результат
         ItemStack result = event.getResult();
         if (result == null || result.getType() == Material.AIR) {
             result = left.clone();
         }
 
-        // Обработка зачарованных книг
         if (right.getType() == Material.ENCHANTED_BOOK && right.getItemMeta() instanceof EnchantmentStorageMeta) {
             EnchantmentStorageMeta rightStorage = (EnchantmentStorageMeta) right.getItemMeta();
             EnchantmentStorageMeta resultStorage = null;
@@ -223,7 +214,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
             
             if (resultStorage != null && rightStorage != null) {
-                // Переносим все чары с книги на результат
                 rightStorage.getStoredEnchants().forEach((ench, lvl) -> {
                     resultStorage.addStoredEnchant(ench, lvl, true);
                 });
@@ -231,15 +221,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
         }
 
-        // Добавляем лор "Бросок I" к результату
         ItemMeta meta = result.getItemMeta();
         if (meta != null) {
-            // Убираем Заговор огня, если он есть
             if (meta.hasEnchant(Enchantment.FIRE_ASPECT)) {
                 meta.removeEnchant(Enchantment.FIRE_ASPECT);
             }
             
-            // Добавляем лор, если его нет
             List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
             if (!hasD20Lore(result)) {
                 lore.add(CHAR_LORE);
@@ -249,7 +236,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             result.setItemMeta(meta);
             event.setResult(result);
             
-            // Устанавливаем стоимость починки
             try {
                 inv.setRepairCost(5);
             } catch (Exception ignored) {}
@@ -268,19 +254,16 @@ public class DiceRollListener implements Listener, CommandExecutor {
         ItemMeta meta = targetItem.getItemMeta();
         if (meta == null) return;
 
-        // Считаем количество ванильных чар
         int vanillaEnchantsCount = meta.getEnchants().size();
         if (targetItem.getType() == Material.ENCHANTED_BOOK && meta instanceof EnchantmentStorageMeta) {
             vanillaEnchantsCount = ((EnchantmentStorageMeta) meta).getStoredEnchants().size();
         }
         
-        // Если нет ванильных чар - точило не работает
         if (vanillaEnchantsCount == 0) {
             event.setResult(null);
             return;
         }
 
-        // Снимаем все ванильные чары, оставляя только "Бросок I"
         ItemStack result = targetItem.clone();
         ItemMeta resultMeta = result.getItemMeta();
         if (resultMeta != null) {
@@ -291,7 +274,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 new ArrayList<>(resultMeta.getEnchants().keySet()).forEach(resultMeta::removeEnchant);
             }
             
-            // Сохраняем лор "Бросок I"
             List<String> lore = resultMeta.hasLore() ? new ArrayList<>(resultMeta.getLore()) : new ArrayList<>();
             if (!hasD20Lore(result)) {
                 lore.add(CHAR_LORE);
@@ -307,11 +289,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         if (event.isCancelled()) return;
         
-        // Защита от урона во время ролла (теперь правильно!)
         if (event.getEntity() instanceof Player) {
             Player victim = (Player) event.getEntity();
             UUID victimUUID = victim.getUniqueId();
-            // Проверяем, что жертва крутит кубик и что урон наносит НЕ она сама
             if (rollingTasks.containsKey(victimUUID) && !waitingForHit.containsKey(victimUUID)) {
                 if (!(event.getDamager() instanceof Player && event.getDamager().equals(victim))) {
                     event.setDamage(event.getDamage() * 0.70);
@@ -327,7 +307,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
         UUID uuid = attacker.getUniqueId();
         
-        // Если есть ожидающий удар - применяем эффекты
         if (waitingForHit.containsKey(uuid)) {
             int roll = waitingForHit.remove(uuid);
             cleanup(uuid);
@@ -335,7 +314,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return;
         }
 
-        // Если идет ролл, но игрок ударил до его завершения - отменяем ролл и начинаем новый
         if (rollingTasks.containsKey(uuid)) {
             rollingTasks.get(uuid).cancel();
             rollingTasks.remove(uuid);
@@ -348,7 +326,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         Player player = event.getPlayer();
         UUID uuid = player.getUniqueId();
         
-        // Если игрок сменил слот во время ролла - отменяем
         if (rollingTasks.containsKey(uuid) && !waitingForHit.containsKey(uuid)) {
             ItemStack newHand = player.getInventory().getItem(event.getNewSlot());
             if (!hasD20Lore(newHand)) {
@@ -361,7 +338,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private void startDiceRoll(Player player) {
         UUID uuid = player.getUniqueId();
         
-        // Очищаем старую BossBar
         if (playerBossBars.containsKey(uuid)) {
             playerBossBars.get(uuid).removeAll();
             playerBossBars.remove(uuid);
@@ -376,7 +352,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             int ticks = 80;
             @Override
             public void run() {
-                // Проверяем, держит ли игрок предмет с лором
                 if (!player.isOnline() || !hasD20Lore(player.getInventory().getItemInMainHand())) {
                     cleanup(uuid);
                     return;
@@ -395,7 +370,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
                     return;
                 }
                 
-                // Обновляем BossBar
                 double progress = (double) ticks / 80.0;
                 bossBar.setProgress(Math.max(0.0, Math.min(1.0, progress)));
                 int randomNum = ThreadLocalRandom.current().nextInt(1, 21);
@@ -448,9 +422,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (!(event.getEntity() instanceof LivingEntity)) return;
         LivingEntity victim = (LivingEntity) event.getEntity();
 
-        // Критический провал (roll = 1)
         if (roll == 1) {
-            event.setCancelled(true); // Теперь полностью отменяем урон
+            event.setCancelled(true);
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, 40, 0));
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ZOMBIE_ATTACK_IRON_DOOR, 1f, 1.2f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 0.8f, 0.7f);
@@ -461,7 +434,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return;
         }
 
-        // Применяем множители урона
         double multiplier;
         Sound hitSound;
         Particle particle;
@@ -492,13 +464,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
             hitSound = Sound.ENTITY_DRAGON_FIREBALL_EXPLODE;
             particle = Particle.FLAME;
             particleCount = 30;
-        } else { // roll == 20
+        } else {
             multiplier = 4.00;
             hitSound = Sound.ENTITY_LIGHTNING_BOLT_THUNDER;
             particle = Particle.SOUL_FIRE_FLAME;
             particleCount = 45;
             
-            // Особые эффекты для крита
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 80, 1));
             
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.8f, 1.1f);
@@ -506,7 +477,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             
             victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 35, 0.3, 0.5, 0.3, 0.1);
             
-            // Отбрасывание с оптимизированным вектором
             Vector launchDirection = victim.getLocation().toVector().subtract(attacker.getLocation().toVector());
             if (launchDirection.lengthSquared() == 0) {
                 launchDirection = new Vector(1, 0, 0);
@@ -518,7 +488,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
             launchDirection.setX(launchDirection.getX() * 1.1);
             launchDirection.setZ(launchDirection.getZ() * 1.1);
             
-            final Vector finalVector = launchDirection.clone();
+            // Исправлено: копируем вектор в финальную переменную для лямбды
+            final Vector finalVector = new Vector(launchDirection.getX(), launchDirection.getY(), launchDirection.getZ());
             
             new BukkitRunnable() {
                 @Override
@@ -530,7 +501,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
             }.runTaskLater(plugin, 1L);
 
-            // Оптимизированный эффект взрыва во время полета
             new BukkitRunnable() {
                 int timer = 30;
                 @Override
@@ -545,6 +515,10 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }.runTaskTimer(plugin, 2L, 2L);
 
             attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
+            
+            // Важно: после крита выходим, чтобы не применять дважды
+            event.setDamage(event.getDamage() * multiplier);
+            return;
         }
 
         // Применяем урон и эффекты для не-критических роллов
@@ -552,7 +526,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         attacker.getWorld().playSound(attacker.getLocation(), hitSound, 1f, 1.2f);
         victim.getWorld().spawnParticle(particle, victim.getLocation().add(0, 1, 0), particleCount, 0.4, 0.5, 0.4, 0.05);
 
-        // Зажигаем врага при roll >= 18
         if (roll >= 18) {
             victim.setFireTicks(60);
         }
