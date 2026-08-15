@@ -420,7 +420,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     private void applyDiceEffects(Player attacker, EntityDamageByEntityEvent event, int roll) {
         if (!(event.getEntity() instanceof LivingEntity)) return;
-        LivingEntity victim = (LivingEntity) event.getEntity();
+        final LivingEntity victim = (LivingEntity) event.getEntity(); // Сделали final
 
         if (roll == 1) {
             event.setCancelled(true);
@@ -488,15 +488,17 @@ public class DiceRollListener implements Listener, CommandExecutor {
             launchDirection.setX(launchDirection.getX() * 1.1);
             launchDirection.setZ(launchDirection.getZ() * 1.1);
             
-            // Исправлено: копируем вектор в финальную переменную для лямбды
             final Vector finalVector = new Vector(launchDirection.getX(), launchDirection.getY(), launchDirection.getZ());
+            
+            // Используем final переменные для лямбд
+            final LivingEntity finalVictim = victim;
             
             new BukkitRunnable() {
                 @Override
                 public void run() {
-                    if (!victim.isDead()) {
-                        victim.setVelocity(new Vector(0, 0, 0));
-                        victim.setVelocity(finalVector);
+                    if (!finalVictim.isDead()) {
+                        finalVictim.setVelocity(new Vector(0, 0, 0));
+                        finalVictim.setVelocity(finalVector);
                     }
                 }
             }.runTaskLater(plugin, 1L);
@@ -505,18 +507,17 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 int timer = 30;
                 @Override
                 public void run() {
-                    if (victim.isDead() || timer <= 0 || victim.isOnGround()) {
+                    if (finalVictim.isDead() || timer <= 0 || finalVictim.isOnGround()) {
                         this.cancel();
                         return;
                     }
-                    victim.getWorld().spawnParticle(Particle.EXPLOSION, victim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
+                    finalVictim.getWorld().spawnParticle(Particle.EXPLOSION, finalVictim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
                     timer -= 2;
                 }
             }.runTaskTimer(plugin, 2L, 2L);
 
             attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
             
-            // Важно: после крита выходим, чтобы не применять дважды
             event.setDamage(event.getDamage() * multiplier);
             return;
         }
