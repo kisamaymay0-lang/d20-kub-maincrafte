@@ -80,7 +80,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 if (activeCheaters.containsKey(uuid)) {
                     activeCheaters.remove(uuid);
                     cheatCooldowns.remove(uuid);
-                    player.sendMessage(ChatColor.RED + "§lЧит-режим отключен. Роллы снова случайны.");
+                    player.sendMessage(ChatColor.RED + "Чит-режим отключен. Роллы снова случайны.");
                 } else {
                     player.sendMessage(ChatColor.RED + "Укажите число! Пример: /d20 cheat 20");
                 }
@@ -95,7 +95,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
                 activeCheaters.put(uuid, targetRoll);
                 cheatCooldowns.put(uuid, System.currentTimeMillis());
-                player.sendMessage(ChatColor.GREEN + "§lЧит-режим активирован! Следующий удар гарантированно выдаст: §e§l[" + targetRoll + "]");
+                player.sendMessage(ChatColor.GREEN + "Чит-режим активирован! Следующий удар гарантированно выдаст: §e[" + targetRoll + "]");
             } catch (NumberFormatException e) {
                 player.sendMessage(ChatColor.RED + "Некорректное число! Пример: /d20 cheat 7");
             }
@@ -131,7 +131,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
             
             player.getInventory().addItem(item);
-            player.sendMessage(ChatColor.GREEN + "§lВам успешно выдан предмет " + material.name() + " с чаром Бросок I!");
+            player.sendMessage(ChatColor.GREEN + "Вам успешно выдан предмет " + material.name() + " с чаром Бросок I!");
             return true;
         }
 
@@ -214,7 +214,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
             
             if (resultStorage != null && rightStorage != null) {
-                // Используем обычный цикл вместо лямбды
                 Map<Enchantment, Integer> enchants = rightStorage.getStoredEnchants();
                 for (Map.Entry<Enchantment, Integer> entry : enchants.entrySet()) {
                     resultStorage.addStoredEnchant(entry.getKey(), entry.getValue(), true);
@@ -271,13 +270,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (resultMeta != null) {
             if (resultMeta instanceof EnchantmentStorageMeta) {
                 EnchantmentStorageMeta sm = (EnchantmentStorageMeta) resultMeta;
-                // Используем обычный цикл вместо лямбды
                 Set<Enchantment> enchants = new HashSet<>(sm.getStoredEnchants().keySet());
                 for (Enchantment ench : enchants) {
                     sm.removeStoredEnchant(ench);
                 }
             } else {
-                // Используем обычный цикл вместо лямбды
                 Set<Enchantment> enchants = new HashSet<>(resultMeta.getEnchants().keySet());
                 for (Enchantment ench : enchants) {
                     resultMeta.removeEnchant(ench);
@@ -340,7 +337,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             ItemStack newHand = player.getInventory().getItem(event.getNewSlot());
             if (!hasD20Lore(newHand)) {
                 cleanup(uuid);
-                player.sendMessage(ChatColor.RED + "§lРолл отменен, так как вы сменили предмет в руке!");
+                player.sendMessage(ChatColor.RED + "Бафф чара \"Бросок I\" был отменен, так как вы сменили предмет в руке!");
             }
         }
     }
@@ -383,8 +380,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 double progress = (double) ticks / 80.0;
                 bossBar.setProgress(Math.max(0.0, Math.min(1.0, progress)));
                 int randomNum = ThreadLocalRandom.current().nextInt(1, 21);
-                String color = (ticks % 4 == 0) ? "§e§l" : "§f§l";
-                bossBar.setTitle("§f§lВыпало: " + color + "[" + randomNum + "]");
+                String color = (ticks % 4 == 0) ? "§e" : "§f";
+                bossBar.setTitle("§fВыпало: " + color + "[" + randomNum + "]");
                 
                 if (ticks % 4 == 0) {
                     player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.3f, 1.5f);
@@ -398,7 +395,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private void startWaitingForHitPhase(Player player, BossBar bossBar, int finalRoll) {
         UUID uuid = player.getUniqueId();
         bossBar.setProgress(1.0);
-        bossBar.setTitle("§f§lВыпало: §e§l[" + finalRoll + "] §f§lВремя для §e§lУДАРА!");
+        bossBar.setTitle("§fВыпало: §e[" + finalRoll + "] §fВремя для §eУДАРА!");
         waitingForHit.put(uuid, finalRoll);
         player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_CHIME, 0.8f, 1.2f);
 
@@ -412,12 +409,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
                 if (!hasD20Lore(player.getInventory().getItemInMainHand())) {
                     cleanup(uuid);
-                    player.sendMessage("§c§lРолл отменен - предмет в руке изменен!");
+                    player.sendMessage(ChatColor.RED + "Бафф чара \"Бросок I\" был отменен, так как вы сменили предмет в руке!");
                     return;
                 }
                 if (ticks <= 0) {
                     cleanup(uuid);
-                    player.sendMessage("§c§lВремя для удара истекло!");
+                    player.sendMessage(ChatColor.RED + "Время для удара истекло!");
                     return;
                 }
                 double progress = (double) ticks / 100.0;
@@ -441,8 +438,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ZOMBIE_ATTACK_IRON_DOOR, 1f, 1.2f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 0.8f, 0.7f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.6f, 1.5f);
-            victim.getWorld().spawnParticle(Particle.EXPLOSION_EMITTER, victim.getLocation().add(0, 1, 0), 2, 0.1, 0.1, 0.1, 0);
-            victim.getWorld().spawnParticle(Particle.LARGE_SMOKE, victim.getLocation().add(0, 1, 0), 85, 0.5, 0.6, 0.5, 0.03);
+            
+            // Сбалансированные частицы для крит. провала
+            victim.getWorld().spawnParticle(Particle.EXPLOSION_EMITTER, victim.getLocation().add(0, 1, 0), 1, 0.1, 0.1, 0.1, 0);
+            victim.getWorld().spawnParticle(Particle.LARGE_SMOKE, victim.getLocation().add(0, 1, 0), 20, 0.5, 0.6, 0.5, 0.03);
+            
             attacker.sendMessage("§c§lКРИТИЧЕСКИЙ ПРОВАЛ! Текущий удар нанес 0 урона.");
             return;
         }
@@ -451,43 +451,69 @@ public class DiceRollListener implements Listener, CommandExecutor {
         Sound hitSound;
         Particle particle;
         int particleCount;
+        double particleOffsetX, particleOffsetY, particleOffsetZ;
+        double particleSpeed;
 
         if (roll <= 5) {
             multiplier = 0.50;
             hitSound = Sound.ENTITY_SLIME_ATTACK;
             particle = Particle.ASH;
-            particleCount = 65;
+            particleCount = 15;
+            particleOffsetX = 0.3;
+            particleOffsetY = 0.3;
+            particleOffsetZ = 0.3;
+            particleSpeed = 0.02;
         } else if (roll <= 9) {
             multiplier = 0.75;
             hitSound = Sound.ITEM_SHIELD_BLOCK;
             particle = Particle.WHITE_SMOKE;
-            particleCount = 50;
+            particleCount = 20;
+            particleOffsetX = 0.3;
+            particleOffsetY = 0.3;
+            particleOffsetZ = 0.3;
+            particleSpeed = 0.02;
         } else if (roll <= 13) {
             multiplier = 1.50;
             hitSound = Sound.BLOCK_ANVIL_PLACE;
             particle = Particle.CRIT;
-            particleCount = 18;
+            particleCount = 12;
+            particleOffsetX = 0.3;
+            particleOffsetY = 0.3;
+            particleOffsetZ = 0.3;
+            particleSpeed = 0.08;
         } else if (roll <= 17) {
             multiplier = 2.00;
             hitSound = Sound.ITEM_SHIELD_BREAK;
             particle = Particle.LAVA;
-            particleCount = 20;
+            particleCount = 15;
+            particleOffsetX = 0.3;
+            particleOffsetY = 0.4;
+            particleOffsetZ = 0.3;
+            particleSpeed = 0.05;
         } else if (roll <= 19) {
             multiplier = 2.50;
             hitSound = Sound.ENTITY_DRAGON_FIREBALL_EXPLODE;
             particle = Particle.FLAME;
-            particleCount = 30;
+            particleCount = 20;
+            particleOffsetX = 0.4;
+            particleOffsetY = 0.5;
+            particleOffsetZ = 0.4;
+            particleSpeed = 0.05;
         } else {
             multiplier = 4.00;
             hitSound = Sound.ENTITY_LIGHTNING_BOLT_THUNDER;
             particle = Particle.SOUL_FIRE_FLAME;
-            particleCount = 45;
+            particleCount = 30;
+            particleOffsetX = 0.4;
+            particleOffsetY = 0.6;
+            particleOffsetZ = 0.4;
+            particleSpeed = 0.05;
             
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 80, 1));
             attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.8f, 1.1f);
             attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_BELL_USE, 0.5f, 1.6f);
             
-            victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 35, 0.3, 0.5, 0.3, 0.1);
+            victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 20, 0.3, 0.5, 0.3, 0.08);
             
             Vector launchDirection = victim.getLocation().toVector().subtract(attacker.getLocation().toVector());
             if (launchDirection.lengthSquared() == 0) {
@@ -504,7 +530,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
             final JavaPlugin finalPlugin = this.plugin;
             final LivingEntity finalVictim = victim;
             
-            // Отбрасывание
             finalPlugin.getServer().getScheduler().runTaskLater(finalPlugin, new Runnable() {
                 @Override
                 public void run() {
@@ -515,7 +540,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
             }, 1L);
 
-            // Эффект взрыва во время полета
             finalPlugin.getServer().getScheduler().runTaskTimer(finalPlugin, new Runnable() {
                 int timer = 30;
                 @Override
@@ -539,10 +563,10 @@ public class DiceRollListener implements Listener, CommandExecutor {
             return;
         }
 
-        // Применяем урон и эффекты для не-критических роллов
+        // Применяем урон и эффекты для обычных роллов
         event.setDamage(event.getDamage() * multiplier);
         attacker.getWorld().playSound(attacker.getLocation(), hitSound, 1f, 1.2f);
-        victim.getWorld().spawnParticle(particle, victim.getLocation().add(0, 1, 0), particleCount, 0.4, 0.5, 0.4, 0.05);
+        victim.getWorld().spawnParticle(particle, victim.getLocation().add(0, 1, 0), particleCount, particleOffsetX, particleOffsetY, particleOffsetZ, particleSpeed);
 
         if (roll >= 18) {
             victim.setFireTicks(60);
