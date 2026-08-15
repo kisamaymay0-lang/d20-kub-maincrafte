@@ -72,7 +72,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
     @Override
     public void onDisable() {
-        // Централизованная очистка
         cleanupAll();
         if (this.diceRollListener != null) {
             this.diceRollListener.disable();
@@ -145,7 +144,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         int finalLvl = (lvlLeft == lvlRight && lvlLeft < 3) ? lvlLeft + 1 : Math.max(lvlLeft, lvlRight);
         ItemStack result = left.clone();
 
-        // ====== ИСПРАВЛЕННАЯ ПОЧИНКА ======
+        // Починка с проверкой на Damageable
         if (left.getType() != Material.ENCHANTED_BOOK && result.getItemMeta() instanceof Damageable) {
             Damageable targetDamageMeta = (Damageable) result.getItemMeta();
             int currentDamage = targetDamageMeta.getDamage();
@@ -202,7 +201,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                 }
             }
         } else {
-            // Объединение зачарований для обычных предметов
             ItemMeta resMeta = result.getItemMeta();
             if (resMeta != null) {
                 Map<Enchantment, Integer> enchantsToAdd = new HashMap<>();
@@ -230,7 +228,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             }
         }
 
-        // Добавляем чар "Адаптация" к результату
         ItemMeta meta = result.getItemMeta();
         if (meta == null) return;
 
@@ -271,12 +268,10 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         Player player = (Player) event.getEntity();
         UUID uuid = player.getUniqueId();
 
-        // Проверка кулдауна
         if (cooldownEndTimes.containsKey(uuid) && System.currentTimeMillis() < cooldownEndTimes.get(uuid)) {
             return;
         }
 
-        // Считаем уровень и количество предметов с чаром
         int totalLvl = 0, pieceCount = 0;
         for (ItemStack armor : player.getInventory().getArmorContents()) {
             int lvl = getLvlFromLore(armor);
@@ -294,13 +289,12 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         boolean isSpam = (now - lastHitTime.getOrDefault(uuid, 0L) < 450);
         if (!isSpam) lastHitTime.put(uuid, now);
 
-        // Если адаптация активна
         if (activeAdaptations.containsKey(uuid)) {
             if (type.equals(activeAdaptations.get(uuid))) {
-                // Совпадает - защита
                 spawnAdaptationParticles(player, type);
 
                 if (superAdaptations.getOrDefault(uuid, false)) {
+                    // СУПЕР-АДАПТАЦИЯ: защита 50% (12.5% за предмет)
                     double perPieceSuper = getConfig().getDouble("settings.super-protection-per-piece", 0.125);
                     event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceSuper)));
 
@@ -312,6 +306,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                         activeTimesLeft.put(uuid, newLeft);
                     }
                 } else {
+                    // ОБЫЧНАЯ АДАПТАЦИЯ: защита 30% (7.5% за предмет)
                     double perPieceNormal = getConfig().getDouble("settings.normal-protection-per-piece", 0.075);
                     event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceNormal)));
 
@@ -323,7 +318,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                         activeTimesLeft.put(uuid, newLeft);
                     }
 
-                    // Счетчик для супер-адаптации
                     if (!isSpam) {
                         superDamageCounters.putIfAbsent(uuid, new HashMap<>());
                         int sHits = superDamageCounters.get(uuid).getOrDefault(type, 0) + 1;
@@ -336,17 +330,21 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                     }
                 }
             } else {
-                // НЕ совпадает - штраф (фича!)
-                double penaltyPerPiece = getConfig().getDouble("settings.penalty-per-piece", 0.10);
+                // НЕ СОВПАДАЕТ: штраф (фича!)
+                double penaltyPerPiece;
+                if (superAdaptations.getOrDefault(uuid, false)) {
+                    // Штраф для супер-адаптации: 50% (12.5% за предмет)
+                    penaltyPerPiece = getConfig().getDouble("settings.super-penalty-per-piece", 0.125);
+                } else {
+                    // Штраф для обычной адаптации: 40% (10% за предмет)
+                    penaltyPerPiece = getConfig().getDouble("settings.penalty-per-piece", 0.10);
+                }
                 event.setDamage(event.getDamage() * (1.0 + (pieceCount * penaltyPerPiece)));
-
-                // Показываем, что адаптация не работает
                 player.getWorld().spawnParticle(Particle.SMOKE, player.getLocation().add(0, 1, 0), 5, 0.2, 0.3, 0.2, 0.05);
             }
             return;
         }
 
-        // Если адаптация не активна - накапливаем счетчик
         if (isSpam) return;
 
         double avg = (double) totalLvl / pieceCount;
@@ -383,7 +381,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
     private void activateNormal(Player player, String type) {
         UUID uuid = player.getUniqueId();
-        // Очищаем старые данные
         cleanupPlayerData(uuid, true);
 
         activeAdaptations.put(uuid, type);
@@ -403,7 +400,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
     private void activateSuper(Player player, String type) {
         UUID uuid = player.getUniqueId();
-        // Очищаем старые данные
         cleanupPlayerData(uuid, true);
 
         superAdaptations.put(uuid, true);
@@ -428,13 +424,14 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         bossBar.addPlayer(player);
         activeBossBars.put(uuid, bossBar);
 
-        activeTimesLeft.put(uuid, (double) sec);
-        activeMaxTimes.put(uuid, (double) sec);
+        // 1 секунда = 10 итераций при периоде 2 тика
+        double totalTicks = sec * 10.0;
+        activeTimesLeft.put(uuid, totalTicks);
+        activeMaxTimes.put(uuid, totalTicks);
 
-        // ОПТИМИЗАЦИЯ: таймер теперь обновляется каждые 2 тика вместо 1
         activeTimers.put(uuid, new BukkitRunnable() {
             boolean isCooldownMode = false;
-            double maxTime = sec;
+            double maxTime = totalTicks;
 
             @Override
             public void run() {
@@ -453,14 +450,14 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
                     activeAdaptations.remove(uuid);
                     superAdaptations.remove(uuid);
-                    superDamageCounters.remove(uuid); // Сбрасываем счетчик супер-адаптации
+                    superDamageCounters.remove(uuid);
 
                     int cdSec = wasSuper ? getConfig().getInt("settings.cooldown-super", 4)
                             : getConfig().getInt("settings.cooldown-normal", 2);
                     cooldownEndTimes.put(uuid, System.currentTimeMillis() + (cdSec * 1000L));
 
                     isCooldownMode = true;
-                    maxTime = cdSec;
+                    maxTime = cdSec * 10.0;
                     timeLeft = 0.0;
 
                     bossBar.setTitle(ChatColor.GRAY + "" + ChatColor.BOLD + "ПЕРЕЗАРЯДКА АДАПТАЦИИ");
@@ -474,13 +471,13 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                         return;
                     }
                     bossBar.setProgress(timeLeft / maxTime);
-                    activeTimesLeft.put(uuid, timeLeft + 0.05);
+                    activeTimesLeft.put(uuid, timeLeft + 1.0);
                 } else {
                     bossBar.setProgress(timeLeft / maxTime);
-                    activeTimesLeft.put(uuid, timeLeft - 0.05);
+                    activeTimesLeft.put(uuid, timeLeft - 1.0);
                 }
             }
-        }.runTaskTimer(this, 0L, 2L)); // <-- период 2 тика вместо 1
+        }.runTaskTimer(this, 0L, 2L));
     }
 
     private void cleanupPlayerData(UUID uuid, boolean keepCooldown) {
