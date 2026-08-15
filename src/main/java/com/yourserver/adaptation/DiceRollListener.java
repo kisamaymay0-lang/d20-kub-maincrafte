@@ -455,88 +455,89 @@ public class DiceRollListener implements Listener, CommandExecutor {
         int mainParticleCount;
         double particleOffsetX, particleOffsetY, particleOffsetZ, particleSpeed;
 
-        // СЛАБЫЕ УДАРЫ (2-7) - дым, минимум эффектов
+        // СЛАБЫЕ УДАРЫ (2-7) - дым
         if (roll <= 4) {
             multiplier = 0.40;
             hitSound = Sound.ENTITY_SLIME_ATTACK;
             mainParticle = Particle.ASH;
-            mainParticleCount = 20;
+            mainParticleCount = 25;
             particleOffsetX = 0.5;
             particleOffsetY = 0.5;
             particleOffsetZ = 0.5;
             particleSpeed = 0.04;
             
             // Слабый дым
-            victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 10, 0.3, 0.3, 0.3, 0.02);
+            victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 12, 0.3, 0.3, 0.3, 0.02);
             
         } else if (roll <= 7) {
             multiplier = 0.65;
             hitSound = Sound.ITEM_SHIELD_BLOCK;
             mainParticle = Particle.WHITE_SMOKE;
-            mainParticleCount = 20;
+            mainParticleCount = 25;
             particleOffsetX = 0.5;
             particleOffsetY = 0.5;
             particleOffsetZ = 0.5;
             particleSpeed = 0.04;
             
             // Немного искр
-            victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 8, 0.2, 0.2, 0.2, 0.05);
+            victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 10, 0.2, 0.2, 0.2, 0.05);
             
-        // СРЕДНИЕ УДАРЫ (8-13) - искры + легкий дым
+        // СРЕДНИЕ УДАРЫ (8-13) - искры
         } else if (roll <= 10) {
             multiplier = 0.90;
             hitSound = Sound.ENTITY_PLAYER_ATTACK_WEAK;
             mainParticle = Particle.CRIT;
-            mainParticleCount = 25;
+            mainParticleCount = 30;
             particleOffsetX = 0.4;
             particleOffsetY = 0.4;
             particleOffsetZ = 0.4;
             particleSpeed = 0.1;
             
-            // Легкий дым для среднего удара
+            // Немного дыма для среднего удара
             victim.getWorld().spawnParticle(Particle.WHITE_SMOKE, victim.getLocation().add(0, 1, 0), 8, 0.3, 0.3, 0.3, 0.02);
             
         } else if (roll <= 13) {
             multiplier = 1.30;
             hitSound = Sound.ENTITY_PLAYER_ATTACK_STRONG;
             mainParticle = Particle.CRIT;
-            mainParticleCount = 35;
+            mainParticleCount = 40;
             particleOffsetX = 0.5;
             particleOffsetY = 0.5;
             particleOffsetZ = 0.5;
             particleSpeed = 0.15;
             
-            // Ведьмины искры для среднего удара (доступны в Paper)
-            victim.getWorld().spawnParticle(Particle.SPELL_WITCH, victim.getLocation().add(0, 1, 0), 10, 0.3, 0.3, 0.3, 0.05);
+            // Больше искр для сильного среднего удара
+            victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 15, 0.4, 0.4, 0.4, 0.1);
             
-        // ХОРОШИЕ УДАРЫ (14-16) - много искр + эффекты
+        // ХОРОШИЕ УДАРЫ (14-16) - много искр
         } else if (roll <= 16) {
             multiplier = 1.80;
             hitSound = Sound.BLOCK_ANVIL_PLACE;
             mainParticle = Particle.CRIT;
-            mainParticleCount = 40;
+            mainParticleCount = 50;
             particleOffsetX = 0.5;
             particleOffsetY = 0.5;
             particleOffsetZ = 0.5;
             particleSpeed = 0.2;
             
-            victim.getWorld().spawnParticle(Particle.SPELL_WITCH, victim.getLocation().add(0, 1, 0), 20, 0.4, 0.4, 0.4, 0.08);
+            // Дополнительные искры
+            victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 20, 0.4, 0.4, 0.4, 0.15);
             
-        // СИЛЬНЫЕ УДАРЫ (17-19) - огонь + искры
+        // СИЛЬНЫЕ УДАРЫ (17-19) - огонь
         } else if (roll <= 19) {
             multiplier = 2.50;
             hitSound = Sound.ENTITY_DRAGON_FIREBALL_EXPLODE;
             mainParticle = Particle.FLAME;
-            mainParticleCount = 40;
+            mainParticleCount = 45;
             particleOffsetX = 0.6;
             particleOffsetY = 0.6;
             particleOffsetZ = 0.6;
             particleSpeed = 0.08;
             
-            victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 20, 0.4, 0.4, 0.4, 0.05);
-            victim.getWorld().spawnParticle(Particle.SPELL_WITCH, victim.getLocation().add(0, 1, 0), 25, 0.5, 0.5, 0.5, 0.1);
+            victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 25, 0.4, 0.4, 0.4, 0.05);
+            victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 25, 0.5, 0.5, 0.5, 0.1);
             
-        // КРИТИЧЕСКАЯ УДАЧА (20)
+        // КРИТИЧЕСКАЯ УДАЧА (20) - всё сразу
         } else {
             multiplier = 4.00;
             hitSound = Sound.ENTITY_LIGHTNING_BOLT_THUNDER;
@@ -553,7 +554,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             
             victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 35, 0.6, 0.6, 0.6, 0.08);
             victim.getWorld().spawnParticle(Particle.EXPLOSION_EMITTER, victim.getLocation().add(0, 1, 0), 1, 0.3, 0.3, 0.3, 0);
-            victim.getWorld().spawnParticle(Particle.SPELL_WITCH, victim.getLocation().add(0, 1, 0), 40, 0.7, 0.7, 0.7, 0.15);
+            victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 40, 0.7, 0.7, 0.7, 0.15);
             
             Vector launchDirection = victim.getLocation().toVector().subtract(attacker.getLocation().toVector());
             if (launchDirection.lengthSquared() == 0) {
