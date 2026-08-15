@@ -118,6 +118,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             String strLvl = lvl == 1 ? "I" : lvl == 2 ? "II" : "III";
             List<String> lore = new ArrayList<>();
             lore.add(ChatColor.LIGHT_PURPLE + "Адаптация " + strLvl);
+            lore.add(ChatColor.DARK_GRAY + "Адаптация-специальная");
             meta.setLore(lore);
             meta.setEnchantmentGlintOverride(true);
             book.setItemMeta(meta);
@@ -136,6 +137,40 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
         if (left == null || right == null) return;
 
+        boolean leftIsAdaptation = isAdaptationBook(left);
+        boolean rightIsAdaptation = isAdaptationBook(right);
+        
+        if ((leftIsAdaptation && !rightIsAdaptation) || (!leftIsAdaptation && rightIsAdaptation)) {
+            event.setResult(null);
+            return;
+        }
+        
+        if (leftIsAdaptation && rightIsAdaptation) {
+            int lvlLeft = getLvlFromLore(left);
+            int lvlRight = getLvlFromLore(right);
+            if (lvlLeft == lvlRight && lvlLeft < 3) {
+                int newLvl = lvlLeft + 1;
+                ItemStack result = left.clone();
+                ItemMeta meta = result.getItemMeta();
+                if (meta != null) {
+                    List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
+                    lore.removeIf(l -> l.contains("Адаптация"));
+                    String strLvl = newLvl == 1 ? "I" : newLvl == 2 ? "II" : "III";
+                    lore.add(ChatColor.LIGHT_PURPLE + "Адаптация " + strLvl);
+                    lore.add(ChatColor.DARK_GRAY + "Адаптация-специальная");
+                    meta.setLore(lore);
+                    meta.setEnchantmentGlintOverride(true);
+                    result.setItemMeta(meta);
+                }
+                event.setResult(result);
+                try { anvil.setRepairCost(5); } catch (Exception ignored) {}
+                return;
+            } else {
+                event.setResult(null);
+                return;
+            }
+        }
+
         int lvlLeft = getLvlFromLore(left);
         int lvlRight = getLvlFromLore(right);
 
@@ -144,7 +179,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         int finalLvl = (lvlLeft == lvlRight && lvlLeft < 3) ? lvlLeft + 1 : Math.max(lvlLeft, lvlRight);
         ItemStack result = left.clone();
 
-        // Починка с проверкой на Damageable
         if (left.getType() != Material.ENCHANTED_BOOK && result.getItemMeta() instanceof Damageable) {
             Damageable targetDamageMeta = (Damageable) result.getItemMeta();
             int currentDamage = targetDamageMeta.getDamage();
@@ -180,29 +214,36 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             }
         }
 
-        // Объединение зачарований для книг
         if (result.getType() == Material.ENCHANTED_BOOK && right.getType() == Material.ENCHANTED_BOOK) {
-            if (result.getItemMeta() instanceof EnchantmentStorageMeta && right.getItemMeta() instanceof EnchantmentStorageMeta) {
-                EnchantmentStorageMeta resMeta = (EnchantmentStorageMeta) result.getItemMeta();
-                EnchantmentStorageMeta rightMeta = (EnchantmentStorageMeta) right.getItemMeta();
-                if (resMeta != null && rightMeta != null) {
-                    for (Map.Entry<Enchantment, Integer> entry : rightMeta.getStoredEnchants().entrySet()) {
-                        Enchantment ench = entry.getKey();
-                        int level = entry.getValue();
-                        if (resMeta.hasStoredEnchant(ench)) {
-                            int currentLevel = resMeta.getStoredEnchantLevel(ench);
-                            int finalEnchLevel = (currentLevel == level) ? currentLevel + 1 : Math.max(currentLevel, level);
-                            resMeta.addStoredEnchant(ench, Math.min(ench.getMaxLevel(), finalEnchLevel), true);
-                        } else {
-                            resMeta.addStoredEnchant(ench, level, true);
+            if (!leftIsAdaptation && !rightIsAdaptation) {
+                if (result.getItemMeta() instanceof EnchantmentStorageMeta && right.getItemMeta() instanceof EnchantmentStorageMeta) {
+                    EnchantmentStorageMeta resMeta = (EnchantmentStorageMeta) result.getItemMeta();
+                    EnchantmentStorageMeta rightMeta = (EnchantmentStorageMeta) right.getItemMeta();
+                    if (resMeta != null && rightMeta != null) {
+                        for (Map.Entry<Enchantment, Integer> entry : rightMeta.getStoredEnchants().entrySet()) {
+                            Enchantment ench = entry.getKey();
+                            int level = entry.getValue();
+                            if (resMeta.hasStoredEnchant(ench)) {
+                                int currentLevel = resMeta.getStoredEnchantLevel(ench);
+                                int finalEnchLevel = (currentLevel == level) ? currentLevel + 1 : Math.max(currentLevel, level);
+                                resMeta.addStoredEnchant(ench, Math.min(ench.getMaxLevel(), finalEnchLevel), true);
+                            } else {
+                                resMeta.addStoredEnchant(ench, level, true);
+                            }
                         }
+                        result.setItemMeta(resMeta);
                     }
-                    result.setItemMeta(resMeta);
                 }
             }
         } else {
             ItemMeta resMeta = result.getItemMeta();
             if (resMeta != null) {
+                boolean isArmor = isArmorItem(left.getType());
+                if (!isArmor && (lvlLeft > 0 || lvlRight > 0)) {
+                    event.setResult(null);
+                    return;
+                }
+                
                 Map<Enchantment, Integer> enchantsToAdd = new HashMap<>();
                 if (right.getType() == Material.ENCHANTED_BOOK) {
                     if (right.getItemMeta() instanceof EnchantmentStorageMeta) {
@@ -231,12 +272,19 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         ItemMeta meta = result.getItemMeta();
         if (meta == null) return;
 
-        List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
-        lore.removeIf(l -> l.contains("Адаптация"));
+        boolean isArmor = isArmorItem(result.getType());
+        if (!isArmor && finalLvl > 0) {
+            event.setResult(null);
+            return;
+        }
 
-        if (finalLvl > 0) {
+        List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
+        lore.removeIf(l -> l.contains("Адаптация") || l.contains("Адаптация-специальная"));
+
+        if (finalLvl > 0 && isArmor) {
             String strLvl = finalLvl == 1 ? "I" : finalLvl == 2 ? "II" : "III";
             lore.add(ChatColor.LIGHT_PURPLE + "Адаптация " + strLvl);
+            lore.add(ChatColor.DARK_GRAY + "Адаптация-специальная");
             meta.setLore(lore);
         }
 
@@ -250,6 +298,20 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         try {
             anvil.setRepairCost(5);
         } catch (Exception ignored) {}
+    }
+
+    private boolean isAdaptationBook(ItemStack item) {
+        if (item == null || !item.hasItemMeta() || !item.getItemMeta().hasLore()) return false;
+        for (String line : item.getItemMeta().getLore()) {
+            if (line.contains("Адаптация-специальная")) return true;
+        }
+        return false;
+    }
+
+    private boolean isArmorItem(Material material) {
+        String name = material.name();
+        return name.contains("HELMET") || name.contains("CHESTPLATE") || 
+               name.contains("LEGGINGS") || name.contains("BOOTS");
     }
 
     private int getLvlFromLore(ItemStack item) {
@@ -268,6 +330,37 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         Player player = (Player) event.getEntity();
         UUID uuid = player.getUniqueId();
 
+        // ===== НОВАЯ ЛОГИКА: проверяем, можно ли считать удары =====
+        boolean canCountHits = true;
+        
+        // 1. Если активна супер-адаптация — удары НЕ считаются
+        if (superAdaptations.containsKey(uuid) && superAdaptations.get(uuid)) {
+            canCountHits = false;
+        }
+        
+        // 2. Если идет перезарядка — удары НЕ считаются
+        if (cooldownEndTimes.containsKey(uuid) && System.currentTimeMillis() < cooldownEndTimes.get(uuid)) {
+            canCountHits = false;
+        }
+        
+        // 3. Если активна адаптация, но она в процессе (активна) — удары НЕ считаются
+        //    (мы не хотим набивать новую адаптацию пока текущая активна)
+        if (activeAdaptations.containsKey(uuid)) {
+            canCountHits = false;
+        }
+
+        // Если удары нельзя считать — просто применяем защиту/штраф и выходим
+        if (!canCountHits) {
+            // Применяем защиту/штраф если адаптация активна
+            if (activeAdaptations.containsKey(uuid)) {
+                applyAdaptationEffects(player, event, uuid);
+            }
+            return;
+        }
+
+        // ===== ДАЛЬШЕ ТОЛЬКО ЕСЛИ МОЖНО СЧИТАТЬ УДАРЫ =====
+        
+        // Проверяем кулдаун (уже проверили выше, но оставляем для страховки)
         if (cooldownEndTimes.containsKey(uuid) && System.currentTimeMillis() < cooldownEndTimes.get(uuid)) {
             return;
         }
@@ -289,64 +382,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         boolean isSpam = (now - lastHitTime.getOrDefault(uuid, 0L) < 450);
         if (!isSpam) lastHitTime.put(uuid, now);
 
-        if (activeAdaptations.containsKey(uuid)) {
-            if (type.equals(activeAdaptations.get(uuid))) {
-                spawnAdaptationParticles(player, type);
-
-                if (superAdaptations.getOrDefault(uuid, false)) {
-                    // СУПЕР-АДАПТАЦИЯ: защита 50% (12.5% за предмет)
-                    double perPieceSuper = getConfig().getDouble("settings.super-protection-per-piece", 0.125);
-                    event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceSuper)));
-
-                    if (!isSpam && activeTimesLeft.containsKey(uuid)) {
-                        double currentLeft = activeTimesLeft.get(uuid);
-                        double maxTime = activeMaxTimes.getOrDefault(uuid, 4.0);
-                        double bonus = getConfig().getDouble("settings.hit-bonus-super", 0.4);
-                        double newLeft = Math.min(maxTime, currentLeft + bonus);
-                        activeTimesLeft.put(uuid, newLeft);
-                    }
-                } else {
-                    // ОБЫЧНАЯ АДАПТАЦИЯ: защита 30% (7.5% за предмет)
-                    double perPieceNormal = getConfig().getDouble("settings.normal-protection-per-piece", 0.075);
-                    event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceNormal)));
-
-                    if (!isSpam && activeTimesLeft.containsKey(uuid)) {
-                        double currentLeft = activeTimesLeft.get(uuid);
-                        double maxTime = activeMaxTimes.getOrDefault(uuid, 10.0);
-                        double bonus = getConfig().getDouble("settings.hit-bonus-normal", 0.2);
-                        double newLeft = Math.min(maxTime, currentLeft + bonus);
-                        activeTimesLeft.put(uuid, newLeft);
-                    }
-
-                    if (!isSpam) {
-                        superDamageCounters.putIfAbsent(uuid, new HashMap<>());
-                        int sHits = superDamageCounters.get(uuid).getOrDefault(type, 0) + 1;
-                        superDamageCounters.get(uuid).put(type, sHits);
-
-                        int requiredSuperHits = getConfig().getInt("settings.required-super-hits", 8);
-                        if (sHits >= requiredSuperHits) {
-                            activateSuper(player, type);
-                        }
-                    }
-                }
-            } else {
-                // НЕ СОВПАДАЕТ: штраф (фича!)
-                double penaltyPerPiece;
-                if (superAdaptations.getOrDefault(uuid, false)) {
-                    // Штраф для супер-адаптации: 50% (12.5% за предмет)
-                    penaltyPerPiece = getConfig().getDouble("settings.super-penalty-per-piece", 0.125);
-                } else {
-                    // Штраф для обычной адаптации: 40% (10% за предмет)
-                    penaltyPerPiece = getConfig().getDouble("settings.penalty-per-piece", 0.10);
-                }
-                event.setDamage(event.getDamage() * (1.0 + (pieceCount * penaltyPerPiece)));
-                player.getWorld().spawnParticle(Particle.SMOKE, player.getLocation().add(0, 1, 0), 5, 0.2, 0.3, 0.2, 0.05);
-            }
-            return;
-        }
-
         if (isSpam) return;
 
+        // Считаем удары для активации адаптации
         double avg = (double) totalLvl / pieceCount;
         int req = (avg > 2.0) ? getConfig().getInt("settings.required-hits.lvl3", 6)
                 : (avg > 1.0) ? getConfig().getInt("settings.required-hits.lvl2", 8)
@@ -358,6 +396,73 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
         if (hits >= req) {
             activateNormal(player, type);
+        }
+    }
+
+    // ===== ВЫНЕСЕННАЯ ЛОГИКА ПРИМЕНЕНИЯ ЭФФЕКТОВ АДАПТАЦИИ =====
+    private void applyAdaptationEffects(Player player, EntityDamageEvent event, UUID uuid) {
+        if (!activeAdaptations.containsKey(uuid)) return;
+        
+        String type = getDamageType(event.getCause());
+        if (type.equals("IGNORE")) return;
+        
+        int pieceCount = 0;
+        for (ItemStack armor : player.getInventory().getArmorContents()) {
+            if (getLvlFromLore(armor) > 0) pieceCount++;
+        }
+        if (pieceCount == 0) return;
+
+        if (type.equals(activeAdaptations.get(uuid))) {
+            spawnAdaptationParticles(player, type);
+
+            if (superAdaptations.getOrDefault(uuid, false)) {
+                double perPieceSuper = getConfig().getDouble("settings.super-protection-per-piece", 0.125);
+                event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceSuper)));
+
+                // Добавление времени при ударе (работает всегда, даже если удары не считаются)
+                if (activeTimesLeft.containsKey(uuid)) {
+                    double currentLeft = activeTimesLeft.get(uuid);
+                    double maxTime = activeMaxTimes.getOrDefault(uuid, 40.0);
+                    double bonus = getConfig().getDouble("settings.hit-bonus-super", 0.4);
+                    double newLeft = Math.min(maxTime, currentLeft + (bonus * 10.0));
+                    activeTimesLeft.put(uuid, newLeft);
+                }
+            } else {
+                double perPieceNormal = getConfig().getDouble("settings.normal-protection-per-piece", 0.075);
+                event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceNormal)));
+
+                if (activeTimesLeft.containsKey(uuid)) {
+                    double currentLeft = activeTimesLeft.get(uuid);
+                    double maxTime = activeMaxTimes.getOrDefault(uuid, 100.0);
+                    double bonus = getConfig().getDouble("settings.hit-bonus-normal", 0.2);
+                    double newLeft = Math.min(maxTime, currentLeft + (bonus * 10.0));
+                    activeTimesLeft.put(uuid, newLeft);
+                }
+
+                // Счетчик для супер-адаптации (накапливается ТОЛЬКО когда можно считать удары)
+                // Сейчас этот код не выполняется, потому что мы вышли из canCountHits,
+                // но оставляем для страховки
+                if (!superAdaptations.getOrDefault(uuid, false)) {
+                    superDamageCounters.putIfAbsent(uuid, new HashMap<>());
+                    int sHits = superDamageCounters.get(uuid).getOrDefault(type, 0) + 1;
+                    superDamageCounters.get(uuid).put(type, sHits);
+
+                    int requiredSuperHits = getConfig().getInt("settings.required-super-hits", 8);
+                    if (sHits >= requiredSuperHits) {
+                        activateSuper(player, type);
+                    }
+                }
+            }
+        } else {
+            // Штраф
+            double penaltyPerPiece;
+            if (superAdaptations.getOrDefault(uuid, false)) {
+                penaltyPerPiece = getConfig().getDouble("settings.super-penalty-per-piece", 0.125);
+            } else {
+                penaltyPerPiece = getConfig().getDouble("settings.penalty-per-piece", 0.10);
+            }
+            event.setDamage(event.getDamage() * (1.0 + (pieceCount * penaltyPerPiece)));
+            player.getWorld().spawnParticle(Particle.SMOKE, player.getLocation().add(0, 1, 0), 5, 0.2, 0.3, 0.2, 0.05);
         }
     }
 
@@ -424,7 +529,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         bossBar.addPlayer(player);
         activeBossBars.put(uuid, bossBar);
 
-        // 1 секунда = 10 итераций при периоде 2 тика
         double totalTicks = sec * 10.0;
         activeTimesLeft.put(uuid, totalTicks);
         activeMaxTimes.put(uuid, totalTicks);
@@ -451,6 +555,10 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                     activeAdaptations.remove(uuid);
                     superAdaptations.remove(uuid);
                     superDamageCounters.remove(uuid);
+                    
+                    // ===== ВАЖНО: СБРАСЫВАЕМ СЧЕТЧИКИ УДАРОВ =====
+                    damageCounters.remove(uuid);
+                    superDamageCounters.remove(uuid);
 
                     int cdSec = wasSuper ? getConfig().getInt("settings.cooldown-super", 4)
                             : getConfig().getInt("settings.cooldown-normal", 2);
@@ -466,6 +574,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
                 if (isCooldownMode) {
                     if (timeLeft >= maxTime) {
+                        // ===== ВАЖНО: ПО ОКОНЧАНИЮ ПЕРЕЗАРЯДКИ СБРАСЫВАЕМ ВСЕ СЧЕТЧИКИ =====
+                        damageCounters.remove(uuid);
+                        superDamageCounters.remove(uuid);
                         cleanupPlayerData(uuid, false);
                         cancel();
                         return;
@@ -490,6 +601,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         activeAdaptations.remove(uuid);
         superAdaptations.remove(uuid);
         superDamageCounters.remove(uuid);
+        // damageCounters НЕ удаляем здесь, чтобы не сбрасывать прогресс при обычной очистке
 
         if (activeBossBars.containsKey(uuid)) {
             activeBossBars.get(uuid).removeAll();
