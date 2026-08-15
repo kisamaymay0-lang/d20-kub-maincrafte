@@ -132,6 +132,43 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         return true;
     }
 
+    // ===== ПУБЛИЧНЫЙ МЕТОД ДЛЯ ЛОМКИ АДАПТАЦИИ (ВЫЗЫВАЕТСЯ ИЗ D20) =====
+    public void breakAdaptation(Player player) {
+        if (player == null) return;
+        UUID uuid = player.getUniqueId();
+
+        // Проверяем, есть ли у игрока активная адаптация
+        if (!activeAdaptations.containsKey(uuid)) return;
+
+        // Останавливаем таймер
+        if (activeTimers.containsKey(uuid)) {
+            activeTimers.get(uuid).cancel();
+            activeTimers.remove(uuid);
+        }
+
+        // Убираем босс-бар
+        if (activeBossBars.containsKey(uuid)) {
+            activeBossBars.get(uuid).removeAll();
+            activeBossBars.remove(uuid);
+        }
+
+        // Удаляем адаптацию (любую)
+        activeAdaptations.remove(uuid);
+        superAdaptations.remove(uuid);
+        superDamageCounters.remove(uuid);
+        damageCounters.remove(uuid);
+
+        // Звук стекла (как при окончании адаптации)
+        player.getWorld().playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 1.0f, 0.8f);
+        player.getWorld().spawnParticle(Particle.SMOKE, player.getLocation().add(0, 1, 0), 10, 0.2, 0.3, 0.2, 0.05);
+
+        // Сообщение игроку (без указания типа)
+        player.sendMessage(ChatColor.RED + "Бафф чара \"Адаптация\" был разбит критическим ударом врага!");
+
+        // Начинаем перезарядку (4 секунды, как у супер-адаптации)
+        cooldownEndTimes.put(uuid, System.currentTimeMillis() + 4000L);
+    }
+
     // ===== ПРОВЕРКА НАЛИЧИЯ ЧАРА В ЛОРЕ =====
     private boolean hasAdaptationLore(ItemStack item) {
         if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) return false;
@@ -178,7 +215,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         if (meta == null) return;
 
         List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
-        // Удаляем старые записи об адаптации
         lore.removeIf(line -> ChatColor.stripColor(line).trim().startsWith("Адаптация"));
 
         String strLvl = level == 1 ? "I" : level == 2 ? "II" : "III";
@@ -203,38 +239,33 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
         if (left == null || right == null) return;
 
-        // ===== ГЛАВНАЯ ПРОВЕРКА: нельзя объединять адаптацию и бросок =====
         boolean leftHasAdaptation = hasAdaptationLore(left);
         boolean rightHasAdaptation = hasAdaptationLore(right);
         boolean leftHasD20 = hasD20Lore(left);
         boolean rightHasD20 = hasD20Lore(right);
 
-        // Если на одном предмете адаптация, а на другом бросок — блокируем
+        // ===== ГЛАВНАЯ ПРОВЕРКА: нельзя объединять адаптацию и бросок =====
         if ((leftHasAdaptation && rightHasD20) || (leftHasD20 && rightHasAdaptation)) {
             event.setResult(null);
             return;
         }
 
-        // Если чара нет ни на одном предмете — выходим
+        // Если чара адаптации нет — выходим
         if (!leftHasAdaptation && !rightHasAdaptation) return;
 
-        // Проверяем, что предмет слева - броня
         boolean isArmor = isArmorItem(left.getType());
         boolean isBook = left.getType() == Material.ENCHANTED_BOOK;
 
-        // Если слева не броня и не книга - блокируем
         if (!isArmor && !isBook) {
             event.setResult(null);
             return;
         }
 
-        // Создаем результат
         ItemStack result = event.getResult();
         if (result == null || result.getType() == Material.AIR) {
             result = left.clone();
         }
 
-        // Если правая книга с адаптацией, а слева броня - накладываем чар
         if (right.getType() == Material.ENCHANTED_BOOK && rightHasAdaptation && isArmor) {
             int bookLevel = getAdaptationLevel(right);
             int currentLevel = getAdaptationLevel(left);
@@ -258,7 +289,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             }
         }
 
-        // Если левая книга с адаптацией, а правая книга с адаптацией - повышаем уровень
         if (left.getType() == Material.ENCHANTED_BOOK && right.getType() == Material.ENCHANTED_BOOK) {
             if (leftHasAdaptation && rightHasAdaptation) {
                 int lvlLeft = getAdaptationLevel(left);
@@ -278,11 +308,10 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             }
         }
 
-        // Блокируем все остальные комбинации
         event.setResult(null);
     }
 
-    // ===== ОСТАЛЬНАЯ ЛОГИКА ПЛАГИНА (без изменений) =====
+    // ===== ОСТАЛЬНАЯ ЛОГИКА ПЛАГИНА =====
     @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerDamage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player)) return;
