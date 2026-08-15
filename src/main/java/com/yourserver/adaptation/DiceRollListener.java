@@ -419,8 +419,11 @@ public class DiceRollListener implements Listener, CommandExecutor {
     }
 
     private void applyDiceEffects(Player attacker, EntityDamageByEntityEvent event, int roll) {
-        if (!(event.getEntity() instanceof LivingEntity)) return;
-        final LivingEntity victim = (LivingEntity) event.getEntity();
+        if (!(event.getEntity() instanceof LivingEntity)) {
+            return;
+        }
+        
+        LivingEntity victim = (LivingEntity) event.getEntity();
 
         if (roll == 1) {
             event.setCancelled(true);
@@ -489,11 +492,30 @@ public class DiceRollListener implements Listener, CommandExecutor {
             
             final Vector finalVector = new Vector(launchDirection.getX(), launchDirection.getY(), launchDirection.getZ());
             
-            // Вызываем отдельный метод для отбрасывания
-            scheduleKnockback(victim, finalVector);
-            
-            // Вызываем отдельный метод для эффекта взрыва
-            scheduleExplosionEffect(victim);
+            // Создаем задачу для отбрасывания
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    if (!victim.isDead()) {
+                        victim.setVelocity(new Vector(0, 0, 0));
+                        victim.setVelocity(finalVector);
+                    }
+                }
+            }.runTaskLater(plugin, 1L);
+
+            // Создаем задачу для эффекта взрыва
+            new BukkitRunnable() {
+                int timer = 30;
+                @Override
+                public void run() {
+                    if (victim.isDead() || timer <= 0 || victim.isOnGround()) {
+                        this.cancel();
+                        return;
+                    }
+                    victim.getWorld().spawnParticle(Particle.EXPLOSION, victim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
+                    timer -= 2;
+                }
+            }.runTaskTimer(plugin, 2L, 2L);
 
             attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
             
@@ -513,35 +535,6 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (roll >= 18) {
             victim.setFireTicks(60);
         }
-    }
-    
-    // Отдельный метод для отбрасывания
-    private void scheduleKnockback(final LivingEntity victim, final Vector finalVector) {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (!victim.isDead()) {
-                    victim.setVelocity(new Vector(0, 0, 0));
-                    victim.setVelocity(finalVector);
-                }
-            }
-        }.runTaskLater(plugin, 1L);
-    }
-    
-    // Отдельный метод для эффекта взрыва
-    private void scheduleExplosionEffect(final LivingEntity victim) {
-        new BukkitRunnable() {
-            int timer = 30;
-            @Override
-            public void run() {
-                if (victim.isDead() || timer <= 0 || victim.isOnGround()) {
-                    this.cancel();
-                    return;
-                }
-                victim.getWorld().spawnParticle(Particle.EXPLOSION, victim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
-                timer -= 2;
-            }
-        }.runTaskTimer(plugin, 2L, 2L);
     }
 
     private boolean hasD20Lore(ItemStack item) {
