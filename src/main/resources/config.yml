@@ -20,8 +20,8 @@ settings:
   duration-super: 4
 
   # ===== КУЛДАУН (в секундах) =====
-  cooldown-normal: 2
-  cooldown-super: 4
+  cooldown-normal: 4
+  cooldown-super: 8
 
   # ===== ТРЕБОВАНИЯ ДЛЯ АКТИВАЦИИ =====
   required-hits:
