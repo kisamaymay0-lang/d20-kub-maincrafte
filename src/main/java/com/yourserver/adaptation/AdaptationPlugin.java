@@ -53,8 +53,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
     private final Particle.DustOptions rangedDust = new Particle.DustOptions(Color.fromRGB(0, 255, 0), 1.2f);
     private final Particle.DustOptions magicDust = new Particle.DustOptions(Color.fromRGB(200, 0, 255), 1.2f);
 
-    // Константа для опознавания чара в lore
+    // Константы для опознавания чаров в lore
     private final String ADAPTATION_LORE = "§dАдаптация";
+    private final String D20_LORE = "§dБросок I";
 
     @Override
     public void onEnable() {
@@ -131,93 +132,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         return true;
     }
 
-    // ===== ПРОСТАЯ И НАДЁЖНАЯ СИСТЕМА НАКОВАЛЬНИ (как у D20) =====
-    @EventHandler(priority = EventPriority.HIGHEST)
-    public void onAnvilPrepare(PrepareAnvilEvent event) {
-        AnvilInventory inv = event.getInventory();
-        ItemStack left = inv.getItem(0);
-        ItemStack right = inv.getItem(1);
-
-        if (left == null || right == null) return;
-
-        // Проверяем, есть ли чар "Адаптация" на левом или правом предмете
-        boolean leftHasAdaptation = hasAdaptationLore(left);
-        boolean rightHasAdaptation = hasAdaptationLore(right);
-
-        // Если чара нет ни на одном предмете - выходим
-        if (!leftHasAdaptation && !rightHasAdaptation) return;
-
-        // Проверяем, что предмет слева - броня
-        boolean isArmor = isArmorItem(left.getType());
-        boolean isBook = left.getType() == Material.ENCHANTED_BOOK;
-
-        // Если слева не броня и не книга - блокируем
-        if (!isArmor && !isBook) {
-            event.setResult(null);
-            return;
-        }
-
-        // Создаем результат
-        ItemStack result = event.getResult();
-        if (result == null || result.getType() == Material.AIR) {
-            result = left.clone();
-        }
-
-        // Если правая книга с адаптацией, а слева броня - накладываем чар
-        if (right.getType() == Material.ENCHANTED_BOOK && rightHasAdaptation && isArmor) {
-            // Получаем уровень адаптации с книги
-            int bookLevel = getAdaptationLevel(right);
-            // Проверяем, есть ли уже адаптация на броне
-            int currentLevel = getAdaptationLevel(left);
-
-            // Если на броне уже есть адаптация, то повышаем уровень (если можно)
-            if (currentLevel > 0) {
-                if (currentLevel == bookLevel && currentLevel < 3) {
-                    // Повышаем уровень
-                    int newLevel = currentLevel + 1;
-                    addAdaptationToItem(result, newLevel);
-                    event.setResult(result);
-                    try { inv.setRepairCost(5); } catch (Exception ignored) {}
-                    return;
-                } else {
-                    // Нельзя объединять разные уровни или выше 3
-                    event.setResult(null);
-                    return;
-                }
-            } else {
-                // Накладываем чар с книги на броню
-                addAdaptationToItem(result, bookLevel);
-                event.setResult(result);
-                try { inv.setRepairCost(5); } catch (Exception ignored) {}
-                return;
-            }
-        }
-
-        // Если левая книга с адаптацией, а правая книга с адаптацией - повышаем уровень
-        if (left.getType() == Material.ENCHANTED_BOOK && right.getType() == Material.ENCHANTED_BOOK) {
-            if (leftHasAdaptation && rightHasAdaptation) {
-                int lvlLeft = getAdaptationLevel(left);
-                int lvlRight = getAdaptationLevel(right);
-
-                if (lvlLeft == lvlRight && lvlLeft < 3) {
-                    int newLevel = lvlLeft + 1;
-                    ItemStack newBook = left.clone();
-                    addAdaptationToItem(newBook, newLevel);
-                    event.setResult(newBook);
-                    try { inv.setRepairCost(5); } catch (Exception ignored) {}
-                    return;
-                } else {
-                    event.setResult(null);
-                    return;
-                }
-            }
-        }
-
-        // Блокируем все остальные комбинации (например, адаптация + другой чар)
-        event.setResult(null);
-    }
-
-    // ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ РАБОТЫ С ЛОРЕ =====
+    // ===== ПРОВЕРКА НАЛИЧИЯ ЧАРА В ЛОРЕ =====
     private boolean hasAdaptationLore(ItemStack item) {
         if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) return false;
         ItemMeta meta = item.getItemMeta();
@@ -226,6 +141,20 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         for (String line : meta.getLore()) {
             String cleanLine = ChatColor.stripColor(line).trim();
             if (cleanLine.startsWith("Адаптация")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasD20Lore(ItemStack item) {
+        if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) return false;
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null || !meta.hasLore()) return false;
+
+        for (String line : meta.getLore()) {
+            String cleanLine = ChatColor.stripColor(line).trim();
+            if (cleanLine.equals("Бросок I")) {
                 return true;
             }
         }
@@ -265,6 +194,94 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                name.contains("LEGGINGS") || name.contains("BOOTS");
     }
 
+    // ===== НАКОВАЛЬНЯ С ЗАПРЕТОМ ОБЪЕДИНЕНИЯ АДАПТАЦИИ И БРОСКА =====
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onAnvilPrepare(PrepareAnvilEvent event) {
+        AnvilInventory inv = event.getInventory();
+        ItemStack left = inv.getItem(0);
+        ItemStack right = inv.getItem(1);
+
+        if (left == null || right == null) return;
+
+        // ===== ГЛАВНАЯ ПРОВЕРКА: нельзя объединять адаптацию и бросок =====
+        boolean leftHasAdaptation = hasAdaptationLore(left);
+        boolean rightHasAdaptation = hasAdaptationLore(right);
+        boolean leftHasD20 = hasD20Lore(left);
+        boolean rightHasD20 = hasD20Lore(right);
+
+        // Если на одном предмете адаптация, а на другом бросок — блокируем
+        if ((leftHasAdaptation && rightHasD20) || (leftHasD20 && rightHasAdaptation)) {
+            event.setResult(null);
+            return;
+        }
+
+        // Если чара нет ни на одном предмете — выходим
+        if (!leftHasAdaptation && !rightHasAdaptation) return;
+
+        // Проверяем, что предмет слева - броня
+        boolean isArmor = isArmorItem(left.getType());
+        boolean isBook = left.getType() == Material.ENCHANTED_BOOK;
+
+        // Если слева не броня и не книга - блокируем
+        if (!isArmor && !isBook) {
+            event.setResult(null);
+            return;
+        }
+
+        // Создаем результат
+        ItemStack result = event.getResult();
+        if (result == null || result.getType() == Material.AIR) {
+            result = left.clone();
+        }
+
+        // Если правая книга с адаптацией, а слева броня - накладываем чар
+        if (right.getType() == Material.ENCHANTED_BOOK && rightHasAdaptation && isArmor) {
+            int bookLevel = getAdaptationLevel(right);
+            int currentLevel = getAdaptationLevel(left);
+
+            if (currentLevel > 0) {
+                if (currentLevel == bookLevel && currentLevel < 3) {
+                    int newLevel = currentLevel + 1;
+                    addAdaptationToItem(result, newLevel);
+                    event.setResult(result);
+                    try { inv.setRepairCost(5); } catch (Exception ignored) {}
+                    return;
+                } else {
+                    event.setResult(null);
+                    return;
+                }
+            } else {
+                addAdaptationToItem(result, bookLevel);
+                event.setResult(result);
+                try { inv.setRepairCost(5); } catch (Exception ignored) {}
+                return;
+            }
+        }
+
+        // Если левая книга с адаптацией, а правая книга с адаптацией - повышаем уровень
+        if (left.getType() == Material.ENCHANTED_BOOK && right.getType() == Material.ENCHANTED_BOOK) {
+            if (leftHasAdaptation && rightHasAdaptation) {
+                int lvlLeft = getAdaptationLevel(left);
+                int lvlRight = getAdaptationLevel(right);
+
+                if (lvlLeft == lvlRight && lvlLeft < 3) {
+                    int newLevel = lvlLeft + 1;
+                    ItemStack newBook = left.clone();
+                    addAdaptationToItem(newBook, newLevel);
+                    event.setResult(newBook);
+                    try { inv.setRepairCost(5); } catch (Exception ignored) {}
+                    return;
+                } else {
+                    event.setResult(null);
+                    return;
+                }
+            }
+        }
+
+        // Блокируем все остальные комбинации
+        event.setResult(null);
+    }
+
     // ===== ОСТАЛЬНАЯ ЛОГИКА ПЛАГИНА (без изменений) =====
     @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerDamage(EntityDamageEvent event) {
@@ -272,7 +289,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         Player player = (Player) event.getEntity();
         UUID uuid = player.getUniqueId();
 
-        // Проверка: можно ли считать удары
         boolean canCountHits = true;
 
         if (superAdaptations.containsKey(uuid) && superAdaptations.get(uuid)) {
@@ -287,17 +303,14 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             canCountHits = false;
         }
 
-        // Применяем эффекты адаптации (если активна)
         if (activeAdaptations.containsKey(uuid)) {
             applyAdaptationEffects(player, event, uuid);
         }
 
-        // Если нельзя считать удары - выходим
         if (!canCountHits) {
             return;
         }
 
-        // Считаем удары для активации адаптации
         int totalLvl = 0, pieceCount = 0;
         for (ItemStack armor : player.getInventory().getArmorContents()) {
             int lvl = getAdaptationLevel(armor);
@@ -369,7 +382,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                     activeTimesLeft.put(uuid, newLeft);
                 }
 
-                // Счетчик для супер-адаптации
                 superDamageCounters.putIfAbsent(uuid, new HashMap<>());
                 int sHits = superDamageCounters.get(uuid).getOrDefault(type, 0) + 1;
                 superDamageCounters.get(uuid).put(type, sHits);
