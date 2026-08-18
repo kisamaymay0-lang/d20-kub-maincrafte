@@ -28,7 +28,7 @@ import java.util.*;
 public class FlaskListener implements Listener {
 
     private final JavaPlugin plugin;
-    private final Map<UUID, FlaskData> activeFlasks = new HashMap<>(); // UUID игрока -> данные о флаконе
+    private final Map<UUID, FlaskData> activeFlasks = new HashMap<>();
     private final Map<UUID, BukkitTask> updateTasks = new HashMap<>();
 
     private final int FLASK_WATER_MODEL = 1001;
@@ -40,8 +40,8 @@ public class FlaskListener implements Listener {
 
     private static class FlaskData {
         String type;
-        int duration; // в секундах
-        int slot; // слот меча
+        int duration;
+        int slot;
 
         FlaskData(String type, int duration, int slot) {
             this.type = type;
@@ -138,7 +138,6 @@ public class FlaskListener implements Listener {
         event.setCancelled(true);
 
         if (flaskType.equals("water")) {
-            // Смываем эффект
             if (!hasFlaskEffect(mainHand)) {
                 player.sendMessage(ChatColor.RED + "На этом мече нет эффекта флакона!");
                 return;
@@ -149,7 +148,6 @@ public class FlaskListener implements Listener {
                 player.getInventory().setItemInOffHand(null);
             }
         } else if (flaskType.equals("poison")) {
-            // Наносим эффект
             if (hasFlaskEffect(mainHand)) {
                 player.sendMessage(ChatColor.RED + "На этом мече уже есть эффект флакона!");
                 return;
@@ -183,7 +181,6 @@ public class FlaskListener implements Listener {
         int slot = player.getInventory().getHeldItemSlot();
         UUID uuid = player.getUniqueId();
         
-        // Очищаем старые данные
         if (activeFlasks.containsKey(uuid)) {
             activeFlasks.remove(uuid);
             if (updateTasks.containsKey(uuid)) {
@@ -201,7 +198,6 @@ public class FlaskListener implements Listener {
 
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f);
         player.getWorld().spawnParticle(Particle.CRIT, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
-        // Сообщение убрано
     }
 
     private void removeFlaskFromSword(Player player) {
@@ -232,7 +228,6 @@ public class FlaskListener implements Listener {
 
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_GENERIC_DRINK, 1f, 1f);
         player.getWorld().spawnParticle(Particle.SMOKE, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
-        // Сообщение убрано
     }
 
     private void startUpdateTask(Player player) {
@@ -256,10 +251,8 @@ public class FlaskListener implements Listener {
 
                 data.duration--;
 
-                // Обновляем лор на мече (даже если он в другом слоте)
                 ItemStack sword = p.getInventory().getItem(data.slot);
                 if (sword == null || !isSword(sword)) {
-                    // Меч пропал - удаляем эффект
                     activeFlasks.remove(uuid);
                     this.cancel();
                     updateTasks.remove(uuid);
@@ -288,7 +281,6 @@ public class FlaskListener implements Listener {
                 }
                 
                 if (!found) {
-                    // Лор пропал - удаляем эффект
                     activeFlasks.remove(uuid);
                     this.cancel();
                     updateTasks.remove(uuid);
@@ -299,7 +291,6 @@ public class FlaskListener implements Listener {
                 sword.setItemMeta(meta);
 
                 if (data.duration <= 0) {
-                    // Эффект закончился
                     lore.removeIf(line -> line.contains("Отравление I"));
                     meta.setLore(lore);
                     sword.setItemMeta(meta);
@@ -313,7 +304,7 @@ public class FlaskListener implements Listener {
                     updateTasks.remove(uuid);
                 }
             }
-        }.runTaskTimer(plugin, 0L, 20L)); // Каждую секунду
+        }.runTaskTimer(plugin, 0L, 20L));
     }
 
     @EventHandler(priority = EventPriority.HIGH)
@@ -325,19 +316,15 @@ public class FlaskListener implements Listener {
         LivingEntity victim = (LivingEntity) event.getEntity();
         UUID uuid = player.getUniqueId();
 
-        // Проверяем, есть ли активный флакон у игрока
         if (!activeFlasks.containsKey(uuid)) return;
         
         FlaskData data = activeFlasks.get(uuid);
         if (!data.type.equals("poison")) return;
 
-        // Проверяем, что бьем мечом
         ItemStack hand = player.getInventory().getItemInMainHand();
         if (!isSword(hand)) return;
         
-        // Проверяем, что меч имеет эффект флакона
         if (!hasFlaskEffect(hand)) {
-            // Если эффекта нет в лоре, но в памяти есть - удаляем
             activeFlasks.remove(uuid);
             if (updateTasks.containsKey(uuid)) {
                 updateTasks.get(uuid).cancel();
@@ -346,18 +333,17 @@ public class FlaskListener implements Listener {
             return;
         }
 
-        // Накладываем отравление на 5 секунд
-        victim.addPotionEffect(new PotionEffect(PotionEffectType.POISON, 100, 0)); // 5 секунд = 100 тиков
+        // Накладываем отравление на 5 секунд (100 тиков)
+        victim.addPotionEffect(new PotionEffect(PotionEffectType.POISON, 100, 0));
         
-        // Эффекты удара
+        // Эффекты удара (ИСПРАВЛЕНО: убран SPELL_WITCH)
         victim.getWorld().playSound(victim.getLocation(), Sound.ENTITY_PLAYER_ATTACK_STRONG, 0.8f, 1.2f);
         victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.3, 0.3, 0.1);
-        victim.getWorld().spawnParticle(Particle.SPELL_WITCH, victim.getLocation().add(0, 1, 0), 10, 0.3, 0.3, 0.3, 0.1);
+        victim.getWorld().spawnParticle(Particle.SPELL_MOB, victim.getLocation().add(0, 1, 0), 10, 0.3, 0.3, 0.3, 0.1);
     }
 
     @EventHandler
     public void onItemHeld(PlayerItemHeldEvent event) {
-        // Обновляем слот в данных при смене слота
         Player player = event.getPlayer();
         UUID uuid = player.getUniqueId();
         
