@@ -8,10 +8,10 @@ import org.bukkit.Particle;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryType;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
+import org.bukkit.event.block.Action;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -26,7 +26,6 @@ public class FlaskListener implements Listener {
     private final Map<UUID, Map<Integer, FlaskData>> activeFlasks = new HashMap<>();
     private final Map<UUID, BukkitTask> updateTasks = new HashMap<>();
 
-    // ===== ИМЕНА ФАЙЛОВ ТЕКСТУР (ДОЛЖНЫ СОВПАДАТЬ С ВАШИМИ) =====
     private final int FLASK_WATER_MODEL = 1001;
     private final int FLASK_POISON_MODEL = 1002;
 
@@ -45,14 +44,12 @@ public class FlaskListener implements Listener {
         }
     }
 
-    // ===== ПРОВЕРКА ЯВЛЯЕТСЯ ЛИ ПРЕДМЕТ МЕЧОМ =====
     private boolean isSword(ItemStack item) {
         if (item == null) return false;
         String type = item.getType().name();
         return type.contains("SWORD");
     }
 
-    // ===== ПРОВЕРКА ЯВЛЯЕТСЯ ЛИ ПРЕДМЕТ ФЛАКОНОМ =====
     private boolean isFlask(ItemStack item) {
         if (item == null || item.getType() != Material.POTION) return false;
         if (!item.hasItemMeta()) return false;
@@ -78,7 +75,6 @@ public class FlaskListener implements Listener {
         return false;
     }
 
-    // ===== ВЫДАЧА ФЛАКОНА (ДЛЯ КОМАНДЫ) =====
     public boolean giveFlask(Player player, String type, int amount) {
         if (player == null) return false;
 
@@ -110,7 +106,59 @@ public class FlaskListener implements Listener {
         return true;
     }
 
-    // ===== НАНЕСЕНИЕ ФЛАКОНА НА МЕЧ =====
+    // ===== НОВЫЙ СПОСОБ: Shift + ПКМ с флаконом в офф-руке =====
+    @EventHandler
+    public void onPlayerInteract(PlayerInteractEvent event) {
+        Player player = event.getPlayer();
+
+        // Проверяем: Shift + ПКМ
+        if (!player.isSneaking()) return;
+        if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+
+        ItemStack mainHand = player.getInventory().getItemInMainHand();
+        ItemStack offHand = player.getInventory().getItemInOffHand();
+
+        // Проверяем: в основной руке меч, в офф-руке флакон
+        if (!isSword(mainHand)) {
+            player.sendMessage(ChatColor.RED + "В основной руке должен быть меч!");
+            return;
+        }
+
+        if (!isFlask(offHand)) {
+            player.sendMessage(ChatColor.RED + "В офф-руке должен быть флакон!");
+            return;
+        }
+
+        String flaskType = getFlaskType(offHand);
+        if (flaskType == null) return;
+
+        event.setCancelled(true);
+
+        if (flaskType.equals("water")) {
+            // Смываем эффект
+            if (!hasFlaskEffect(mainHand)) {
+                player.sendMessage(ChatColor.RED + "На этом мече нет эффекта флакона!");
+                return;
+            }
+            removeFlaskFromSword(player, mainHand);
+            offHand.setAmount(offHand.getAmount() - 1);
+            if (offHand.getAmount() <= 0) {
+                player.getInventory().setItemInOffHand(null);
+            }
+        } else if (flaskType.equals("poison")) {
+            // Наносим эффект
+            if (hasFlaskEffect(mainHand)) {
+                player.sendMessage(ChatColor.RED + "На этом мече уже есть эффект флакона!");
+                return;
+            }
+            applyFlaskToSword(player, offHand, mainHand);
+            offHand.setAmount(offHand.getAmount() - 1);
+            if (offHand.getAmount() <= 0) {
+                player.getInventory().setItemInOffHand(null);
+            }
+        }
+    }
+
     private void applyFlaskToSword(Player player, ItemStack flask, ItemStack sword) {
         if (!isSword(sword)) {
             player.sendMessage(ChatColor.RED + "Флакон можно нанести только на меч!");
@@ -131,17 +179,12 @@ public class FlaskListener implements Listener {
         }
 
         if (flaskType.equals("poison")) {
-            // Убираем один флакон
-            flask.setAmount(flask.getAmount() - 1);
-
-            // Добавляем лор на меч
             ItemMeta meta = sword.getItemMeta();
             List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
             lore.add("§2Отравление I §f- §a3:00");
             meta.setLore(lore);
             sword.setItemMeta(meta);
 
-            // Сохраняем данные
             int slot = player.getInventory().getHeldItemSlot();
             UUID uuid = player.getUniqueId();
             activeFlasks.putIfAbsent(uuid, new HashMap<>());
@@ -158,7 +201,6 @@ public class FlaskListener implements Listener {
         }
     }
 
-    // ===== СМЫВАНИЕ ФЛАКОНА С МЕЧА =====
     private void removeFlaskFromSword(Player player, ItemStack sword) {
         if (!isSword(sword)) {
             player.sendMessage(ChatColor.RED + "Флакон можно нанести только на меч!");
@@ -194,7 +236,6 @@ public class FlaskListener implements Listener {
         player.sendMessage(ChatColor.GREEN + "Вы смыли эффект флакона с меча!");
     }
 
-    // ===== ОБНОВЛЕНИЕ ТАЙМЕРА =====
     private void startUpdateTask(Player player) {
         UUID uuid = player.getUniqueId();
         updateTasks.put(uuid, new BukkitRunnable() {
@@ -270,50 +311,6 @@ public class FlaskListener implements Listener {
         }.runTaskTimer(plugin, 0L, 20L));
     }
 
-    // ===== ОБРАБОТЧИК КЛИКОВ В ИНВЕНТАРЕ =====
-    @EventHandler
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (!(event.getWhoClicked() instanceof Player)) return;
-        Player player = (Player) event.getWhoClicked();
-
-        // Только правый клик
-        if (!event.isRightClick()) return;
-        if (event.getClickedInventory() == null) return;
-        if (event.getClickedInventory().getType() != InventoryType.PLAYER) return;
-
-        ItemStack cursor = event.getCursor();
-        if (!isFlask(cursor)) {
-            return;
-        }
-
-        ItemStack clicked = event.getCurrentItem();
-        if (clicked == null || !isSword(clicked)) {
-            player.sendMessage(ChatColor.RED + "Флакон можно применить только к мечу!");
-            return;
-        }
-
-        event.setCancelled(true);
-        String flaskType = getFlaskType(cursor);
-
-        if (flaskType.equals("water")) {
-            removeFlaskFromSword(player, clicked);
-            cursor.setAmount(cursor.getAmount() - 1);
-            if (cursor.getAmount() <= 0) {
-                event.setCursor(null);
-            }
-        } else if (flaskType.equals("poison")) {
-            if (hasFlaskEffect(clicked)) {
-                player.sendMessage(ChatColor.RED + "На этом мече уже есть эффект флакона!");
-                return;
-            }
-            applyFlaskToSword(player, cursor, clicked);
-            if (cursor.getAmount() <= 0) {
-                event.setCursor(null);
-            }
-        }
-    }
-
-    // ===== ОБРАБОТЧИК СМЕНЫ ПРЕДМЕТА В РУКЕ =====
     @EventHandler
     public void onItemHeld(PlayerItemHeldEvent event) {
         Player player = event.getPlayer();
@@ -360,7 +357,6 @@ public class FlaskListener implements Listener {
         }
     }
 
-    // ===== ОЧИСТКА ПРИ ВЫХОДЕ =====
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         UUID uuid = event.getPlayer().getUniqueId();
