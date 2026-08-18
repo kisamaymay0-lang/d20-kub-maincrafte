@@ -50,7 +50,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
     private RollbackListener rollbackListener;
     private FlaskListener flaskListener;
 
-    // Кешированные объекты для частиц
+    // Кешированные объекты для частиц (ИСПРАВЛЕНО)
     private final Particle.DustOptions meleeDust = new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
     private final Particle.DustOptions rangedDust = new Particle.DustOptions(Color.fromRGB(0, 255, 0), 1.2f);
     private final Particle.DustOptions magicDust = new Particle.DustOptions(Color.fromRGB(200, 0, 255), 1.2f);
@@ -67,26 +67,28 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             getCommand("adaptation").setExecutor(this);
         }
 
+        // ===== РЕГИСТРАЦИЯ D20 =====
         this.diceRollListener = new DiceRollListener(this);
         getServer().getPluginManager().registerEvents(this.diceRollListener, this);
         if (getCommand("d20") != null) {
             getCommand("d20").setExecutor(this.diceRollListener);
         }
 
+        // ===== РЕГИСТРАЦИЯ ФЛАКОНОВ (ИСПРАВЛЕНО) =====
         this.flaskListener = new FlaskListener(this);
         getServer().getPluginManager().registerEvents(this.flaskListener, this);
         if (getCommand("flask") != null) {
             getCommand("flask").setExecutor(new FlaskCommand(this.flaskListener));
         }
 
-        // ===== РЕГИСТРАЦИЯ ЧАРА "ОТКАТ I" =====
+        // ===== РЕГИСТРАЦИЯ ОТКАТА =====
         this.rollbackListener = new RollbackListener(this);
         getServer().getPluginManager().registerEvents(this.rollbackListener, this);
         if (getCommand("rollback") != null) {
             getCommand("rollback").setExecutor(new RollbackCommand(this.rollbackListener));
         }
 
-        getLogger().info("Плагин AdaptationPlugin [COOLDOWN-UPDATE + D20 + ROLLBACK] успешно запущен!");
+        getLogger().info("Плагин AdaptationPlugin [FULLY FIXED] успешно запущен!");
     }
 
     @Override
@@ -99,7 +101,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             this.rollbackListener.disable();
         }
         if (this.flaskListener != null) {
-        this.flaskListener.disable();
+            this.flaskListener.disable();
         }
     }
 
@@ -547,115 +549,119 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                     damageCounters.remove(uuid);
 
                     int cdSec = wasSuper ? getConfig().getInt("settings.cooldown-super", 4)
-                            : getConfig().getInt("settings.cooldown-normal", 2);
-                    cooldownEndTimes.put(uuid, System.currentTimeMillis() + (cdSec * 1000L));
-
-                    isCooldownMode = true;
+                                         : getConfig().getInt("settings.cooldown-normal", 4);
+                    cooldownEndTimes.put(uuid, System.currentTimeMillis() + cdSec * 1000L);
+                    activeTimesLeft.put(uuid, cdSec * 10.0);
                     maxTime = cdSec * 10.0;
-                    timeLeft = 0.0;
+                    isCooldownMode = true;
 
-                    bossBar.setTitle(ChatColor.GRAY + "" + ChatColor.BOLD + "ПЕРЕЗАРЯДКА АДАПТАЦИИ");
-                    bossBar.setColor(BarColor.WHITE);
+                    p.sendMessage(ChatColor.RED + "Адаптация закончилась! Перезарядка " + cdSec + " секунд.");
+                    bossBar.setTitle("§c§lПЕРЕЗАРЯДКА: " + cdSec + "с");
+                    bossBar.setColor(BarColor.RED);
+                    bossBar.setProgress(1.0);
+                    return;
                 }
 
                 if (isCooldownMode) {
-                    if (timeLeft >= maxTime) {
-                        damageCounters.remove(uuid);
-                        superDamageCounters.remove(uuid);
+                    timeLeft--;
+                    activeTimesLeft.put(uuid, timeLeft);
+                    double progress = Math.max(0.0, timeLeft / maxTime);
+                    bossBar.setProgress(Math.min(1.0, progress));
+                    int secondsLeft = (int) Math.ceil(timeLeft / 10.0);
+                    bossBar.setTitle("§c§lПЕРЕЗАРЯДКА: " + secondsLeft + "с");
+
+                    if (timeLeft <= 0) {
                         cleanupPlayerData(uuid, false);
+                        p.sendMessage(ChatColor.GREEN + "Перезарядка закончилась!");
+                        bossBar.removeAll();
+                        activeBossBars.remove(uuid);
                         cancel();
-                        return;
                     }
-                    bossBar.setProgress(timeLeft / maxTime);
-                    activeTimesLeft.put(uuid, timeLeft + 1.0);
+                    return;
+                }
+
+                // Обычный режим
+                timeLeft--;
+                activeTimesLeft.put(uuid, timeLeft);
+                double progress = Math.max(0.0, timeLeft / maxTime);
+                bossBar.setProgress(Math.min(1.0, progress));
+
+                if (wasSuper) {
+                    bossBar.setTitle("§6§l" + msg + " §7[§6" + (int) Math.ceil(timeLeft / 10.0) + "с§7]");
                 } else {
-                    bossBar.setProgress(timeLeft / maxTime);
-                    activeTimesLeft.put(uuid, timeLeft - 1.0);
+                    bossBar.setTitle(msg + " §7[§f" + (int) Math.ceil(timeLeft / 10.0) + "с§7]");
                 }
             }
         }.runTaskTimer(this, 0L, 2L));
     }
 
+    private void playBell(Player player, float pitch, long delay) {
+        for (int i = 0; i < 3; i++) {
+            final int index = i;
+            Bukkit.getScheduler().runTaskLater(this, () -> {
+                if (player.isOnline()) {
+                    player.getWorld().playSound(player.getLocation(), Sound.BLOCK_BELL_USE, 1.0f, pitch + (index * 0.1f));
+                }
+            }, delay * (i + 1));
+        }
+    }
+
     private void cleanupPlayerData(UUID uuid, boolean keepCooldown) {
-        activeTimesLeft.remove(uuid);
-        activeMaxTimes.remove(uuid);
         if (activeTimers.containsKey(uuid)) {
             activeTimers.get(uuid).cancel();
             activeTimers.remove(uuid);
         }
-        activeAdaptations.remove(uuid);
-        superAdaptations.remove(uuid);
-        superDamageCounters.remove(uuid);
-
         if (activeBossBars.containsKey(uuid)) {
             activeBossBars.get(uuid).removeAll();
             activeBossBars.remove(uuid);
         }
-
+        activeTimesLeft.remove(uuid);
+        activeMaxTimes.remove(uuid);
         if (!keepCooldown) {
             cooldownEndTimes.remove(uuid);
         }
     }
 
     private void cleanupAll() {
-        activeTimers.values().forEach(BukkitTask::cancel);
-        activeBossBars.values().forEach(BossBar::removeAll);
-
-        damageCounters.clear();
-        superDamageCounters.clear();
-        activeTimers.clear();
-        activeAdaptations.clear();
-        superAdaptations.clear();
-        lastHitTime.clear();
+        for (BossBar bar : activeBossBars.values()) {
+            bar.removeAll();
+        }
         activeBossBars.clear();
+        for (BukkitTask task : activeTimers.values()) {
+            task.cancel();
+        }
+        activeTimers.clear();
         activeTimesLeft.clear();
         activeMaxTimes.clear();
         cooldownEndTimes.clear();
+        activeAdaptations.clear();
+        superAdaptations.clear();
+        damageCounters.clear();
+        superDamageCounters.clear();
     }
 
-    private void playBell(Player player, float pitch, long per) {
-        if (player == null) return;
-        player.getWorld().playSound(player.getLocation(), Sound.BLOCK_BELL_USE, 3.0f, pitch);
-        UUID uuid = player.getUniqueId();
-
-        new BukkitRunnable() {
-            int count = 1;
-
-            @Override
-            public void run() {
-                Player p = Bukkit.getPlayer(uuid);
-                if (p == null || !p.isOnline() || count >= 3) {
-                    cancel();
-                    return;
-                }
-                p.getWorld().playSound(p.getLocation(), Sound.BLOCK_BELL_USE, 3.0f, pitch);
-                count++;
-            }
-        }.runTaskTimer(this, per, per);
+    private String getDamageType(DamageCause cause) {
+        switch (cause) {
+            case ENTITY_ATTACK:
+            case ENTITY_SWEEP_ATTACK:
+                return "MELEE";
+            case PROJECTILE:
+                return "RANGED";
+            case MAGIC:
+            case POISON:
+            case WITHER:
+            case DRAGON_BREATH:
+            case THORNS:
+                return "MAGIC";
+            default:
+                return "IGNORE";
+        }
     }
 
-    private String getDamageType(DamageCause c) {
-        if (c == DamageCause.PROJECTILE || c == DamageCause.BLOCK_EXPLOSION || c == DamageCause.ENTITY_EXPLOSION) {
-            return "RANGED";
+    // ===== ВСПОМОГАТЕЛЬНЫЙ МЕТОД ДЛЯ D20 (ЧТОБЫ НЕ БЫЛО ОШИБОК) =====
+    public void disableDiceRollListener() {
+        if (diceRollListener != null) {
+            diceRollListener.disable();
         }
-        if (c == DamageCause.MAGIC || c == DamageCause.POISON || c == DamageCause.WITHER || c == DamageCause.DRAGON_BREATH) {
-            return "MAGIC";
-        }
-        if (c.name().equals("SONIC_BOOM")) {
-            return "MAGIC";
-        }
-        if (c == DamageCause.VOID || c == DamageCause.STARVATION || c.name().equals("CUSTOM")) {
-            return "IGNORE";
-        }
-        return "MELEE";
-    }
-
-    @EventHandler
-    public void onQuit(PlayerQuitEvent e) {
-        UUID id = e.getPlayer().getUniqueId();
-        damageCounters.remove(id);
-        superDamageCounters.remove(id);
-        lastHitTime.remove(id);
-        cleanupPlayerData(id, false);
     }
 }
