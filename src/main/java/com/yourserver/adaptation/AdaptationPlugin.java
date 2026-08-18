@@ -47,6 +47,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
     private final Map<UUID, Double> activeMaxTimes = new HashMap<>();
     private final Map<UUID, Long> cooldownEndTimes = new HashMap<>();
     private DiceRollListener diceRollListener;
+    private RollbackListener rollbackListener;
 
     private final Particle.DustOptions meleeDust = new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
     private final Particle.DustOptions rangedDust = new Particle.DustOptions(Color.fromRGB(0, 255, 0), 1.2f);
@@ -62,6 +63,11 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         if (getCommand("adaptation") != null) {
             getCommand("adaptation").setExecutor(this);
         }
+        this.rollbackListener = new RollbackListener(this);
+        getServer().getPluginManager().registerEvents(this.rollbackListener, this);
+        if (getCommand("rollback") != null) {
+        getCommand("rollback").setExecutor(new RollbackCommand(this.rollbackListener));
+        }
 
         this.diceRollListener = new DiceRollListener(this);
         getServer().getPluginManager().registerEvents(this.diceRollListener, this);
@@ -70,6 +76,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         }
 
         getLogger().info("Плагин AdaptationPlugin [COOLDOWN-UPDATE + D20] успешно запущен!");
+        
     }
 
     @Override
@@ -77,6 +84,11 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         cleanupAll();
         if (this.diceRollListener != null) {
             this.diceRollListener.disable();
+    this.rollbackListener.disable();
+}
+        if (this.rollbackListener != null) {
+    this.rollbackListener.disable();
+}
         }
     }
 
