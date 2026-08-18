@@ -48,6 +48,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
     private final Map<UUID, Long> cooldownEndTimes = new HashMap<>();
     private DiceRollListener diceRollListener;
     private RollbackListener rollbackListener;
+    private FlaskListener flaskListener;
 
     // Кешированные объекты для частиц
     private final Particle.DustOptions meleeDust = new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -72,6 +73,12 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             getCommand("d20").setExecutor(this.diceRollListener);
         }
 
+        this.flaskListener = new FlaskListener(this);
+        getServer().getPluginManager().registerEvents(this.flaskListener, this);
+        if (getCommand("flask") != null) {
+            getCommand("flask").setExecutor(new FlaskCommand(this.flaskListener));
+        }
+
         // ===== РЕГИСТРАЦИЯ ЧАРА "ОТКАТ I" =====
         this.rollbackListener = new RollbackListener(this);
         getServer().getPluginManager().registerEvents(this.rollbackListener, this);
@@ -90,6 +97,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         }
         if (this.rollbackListener != null) {
             this.rollbackListener.disable();
+        }
+        if (this.flaskListener != null) {
+        this.flaskListener.disable();
         }
     }
 
