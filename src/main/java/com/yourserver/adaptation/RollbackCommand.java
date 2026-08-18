@@ -41,7 +41,7 @@ public class RollbackCommand implements CommandExecutor {
 
             boolean success = rollbackListener.giveRollbackTotem(target);
             if (success) {
-                sender.sendMessage(ChatColor.GREEN + "Тотем Отката выдан игроку " + target.getName());
+                sender.sendMessage(ChatColor.GREEN + "Тотем бессмертия выдан игроку " + target.getName());
             } else {
                 sender.sendMessage(ChatColor.RED + "Не удалось выдать тотем!");
             }
