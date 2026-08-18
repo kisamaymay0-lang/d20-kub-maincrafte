@@ -6,24 +6,29 @@ import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.Particle;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.EventPriority;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 
 import java.util.*;
 
 public class FlaskListener implements Listener {
 
     private final JavaPlugin plugin;
-    private final Map<UUID, Map<Integer, FlaskData>> activeFlasks = new HashMap<>();
+    private final Map<UUID, FlaskData> activeFlasks = new HashMap<>(); // UUID игрока -> данные о флаконе
     private final Map<UUID, BukkitTask> updateTasks = new HashMap<>();
 
     private final int FLASK_WATER_MODEL = 1001;
@@ -35,11 +40,13 @@ public class FlaskListener implements Listener {
 
     private static class FlaskData {
         String type;
-        int duration;
+        int duration; // в секундах
+        int slot; // слот меча
 
-        FlaskData(String type, int duration) {
+        FlaskData(String type, int duration, int slot) {
             this.type = type;
             this.duration = duration;
+            this.slot = slot;
         }
     }
 
@@ -131,21 +138,23 @@ public class FlaskListener implements Listener {
         event.setCancelled(true);
 
         if (flaskType.equals("water")) {
+            // Смываем эффект
             if (!hasFlaskEffect(mainHand)) {
                 player.sendMessage(ChatColor.RED + "На этом мече нет эффекта флакона!");
                 return;
             }
-            removeFlaskFromSword(player, mainHand);
+            removeFlaskFromSword(player);
             offHand.setAmount(offHand.getAmount() - 1);
             if (offHand.getAmount() <= 0) {
                 player.getInventory().setItemInOffHand(null);
             }
         } else if (flaskType.equals("poison")) {
+            // Наносим эффект
             if (hasFlaskEffect(mainHand)) {
                 player.sendMessage(ChatColor.RED + "На этом мече уже есть эффект флакона!");
                 return;
             }
-            applyFlaskToSword(player, offHand, mainHand);
+            applyFlaskToSword(player, mainHand);
             offHand.setAmount(offHand.getAmount() - 1);
             if (offHand.getAmount() <= 0) {
                 player.getInventory().setItemInOffHand(null);
@@ -153,7 +162,7 @@ public class FlaskListener implements Listener {
         }
     }
 
-    private void applyFlaskToSword(Player player, ItemStack flask, ItemStack sword) {
+    private void applyFlaskToSword(Player player, ItemStack sword) {
         if (!isSword(sword)) {
             player.sendMessage(ChatColor.RED + "Флакон можно нанести только на меч!");
             return;
@@ -164,74 +173,66 @@ public class FlaskListener implements Listener {
             return;
         }
 
-        String flaskType = getFlaskType(flask);
-        if (flaskType == null) return;
-
-        if (flaskType.equals("water")) {
-            player.sendMessage(ChatColor.RED + "Этот меч не имеет эффекта флакона!");
-            return;
-        }
-
-        if (flaskType.equals("poison")) {
-            ItemMeta meta = sword.getItemMeta();
-            List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
-            
-            lore.removeIf(line -> line.contains("Отравление I"));
-            lore.add("§2Отравление I §f- §a3:00");
-            meta.setLore(lore);
-            sword.setItemMeta(meta);
-
-            int slot = player.getInventory().getHeldItemSlot();
-            UUID uuid = player.getUniqueId();
-            activeFlasks.putIfAbsent(uuid, new HashMap<>());
-            FlaskData data = new FlaskData("poison", 180);
-            activeFlasks.get(uuid).put(slot, data);
-
-            if (!updateTasks.containsKey(uuid)) {
-                startUpdateTask(player);
-            }
-
-            player.getWorld().playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f);
-            // ИСПРАВЛЕНО: используем CRIT вместо CRITICAL_HIT
-            player.getWorld().spawnParticle(Particle.CRIT, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
-            player.sendMessage(ChatColor.GREEN + "Вы нанесли флакон отравления на меч! Длительность: 3 минуты.");
-        }
-    }
-
-    private void removeFlaskFromSword(Player player, ItemStack sword) {
-        if (!isSword(sword)) {
-            player.sendMessage(ChatColor.RED + "Флакон можно нанести только на меч!");
-            return;
-        }
-
-        if (!hasFlaskEffect(sword)) {
-            player.sendMessage(ChatColor.RED + "На этом мече нет эффекта флакона!");
-            return;
-        }
-
         ItemMeta meta = sword.getItemMeta();
         List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
         lore.removeIf(line -> line.contains("Отравление I"));
+        lore.add("§2Отравление I §f- §a3:00");
         meta.setLore(lore);
         sword.setItemMeta(meta);
 
         int slot = player.getInventory().getHeldItemSlot();
         UUID uuid = player.getUniqueId();
+        
+        // Очищаем старые данные
         if (activeFlasks.containsKey(uuid)) {
-            activeFlasks.get(uuid).remove(slot);
-            if (activeFlasks.get(uuid).isEmpty()) {
-                activeFlasks.remove(uuid);
-                if (updateTasks.containsKey(uuid)) {
-                    updateTasks.get(uuid).cancel();
-                    updateTasks.remove(uuid);
-                }
+            activeFlasks.remove(uuid);
+            if (updateTasks.containsKey(uuid)) {
+                updateTasks.get(uuid).cancel();
+                updateTasks.remove(uuid);
+            }
+        }
+        
+        FlaskData data = new FlaskData("poison", 180, slot);
+        activeFlasks.put(uuid, data);
+
+        if (!updateTasks.containsKey(uuid)) {
+            startUpdateTask(player);
+        }
+
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f);
+        player.getWorld().spawnParticle(Particle.CRIT, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
+        // Сообщение убрано
+    }
+
+    private void removeFlaskFromSword(Player player) {
+        UUID uuid = player.getUniqueId();
+        
+        if (!activeFlasks.containsKey(uuid)) {
+            return;
+        }
+
+        FlaskData data = activeFlasks.get(uuid);
+        ItemStack sword = player.getInventory().getItem(data.slot);
+        
+        if (sword != null && isSword(sword)) {
+            ItemMeta meta = sword.getItemMeta();
+            if (meta != null && meta.hasLore()) {
+                List<String> lore = meta.getLore();
+                lore.removeIf(line -> line.contains("Отравление I"));
+                meta.setLore(lore);
+                sword.setItemMeta(meta);
             }
         }
 
+        activeFlasks.remove(uuid);
+        if (updateTasks.containsKey(uuid)) {
+            updateTasks.get(uuid).cancel();
+            updateTasks.remove(uuid);
+        }
+
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_GENERIC_DRINK, 1f, 1f);
-        // ИСПРАВЛЕНО: используем SMOKE (он существует в 1.21.1)
         player.getWorld().spawnParticle(Particle.SMOKE, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
-        player.sendMessage(ChatColor.GREEN + "Вы смыли эффект флакона с меча!");
+        // Сообщение убрано
     }
 
     private void startUpdateTask(Player player) {
@@ -246,111 +247,124 @@ public class FlaskListener implements Listener {
                     return;
                 }
 
-                Map<Integer, FlaskData> flasks = activeFlasks.get(uuid);
-                if (flasks == null || flasks.isEmpty()) {
+                FlaskData data = activeFlasks.get(uuid);
+                if (data == null) {
                     this.cancel();
                     updateTasks.remove(uuid);
                     return;
                 }
 
-                List<Integer> toRemove = new ArrayList<>();
-                for (Map.Entry<Integer, FlaskData> entry : flasks.entrySet()) {
-                    int slot = entry.getKey();
-                    FlaskData data = entry.getValue();
+                data.duration--;
 
-                    data.duration--;
+                // Обновляем лор на мече (даже если он в другом слоте)
+                ItemStack sword = p.getInventory().getItem(data.slot);
+                if (sword == null || !isSword(sword)) {
+                    // Меч пропал - удаляем эффект
+                    activeFlasks.remove(uuid);
+                    this.cancel();
+                    updateTasks.remove(uuid);
+                    return;
+                }
 
-                    ItemStack item = p.getInventory().getItem(slot);
-                    if (item == null || !isSword(item)) {
-                        toRemove.add(slot);
-                        continue;
+                ItemMeta meta = sword.getItemMeta();
+                if (meta == null || !meta.hasLore()) {
+                    activeFlasks.remove(uuid);
+                    this.cancel();
+                    updateTasks.remove(uuid);
+                    return;
+                }
+
+                List<String> lore = meta.getLore();
+                boolean found = false;
+                for (int i = 0; i < lore.size(); i++) {
+                    if (lore.get(i).contains("Отравление I")) {
+                        int minutes = data.duration / 60;
+                        int seconds = data.duration % 60;
+                        String timeStr = String.format("%02d:%02d", minutes, seconds);
+                        lore.set(i, "§2Отравление I §f- §a" + timeStr);
+                        found = true;
+                        break;
                     }
+                }
+                
+                if (!found) {
+                    // Лор пропал - удаляем эффект
+                    activeFlasks.remove(uuid);
+                    this.cancel();
+                    updateTasks.remove(uuid);
+                    return;
+                }
+                
+                meta.setLore(lore);
+                sword.setItemMeta(meta);
 
-                    ItemMeta meta = item.getItemMeta();
-                    if (meta == null || !meta.hasLore()) {
-                        toRemove.add(slot);
-                        continue;
-                    }
-
-                    List<String> lore = meta.getLore();
-                    for (int i = 0; i < lore.size(); i++) {
-                        if (lore.get(i).contains("Отравление I")) {
-                            int minutes = data.duration / 60;
-                            int seconds = data.duration % 60;
-                            String timeStr = String.format("%02d:%02d", minutes, seconds);
-                            lore.set(i, "§2Отравление I §f- §a" + timeStr);
-                            break;
-                        }
-                    }
+                if (data.duration <= 0) {
+                    // Эффект закончился
+                    lore.removeIf(line -> line.contains("Отравление I"));
                     meta.setLore(lore);
-                    item.setItemMeta(meta);
-
-                    if (data.duration <= 0) {
-                        toRemove.add(slot);
-                        lore.removeIf(line -> line.contains("Отравление I"));
-                        meta.setLore(lore);
-                        item.setItemMeta(meta);
-                        p.sendMessage(ChatColor.RED + "Эффект флакона на мече закончился!");
-                        p.getWorld().playSound(p.getLocation(), Sound.BLOCK_GLASS_BREAK, 1f, 0.8f);
-                        p.getWorld().spawnParticle(Particle.SMOKE, p.getLocation().add(0, 1, 0), 10, 0.2, 0.3, 0.2, 0.05);
-                    }
-                }
-
-                for (int slot : toRemove) {
-                    flasks.remove(slot);
-                }
-
-                if (flasks.isEmpty()) {
+                    sword.setItemMeta(meta);
+                    
+                    p.sendMessage(ChatColor.RED + "Эффект флакона на мече закончился!");
+                    p.getWorld().playSound(p.getLocation(), Sound.BLOCK_GLASS_BREAK, 1f, 0.8f);
+                    p.getWorld().spawnParticle(Particle.SMOKE, p.getLocation().add(0, 1, 0), 10, 0.2, 0.3, 0.2, 0.05);
+                    
                     activeFlasks.remove(uuid);
                     this.cancel();
                     updateTasks.remove(uuid);
                 }
             }
-        }.runTaskTimer(plugin, 0L, 20L));
+        }.runTaskTimer(plugin, 0L, 20L)); // Каждую секунду
+    }
+
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onEntityDamage(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Player)) return;
+        if (!(event.getEntity() instanceof LivingEntity)) return;
+        
+        Player player = (Player) event.getDamager();
+        LivingEntity victim = (LivingEntity) event.getEntity();
+        UUID uuid = player.getUniqueId();
+
+        // Проверяем, есть ли активный флакон у игрока
+        if (!activeFlasks.containsKey(uuid)) return;
+        
+        FlaskData data = activeFlasks.get(uuid);
+        if (!data.type.equals("poison")) return;
+
+        // Проверяем, что бьем мечом
+        ItemStack hand = player.getInventory().getItemInMainHand();
+        if (!isSword(hand)) return;
+        
+        // Проверяем, что меч имеет эффект флакона
+        if (!hasFlaskEffect(hand)) {
+            // Если эффекта нет в лоре, но в памяти есть - удаляем
+            activeFlasks.remove(uuid);
+            if (updateTasks.containsKey(uuid)) {
+                updateTasks.get(uuid).cancel();
+                updateTasks.remove(uuid);
+            }
+            return;
+        }
+
+        // Накладываем отравление на 5 секунд
+        victim.addPotionEffect(new PotionEffect(PotionEffectType.POISON, 100, 0)); // 5 секунд = 100 тиков
+        
+        // Эффекты удара
+        victim.getWorld().playSound(victim.getLocation(), Sound.ENTITY_PLAYER_ATTACK_STRONG, 0.8f, 1.2f);
+        victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.3, 0.3, 0.1);
+        victim.getWorld().spawnParticle(Particle.SPELL_WITCH, victim.getLocation().add(0, 1, 0), 10, 0.3, 0.3, 0.3, 0.1);
     }
 
     @EventHandler
     public void onItemHeld(PlayerItemHeldEvent event) {
+        // Обновляем слот в данных при смене слота
         Player player = event.getPlayer();
         UUID uuid = player.getUniqueId();
-
+        
         if (activeFlasks.containsKey(uuid)) {
-            int oldSlot = event.getPreviousSlot();
-            int newSlot = event.getNewSlot();
-
-            if (activeFlasks.get(uuid).containsKey(oldSlot)) {
-                FlaskData data = activeFlasks.get(uuid).remove(oldSlot);
-                activeFlasks.get(uuid).put(newSlot, data);
-
-                ItemStack newItem = player.getInventory().getItem(newSlot);
-                if (newItem != null && isSword(newItem)) {
-                    ItemMeta meta = newItem.getItemMeta();
-                    if (meta != null) {
-                        List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
-                        int minutes = data.duration / 60;
-                        int seconds = data.duration % 60;
-                        String timeStr = String.format("%02d:%02d", minutes, seconds);
-                        boolean hasLore = false;
-                        for (String line : lore) {
-                            if (line.contains("Отравление I")) {
-                                hasLore = true;
-                                break;
-                            }
-                        }
-                        if (!hasLore) {
-                            lore.add("§2Отравление I §f- §a" + timeStr);
-                        } else {
-                            for (int i = 0; i < lore.size(); i++) {
-                                if (lore.get(i).contains("Отравление I")) {
-                                    lore.set(i, "§2Отравление I §f- §a" + timeStr);
-                                    break;
-                                }
-                            }
-                        }
-                        meta.setLore(lore);
-                        newItem.setItemMeta(meta);
-                    }
-                }
+            FlaskData data = activeFlasks.get(uuid);
+            if (data.slot == event.getPreviousSlot()) {
+                data.slot = event.getNewSlot();
             }
         }
     }
