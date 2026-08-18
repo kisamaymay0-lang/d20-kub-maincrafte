@@ -36,7 +36,6 @@ public class FlaskListener implements Listener {
     private static class FlaskData {
         String type;
         int duration;
-        BukkitTask task;
 
         FlaskData(String type, int duration) {
             this.type = type;
@@ -106,19 +105,16 @@ public class FlaskListener implements Listener {
         return true;
     }
 
-    // ===== НОВЫЙ СПОСОБ: Shift + ПКМ с флаконом в офф-руке =====
     @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
         Player player = event.getPlayer();
 
-        // Проверяем: Shift + ПКМ
         if (!player.isSneaking()) return;
         if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
 
         ItemStack mainHand = player.getInventory().getItemInMainHand();
         ItemStack offHand = player.getInventory().getItemInOffHand();
 
-        // Проверяем: в основной руке меч, в офф-руке флакон
         if (!isSword(mainHand)) {
             player.sendMessage(ChatColor.RED + "В основной руке должен быть меч!");
             return;
@@ -135,7 +131,6 @@ public class FlaskListener implements Listener {
         event.setCancelled(true);
 
         if (flaskType.equals("water")) {
-            // Смываем эффект
             if (!hasFlaskEffect(mainHand)) {
                 player.sendMessage(ChatColor.RED + "На этом мече нет эффекта флакона!");
                 return;
@@ -146,7 +141,6 @@ public class FlaskListener implements Listener {
                 player.getInventory().setItemInOffHand(null);
             }
         } else if (flaskType.equals("poison")) {
-            // Наносим эффект
             if (hasFlaskEffect(mainHand)) {
                 player.sendMessage(ChatColor.RED + "На этом мече уже есть эффект флакона!");
                 return;
@@ -181,6 +175,8 @@ public class FlaskListener implements Listener {
         if (flaskType.equals("poison")) {
             ItemMeta meta = sword.getItemMeta();
             List<String> lore = meta.hasLore() ? meta.getLore() : new ArrayList<>();
+            
+            lore.removeIf(line -> line.contains("Отравление I"));
             lore.add("§2Отравление I §f- §a3:00");
             meta.setLore(lore);
             sword.setItemMeta(meta);
@@ -196,7 +192,7 @@ public class FlaskListener implements Listener {
             }
 
             player.getWorld().playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f);
-            player.getWorld().spawnParticle(Particle.CRIT, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
+            player.getWorld().spawnParticle(Particle.CRITICAL_HIT, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
             player.sendMessage(ChatColor.GREEN + "Вы нанесли флакон отравления на меч! Длительность: 3 минуты.");
         }
     }
