@@ -49,10 +49,12 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
     private DiceRollListener diceRollListener;
     private RollbackListener rollbackListener;
 
+    // Кешированные объекты для частиц
     private final Particle.DustOptions meleeDust = new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
     private final Particle.DustOptions rangedDust = new Particle.DustOptions(Color.fromRGB(0, 255, 0), 1.2f);
     private final Particle.DustOptions magicDust = new Particle.DustOptions(Color.fromRGB(200, 0, 255), 1.2f);
 
+    // Константы для опознавания чаров в lore
     private final String ADAPTATION_LORE = "§dАдаптация";
     private final String D20_LORE = "§dБросок I";
 
@@ -63,11 +65,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         if (getCommand("adaptation") != null) {
             getCommand("adaptation").setExecutor(this);
         }
-        this.rollbackListener = new RollbackListener(this);
-        getServer().getPluginManager().registerEvents(this.rollbackListener, this);
-        if (getCommand("rollback") != null) {
-        getCommand("rollback").setExecutor(new RollbackCommand(this.rollbackListener));
-        }
 
         this.diceRollListener = new DiceRollListener(this);
         getServer().getPluginManager().registerEvents(this.diceRollListener, this);
@@ -75,8 +72,14 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
             getCommand("d20").setExecutor(this.diceRollListener);
         }
 
-        getLogger().info("Плагин AdaptationPlugin [COOLDOWN-UPDATE + D20] успешно запущен!");
-        
+        // ===== РЕГИСТРАЦИЯ ЧАРА "ОТКАТ I" =====
+        this.rollbackListener = new RollbackListener(this);
+        getServer().getPluginManager().registerEvents(this.rollbackListener, this);
+        if (getCommand("rollback") != null) {
+            getCommand("rollback").setExecutor(new RollbackCommand(this.rollbackListener));
+        }
+
+        getLogger().info("Плагин AdaptationPlugin [COOLDOWN-UPDATE + D20 + ROLLBACK] успешно запущен!");
     }
 
     @Override
@@ -84,11 +87,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         cleanupAll();
         if (this.diceRollListener != null) {
             this.diceRollListener.disable();
-    this.rollbackListener.disable();
-}
+        }
         if (this.rollbackListener != null) {
-    this.rollbackListener.disable();
-}
+            this.rollbackListener.disable();
         }
     }
 
@@ -142,6 +143,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         return true;
     }
 
+    // ===== ПУБЛИЧНЫЙ МЕТОД ДЛЯ ЛОМКИ АДАПТАЦИИ (ВЫЗЫВАЕТСЯ ИЗ D20) =====
     public void breakAdaptation(Player player) {
         if (player == null) return;
         UUID uuid = player.getUniqueId();
@@ -171,6 +173,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         cooldownEndTimes.put(uuid, System.currentTimeMillis() + 4000L);
     }
 
+    // ===== ПРОВЕРКА НАЛИЧИЯ ЧАРА В ЛОРЕ =====
     private boolean hasAdaptationLore(ItemStack item) {
         if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) return false;
         ItemMeta meta = item.getItemMeta();
@@ -231,6 +234,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
                name.contains("LEGGINGS") || name.contains("BOOTS");
     }
 
+    // ===== НАКОВАЛЬНЯ С ЗАПРЕТОМ ОБЪЕДИНЕНИЯ АДАПТАЦИИ И БРОСКА =====
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onAnvilPrepare(PrepareAnvilEvent event) {
         AnvilInventory inv = event.getInventory();
@@ -309,6 +313,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         event.setResult(null);
     }
 
+    // ===== ОСТАЛЬНАЯ ЛОГИКА ПЛАГИНА =====
     @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerDamage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player)) return;
