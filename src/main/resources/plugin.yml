@@ -12,3 +12,12 @@ commands:
     description: управление плагином f9-daptation-sosika-bobr551
     permission: adaptation.admin
     usage: /adaptation <give/reload>
+  rollback:
+    description: Выдать тотем с чаром "Откат I"
+    usage: /rollback give <игрок>
+    permission: rollback.admin
+
+permissions:
+  rollback.admin:
+    description: Право на использование команды /rollback
+    default: op
