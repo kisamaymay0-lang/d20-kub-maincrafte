@@ -16,8 +16,18 @@ commands:
     description: Выдать тотем с чаром "Откат I"
     usage: /rollback give <игрок>
     permission: rollback.admin
+  flask:
+    description: Управление флаконами
+    usage: /flask give <игрок> <water/poison> [количество]
+    permission: flask.admin
 
 permissions:
+  adaptation.admin:
+    description: Право на использование команд адаптации
+    default: op
   rollback.admin:
     description: Право на использование команды /rollback
+    default: op
+  flask.admin:
+    description: Право на использование команды /flask
     default: op
