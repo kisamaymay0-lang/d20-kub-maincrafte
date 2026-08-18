@@ -14,3 +14,18 @@ settings:
     lvl2: 8
     lvl3: 6
   required-super-hits: 8
+  # Настройки чара "Откат I"
+rollback:
+  # Количество секунд, на которые откатывается игрок
+  history-seconds: 5
+  
+  # Интервал сохранения позиций (в тиках, 20 = 1 секунда)
+  # 10 = 0.5 секунды (для точности)
+  save-interval-ticks: 10
+  
+  # Эффекты после телепортации
+  effects:
+    blindness-duration: 40   # в тиках (40 = 2 секунды)
+    slowness-duration: 60    # в тиках (60 = 3 секунды)
+    slowness-level: 1
+    confusion-duration: 60   # в тиках
