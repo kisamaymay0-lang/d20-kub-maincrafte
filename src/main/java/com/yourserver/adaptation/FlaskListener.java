@@ -336,10 +336,11 @@ public class FlaskListener implements Listener {
         // Накладываем отравление на 5 секунд (100 тиков)
         victim.addPotionEffect(new PotionEffect(PotionEffectType.POISON, 100, 0));
         
-        // Эффекты удара (ИСПРАВЛЕНО: убран SPELL_WITCH)
+        // Эффекты удара (УБРАНЫ ВСЕ ПРОБЛЕМНЫЕ ЧАСТИЦЫ)
         victim.getWorld().playSound(victim.getLocation(), Sound.ENTITY_PLAYER_ATTACK_STRONG, 0.8f, 1.2f);
         victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 15, 0.3, 0.3, 0.3, 0.1);
-        victim.getWorld().spawnParticle(Particle.SPELL_MOB, victim.getLocation().add(0, 1, 0), 10, 0.3, 0.3, 0.3, 0.1);
+        // Добавляем зеленый эффект через SPELL_MOB (если есть) или просто SMOKE
+        victim.getWorld().spawnParticle(Particle.SMOKE, victim.getLocation().add(0, 1, 0), 10, 0.3, 0.3, 0.3, 0.1);
     }
 
     @EventHandler
