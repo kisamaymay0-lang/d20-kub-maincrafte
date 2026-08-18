@@ -105,8 +105,7 @@ public class FlaskListener implements Listener {
             }
 
             player.getWorld().playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f);
-            // Исправлено: SPELL_WITCH → SPELL_MOB
-            player.getWorld().spawnParticle(Particle.SPELL_MOB, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
+            player.getWorld().spawnParticle(Particle.CRIT, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
             player.sendMessage(ChatColor.GREEN + "Вы нанесли флакон отравления на меч! Длительность: 3 минуты.");
         }
     }
@@ -142,8 +141,7 @@ public class FlaskListener implements Listener {
         }
 
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_GENERIC_DRINK, 1f, 1f);
-        // Исправлено: WATER_SPLASH → WATER_BUBBLE
-        player.getWorld().spawnParticle(Particle.WATER_BUBBLE, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
+        player.getWorld().spawnParticle(Particle.WATER_DROP, player.getLocation().add(0, 1, 0), 20, 0.3, 0.3, 0.3, 0.1);
         player.sendMessage(ChatColor.GREEN + "Вы смыли эффект флакона с меча!");
     }
 
