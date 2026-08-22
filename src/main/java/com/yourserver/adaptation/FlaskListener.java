@@ -1,11 +1,10 @@
 package com.yourserver.adaptation;
 
-import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.Sound;
 import org.bukkit.Particle;
+import org.bukkit.Sound;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -15,173 +14,106 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.event.player.PlayerItemHeldEvent;
-import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
-import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.UUID;
 
 public class FlaskListener implements Listener {
 
     private final JavaPlugin plugin;
 
-    private final int FLASK_WATER_MODEL = 1001;
-    private final int FLASK_POISON_MODEL = 1002;
-
+    /*
+     * Эти ключи находятся непосредственно внутри предмета.
+     * Поэтому переименование предмета ничего не меняет.
+     */
     private final NamespacedKey flaskTypeKey;
     private final NamespacedKey poisonExpireKey;
 
-    private final java.util.Map<UUID, BukkitTask> updateTasks =
-            new java.util.HashMap<>();
-
     public FlaskListener(JavaPlugin plugin) {
-
         this.plugin = plugin;
 
-        /*
-         * Эти ключи будут храниться внутри предмета.
-         */
-        flaskTypeKey =
-                new NamespacedKey(
-                        plugin,
-                        "flask_type"
-                );
+        flaskTypeKey = new NamespacedKey(
+                plugin,
+                "flask_type"
+        );
 
-        poisonExpireKey =
-                new NamespacedKey(
-                        plugin,
-                        "poison_expire"
-                );
+        poisonExpireKey = new NamespacedKey(
+                plugin,
+                "poison_expire"
+        );
     }
 
+    /*
+     * Определяем меч.
+     */
     private boolean isSword(ItemStack item) {
-
-        if (item == null) {
+        if (item == null || item.getType() == Material.AIR) {
             return false;
         }
 
-        return item.getType()
-                .name()
-                .endsWith("_SWORD");
+        return item.getType().name().endsWith("_SWORD");
     }
 
+    /*
+     * Флакон определяется ТОЛЬКО по PDC.
+     *
+     * Поэтому:
+     * - воду нельзя превратить в яд простым переименованием;
+     * - яд нельзя превратить в воду простым переименованием.
+     */
     private boolean isFlask(ItemStack item) {
-
         if (item == null ||
                 item.getType() != Material.POTION ||
                 !item.hasItemMeta()) {
-
             return false;
         }
 
-        ItemMeta meta =
-                item.getItemMeta();
+        ItemMeta meta = item.getItemMeta();
 
         if (meta == null) {
             return false;
         }
 
-        /*
-         * Новый способ определения.
-         */
-        PersistentDataContainer pdc =
-                meta.getPersistentDataContainer();
-
-        if (pdc.has(
+        return meta.getPersistentDataContainer().has(
                 flaskTypeKey,
                 PersistentDataType.STRING
-        )) {
-
-            return true;
-        }
-
-        /*
-         * Совместимость со старыми флаконами.
-         */
-        if (!meta.hasDisplayName()) {
-            return false;
-        }
-
-        String name =
-                ChatColor.stripColor(
-                        meta.getDisplayName()
-                );
-
-        return name.equals("Флакон с водой") ||
-               name.equals("Флакон с отравлением");
+        );
     }
 
     private String getFlaskType(ItemStack item) {
-
         if (!isFlask(item)) {
             return null;
         }
 
-        ItemMeta meta =
-                item.getItemMeta();
+        ItemMeta meta = item.getItemMeta();
 
         if (meta == null) {
             return null;
         }
 
-        PersistentDataContainer pdc =
-                meta.getPersistentDataContainer();
-
-        String storedType =
-                pdc.get(
-                        flaskTypeKey,
-                        PersistentDataType.STRING
-                );
-
-        if (storedType != null) {
-            return storedType;
-        }
-
-        /*
-         * Совместимость со старыми предметами.
-         */
-        if (meta.hasDisplayName()) {
-
-            String name =
-                    ChatColor.stripColor(
-                            meta.getDisplayName()
-                    );
-
-            if (name.equals("Флакон с водой")) {
-                return "water";
-            }
-
-            if (name.equals("Флакон с отравлением")) {
-                return "poison";
-            }
-        }
-
-        return null;
+        return meta.getPersistentDataContainer().get(
+                flaskTypeKey,
+                PersistentDataType.STRING
+        );
     }
 
+    /*
+     * Проверяем яд непосредственно на мече.
+     */
     private boolean hasPoison(ItemStack sword) {
 
-        if (!isSword(sword)) {
+        if (!isSword(sword) || !sword.hasItemMeta()) {
             return false;
         }
 
-        if (!sword.hasItemMeta()) {
-            return false;
-        }
-
-        ItemMeta meta =
-                sword.getItemMeta();
+        ItemMeta meta = sword.getItemMeta();
 
         if (meta == null) {
             return false;
@@ -190,69 +122,29 @@ public class FlaskListener implements Listener {
         PersistentDataContainer pdc =
                 meta.getPersistentDataContainer();
 
-        Long expire =
-                pdc.get(
-                        poisonExpireKey,
-                        PersistentDataType.LONG
-                );
+        Long expire = pdc.get(
+                poisonExpireKey,
+                PersistentDataType.LONG
+        );
 
-        if (expire != null) {
-
-            if (expire > System.currentTimeMillis()) {
-                return true;
-            }
-
-            removePoisonData(sword);
+        if (expire == null) {
             return false;
         }
 
         /*
-         * Совместимость со старыми мечами,
-         * где яд был только в Lore.
+         * Время закончилось.
          */
-        return hasLegacyPoisonLore(sword);
-    }
-
-    private boolean hasLegacyPoisonLore(ItemStack sword) {
-
-        if (sword == null ||
-                !sword.hasItemMeta()) {
-
+        if (System.currentTimeMillis() >= expire) {
+            removePoison(sword);
             return false;
         }
 
-        ItemMeta meta =
-                sword.getItemMeta();
-
-        if (meta == null ||
-                !meta.hasLore()) {
-
-            return false;
-        }
-
-        for (String line :
-                meta.getLore()) {
-
-            if (ChatColor.stripColor(line)
-                    .contains("Отравление I")) {
-
-                return true;
-            }
-        }
-
-        return false;
+        return true;
     }
 
-    private void removePoisonData(ItemStack sword) {
+    private void applyPoison(ItemStack sword) {
 
-        if (sword == null ||
-                !sword.hasItemMeta()) {
-
-            return;
-        }
-
-        ItemMeta meta =
-                sword.getItemMeta();
+        ItemMeta meta = sword.getItemMeta();
 
         if (meta == null) {
             return;
@@ -261,8 +153,25 @@ public class FlaskListener implements Listener {
         PersistentDataContainer pdc =
                 meta.getPersistentDataContainer();
 
-        pdc.remove(poisonExpireKey);
+        /*
+         * Ровно 3 минуты.
+         */
+        long expire =
+                System.currentTimeMillis() + 180_000L;
 
+        pdc.set(
+                poisonExpireKey,
+                PersistentDataType.LONG,
+                expire
+        );
+
+        /*
+         * Только одна короткая строка.
+         * Таймер сюда НЕ записываем.
+         *
+         * Поэтому ItemMeta больше не меняется
+         * каждую секунду и меч не дёргается.
+         */
         List<String> lore =
                 meta.hasLore()
                         ? new ArrayList<>(meta.getLore())
@@ -273,11 +182,56 @@ public class FlaskListener implements Listener {
                         .contains("Отравление I")
         );
 
+        lore.add("§2Отравление I");
+
         meta.setLore(lore);
 
         sword.setItemMeta(meta);
     }
 
+    private void removePoison(ItemStack sword) {
+
+        if (sword == null || !sword.hasItemMeta()) {
+            return;
+        }
+
+        ItemMeta meta = sword.getItemMeta();
+
+        if (meta == null) {
+            return;
+        }
+
+        PersistentDataContainer pdc =
+                meta.getPersistentDataContainer();
+
+        pdc.remove(poisonExpireKey);
+
+        if (meta.hasLore()) {
+
+            List<String> lore =
+                    new ArrayList<>(meta.getLore());
+
+            lore.removeIf(line ->
+                    ChatColor.stripColor(line)
+                            .contains("Отравление I")
+            );
+
+            if (lore.isEmpty()) {
+                meta.setLore(null);
+            } else {
+                meta.setLore(lore);
+            }
+        }
+
+        sword.setItemMeta(meta);
+    }
+
+    /*
+     * Выдача флакона.
+     *
+     * Никакого Lore.
+     * Никаких описаний.
+     */
     public boolean giveFlask(
             Player player,
             String type,
@@ -290,18 +244,13 @@ public class FlaskListener implements Listener {
 
         if (!type.equalsIgnoreCase("water") &&
                 !type.equalsIgnoreCase("poison")) {
-
             return false;
         }
 
-        amount =
-                Math.max(
-                        1,
-                        Math.min(
-                                amount,
-                                64
-                        )
-                );
+        amount = Math.max(
+                1,
+                Math.min(amount, 64)
+        );
 
         ItemStack flask =
                 new ItemStack(
@@ -321,46 +270,40 @@ public class FlaskListener implements Listener {
 
         if (type.equalsIgnoreCase("water")) {
 
+            /*
+             * Название.
+             */
             meta.setDisplayName(
-                    "§bФлакон с водой"
-            );
-
-            meta.setLore(
-                    Arrays.asList(
-                            "§7Смывает эффект отравления с меча"
-                    )
+                    "§fФлакон с водой"
             );
 
             /*
-             * Старый CustomModelData оставляем.
-             * Он совместим с текущим кодом и будет
-             * прочитан новым resource pack через
-             * range_dispatch.
+             * PDC — реальный тип предмета.
              */
-            meta.setCustomModelData(
-                    FLASK_WATER_MODEL
-            );
-
             pdc.set(
                     flaskTypeKey,
                     PersistentDataType.STRING,
                     "water"
             );
 
-        } else {
-
-            meta.setDisplayName(
-                    "§aФлакон с отравлением"
-            );
-
-            meta.setLore(
-                    Arrays.asList(
-                            "§7Наносит отравление на меч на 3 минуты"
+            /*
+             * ВАЖНО:
+             * больше CustomModelData 1001 здесь нет.
+             *
+             * Используем современный item_model
+             * Paper 1.21.11.
+             */
+            meta.setItemModel(
+                    new NamespacedKey(
+                            "minecraft",
+                            "flask_water"
                     )
             );
 
-            meta.setCustomModelData(
-                    FLASK_POISON_MODEL
+        } else {
+
+            meta.setDisplayName(
+                    "§fФлакон с отравлением"
             );
 
             pdc.set(
@@ -368,33 +311,42 @@ public class FlaskListener implements Listener {
                     PersistentDataType.STRING,
                     "poison"
             );
+
+            meta.setItemModel(
+                    new NamespacedKey(
+                            "minecraft",
+                            "flask_poison"
+                    )
+            );
         }
 
         flask.setItemMeta(meta);
 
-        java.util.Map<Integer, ItemStack> leftovers =
+        var leftovers =
                 player.getInventory().addItem(flask);
 
-        if (!leftovers.isEmpty()) {
+        /*
+         * Если инвентарь полный — предмет падает,
+         * но игроку ничего не пишем в чат.
+         */
+        for (ItemStack leftover :
+                leftovers.values()) {
 
-            for (ItemStack leftover :
-                    leftovers.values()) {
-
-                player.getWorld().dropItemNaturally(
-                        player.getLocation(),
-                        leftover
-                );
-            }
-
-            player.sendMessage(
-                    ChatColor.YELLOW +
-                    "Часть флаконов не поместилась в инвентарь и была выброшена рядом."
+            player.getWorld().dropItemNaturally(
+                    player.getLocation(),
+                    leftover
             );
         }
 
         return true;
     }
 
+    /*
+     * Shift + ПКМ.
+     *
+     * Меч в основной руке.
+     * Флакон в левой.
+     */
     @EventHandler(
             priority = EventPriority.HIGHEST
     )
@@ -404,160 +356,125 @@ public class FlaskListener implements Listener {
 
         if (event.getAction() != Action.RIGHT_CLICK_AIR &&
                 event.getAction() != Action.RIGHT_CLICK_BLOCK) {
-
             return;
         }
 
         Player player =
                 event.getPlayer();
 
-        ItemStack eventItem =
-                event.getItem();
-
-        /*
-         * Если игрок взаимодействует самим флаконом,
-         * запрещаем обычное питьё Potion.
-         */
-        if (isFlask(eventItem)) {
-            event.setCancelled(true);
-        }
-
-        ItemStack mainHand =
-                player.getInventory()
-                        .getItemInMainHand();
-
         ItemStack offHand =
                 player.getInventory()
                         .getItemInOffHand();
 
         /*
-         * Флакон должен находиться в оффхенде.
+         * Если это вообще не наш флакон —
+         * ничего не трогаем.
          */
         if (!isFlask(offHand)) {
             return;
         }
 
         /*
-         * Для нанесения нужен Shift.
+         * Наш флакон нельзя пить как обычное зелье.
          */
+        event.setCancelled(true);
+
         if (!player.isSneaking()) {
             return;
         }
 
-        event.setCancelled(true);
+        ItemStack mainHand =
+                player.getInventory()
+                        .getItemInMainHand();
 
         if (!isSword(mainHand)) {
-
-            player.sendMessage(
-                    ChatColor.RED +
-                    "В основной руке должен быть меч!"
-            );
-
             return;
         }
 
-        String type =
+        String flaskType =
                 getFlaskType(offHand);
 
-        if (type == null) {
+        if (flaskType == null) {
             return;
         }
 
-        if (type.equals("water")) {
+        /*
+         * ВОДА
+         */
+        if (flaskType.equals("water")) {
 
             if (!hasPoison(mainHand)) {
-
-                player.sendMessage(
-                        ChatColor.RED +
-                        "На этом мече нет эффекта отравления!"
-                );
-
                 return;
             }
 
-            removePoisonData(mainHand);
+            removePoison(mainHand);
 
-            consumeOffhandFlask(player);
+            consumeFlask(player);
 
             player.getWorld().playSound(
                     player.getLocation(),
                     Sound.ENTITY_GENERIC_DRINK,
-                    1.0f,
+                    0.7f,
                     1.0f
             );
 
             player.getWorld().spawnParticle(
                     Particle.SMOKE,
                     player.getLocation().add(0, 1, 0),
-                    20,
+                    8,
+                    0.2,
                     0.3,
-                    0.3,
-                    0.3,
-                    0.1
-            );
-
-            player.sendMessage(
-                    ChatColor.GREEN +
-                    "Отравление с меча смыто!"
+                    0.2,
+                    0.02
             );
 
             return;
         }
 
-        if (type.equals("poison")) {
+        /*
+         * ОТРАВЛЕНИЕ
+         */
+        if (flaskType.equals("poison")) {
 
             if (hasPoison(mainHand)) {
-
-                player.sendMessage(
-                        ChatColor.RED +
-                        "На этом мече уже есть эффект отравления!"
-                );
-
                 return;
             }
 
             applyPoison(mainHand);
 
-            consumeOffhandFlask(player);
+            consumeFlask(player);
 
             player.getWorld().playSound(
                     player.getLocation(),
                     Sound.ENTITY_EXPERIENCE_ORB_PICKUP,
-                    1.0f,
+                    0.7f,
                     1.0f
             );
 
             player.getWorld().spawnParticle(
                     Particle.CRIT,
                     player.getLocation().add(0, 1, 0),
-                    20,
+                    8,
+                    0.2,
                     0.3,
-                    0.3,
-                    0.3,
-                    0.1
-            );
-
-            player.sendMessage(
-                    ChatColor.GREEN +
-                    "На меч нанесено отравление на 3 минуты!"
+                    0.2,
+                    0.02
             );
         }
     }
 
-    private void consumeOffhandFlask(
-            Player player
-    ) {
+    private void consumeFlask(Player player) {
 
-        ItemStack offhand =
+        ItemStack flask =
                 player.getInventory()
                         .getItemInOffHand();
 
-        if (offhand == null) {
+        if (flask == null) {
             return;
         }
 
         int amount =
-                offhand.getAmount();
+                flask.getAmount();
 
         if (amount <= 1) {
 
@@ -566,62 +483,15 @@ public class FlaskListener implements Listener {
 
         } else {
 
-            offhand.setAmount(
+            flask.setAmount(
                     amount - 1
             );
         }
     }
 
-    private void applyPoison(
-            ItemStack sword
-    ) {
-
-        if (!isSword(sword)) {
-            return;
-        }
-
-        ItemMeta meta =
-                sword.getItemMeta();
-
-        if (meta == null) {
-            return;
-        }
-
-        /*
-         * 3 минуты от текущего момента.
-         */
-        long expire =
-                System.currentTimeMillis()
-                + 180_000L;
-
-        PersistentDataContainer pdc =
-                meta.getPersistentDataContainer();
-
-        pdc.set(
-                poisonExpireKey,
-                PersistentDataType.LONG,
-                expire
-        );
-
-        List<String> lore =
-                meta.hasLore()
-                        ? new ArrayList<>(meta.getLore())
-                        : new ArrayList<>();
-
-        lore.removeIf(line ->
-                ChatColor.stripColor(line)
-                        .contains("Отравление I")
-        );
-
-        lore.add(
-                "§2Отравление I §f- §a3:00"
-        );
-
-        meta.setLore(lore);
-
-        sword.setItemMeta(meta);
-    }
-
+    /*
+     * Удар отравленным мечом.
+     */
     @EventHandler(
             priority = EventPriority.HIGH
     )
@@ -640,6 +510,9 @@ public class FlaskListener implements Listener {
         Player player =
                 (Player) event.getDamager();
 
+        LivingEntity victim =
+                (LivingEntity) event.getEntity();
+
         ItemStack sword =
                 player.getInventory()
                         .getItemInMainHand();
@@ -648,15 +521,16 @@ public class FlaskListener implements Listener {
             return;
         }
 
+        /*
+         * Здесь одновременно проверяется
+         * и наличие яда, и его срок.
+         */
         if (!hasPoison(sword)) {
             return;
         }
 
-        LivingEntity victim =
-                (LivingEntity) event.getEntity();
-
         /*
-         * 5 секунд отравления.
+         * 5 секунд Poison I.
          */
         victim.addPotionEffect(
                 new PotionEffect(
@@ -666,271 +540,32 @@ public class FlaskListener implements Listener {
                 )
         );
 
-        victim.getWorld().playSound(
-                victim.getLocation(),
-                Sound.ENTITY_PLAYER_ATTACK_STRONG,
-                0.8f,
-                1.2f
-        );
-
         victim.getWorld().spawnParticle(
                 Particle.CRIT,
                 victim.getLocation().add(0, 1, 0),
-                15,
+                8,
+                0.2,
                 0.3,
-                0.3,
-                0.3,
-                0.1
+                0.2,
+                0.02
         );
-
-        victim.getWorld().spawnParticle(
-                Particle.SMOKE,
-                victim.getLocation().add(0, 1, 0),
-                10,
-                0.3,
-                0.3,
-                0.3,
-                0.1
-        );
-    }
-
-    private void startUpdateTask(
-            Player player
-    ) {
-
-        UUID uuid =
-                player.getUniqueId();
-
-        if (updateTasks.containsKey(uuid)) {
-            return;
-        }
-
-        BukkitTask task =
-                new BukkitRunnable() {
-
-                    @Override
-                    public void run() {
-
-                        Player p =
-                                Bukkit.getPlayer(uuid);
-
-                        if (p == null ||
-                                !p.isOnline()) {
-
-                            cancel();
-                            updateTasks.remove(uuid);
-                            return;
-                        }
-
-                        updatePlayerPoison(
-                                p
-                        );
-                    }
-
-                }.runTaskTimer(
-                        plugin,
-                        0L,
-                        20L
-                );
-
-        updateTasks.put(
-                uuid,
-                task
-        );
-    }
-
-    private void updatePlayerPoison(
-            Player player
-    ) {
-
-        boolean foundPoison =
-                false;
-
-        /*
-         * Проверяем весь основной инвентарь.
-         * Поэтому меч можно свободно
-         * перемещать между слотами.
-         */
-        for (int slot = 0;
-             slot < player.getInventory().getSize();
-             slot++) {
-
-            ItemStack item =
-                    player.getInventory()
-                            .getItem(slot);
-
-            if (!isSword(item)) {
-                continue;
-            }
-
-            if (!hasPoison(item)) {
-
-                /*
-                 * Если старый эффект уже истёк,
-                 * убираем его Lore.
-                 */
-                if (hasLegacyPoisonLore(item)) {
-                    removePoisonData(item);
-                }
-
-                continue;
-            }
-
-            foundPoison = true;
-
-            updatePoisonLore(
-                    item
-            );
-        }
-
-        /*
-         * Также проверяем предметы в руках,
-         * если они не попали в inventory.
-         */
-        for (ItemStack item :
-                player.getInventory().getArmorContents()) {
-
-            if (!isSword(item)) {
-                continue;
-            }
-
-            if (hasPoison(item)) {
-                foundPoison = true;
-                updatePoisonLore(item);
-            }
-        }
-
-        if (!foundPoison) {
-
-            BukkitTask task =
-                    updateTasks.remove(
-                            player.getUniqueId()
-                    );
-
-            if (task != null) {
-                task.cancel();
-            }
-        }
-    }
-
-    private void updatePoisonLore(
-            ItemStack sword
-    ) {
-
-        if (!sword.hasItemMeta()) {
-            return;
-        }
-
-        ItemMeta meta =
-                sword.getItemMeta();
-
-        if (meta == null) {
-            return;
-        }
-
-        PersistentDataContainer pdc =
-                meta.getPersistentDataContainer();
-
-        Long expire =
-                pdc.get(
-                        poisonExpireKey,
-                        PersistentDataType.LONG
-                );
-
-        if (expire == null) {
-            return;
-        }
-
-        long remaining =
-                expire -
-                System.currentTimeMillis();
-
-        if (remaining <= 0) {
-
-            removePoisonData(
-                    sword
-            );
-
-            return;
-        }
-
-        long totalSeconds =
-                (remaining + 999L) / 1000L;
-
-        long minutes =
-                totalSeconds / 60L;
-
-        long seconds =
-                totalSeconds % 60L;
-
-        String time =
-                String.format(
-                        "%02d:%02d",
-                        minutes,
-                        seconds
-                );
-
-        List<String> lore =
-                meta.hasLore()
-                        ? new ArrayList<>(meta.getLore())
-                        : new ArrayList<>();
-
-        lore.removeIf(line ->
-                ChatColor.stripColor(line)
-                        .contains("Отравление I")
-        );
-
-        lore.add(
-                "§2Отравление I §f- §a" +
-                time
-        );
-
-        meta.setLore(lore);
-
-        sword.setItemMeta(meta);
     }
 
     @EventHandler
-    public void onItemHeld(
-            PlayerItemHeldEvent event
-    ) {
-
-        Player player =
-                event.getPlayer();
-
+    public void onQuit(PlayerQuitEvent event) {
         /*
-         * Никакой привязки к slot больше нет.
-         * Просто запускаем обновление,
-         * если оно ещё не запущено.
+         * Ничего не нужно очищать.
+         *
+         * Таймер находится непосредственно
+         * на мече, поэтому после выхода
+         * игрока он продолжит отсчитываться
+         * по реальному времени.
          */
-        startUpdateTask(player);
-    }
-
-    @EventHandler
-    public void onQuit(
-            PlayerQuitEvent event
-    ) {
-
-        UUID uuid =
-                event.getPlayer()
-                        .getUniqueId();
-
-        BukkitTask task =
-                updateTasks.remove(uuid);
-
-        if (task != null) {
-            task.cancel();
-        }
     }
 
     public void disable() {
-
-        for (BukkitTask task :
-                updateTasks.values()) {
-
-            task.cancel();
-        }
-
-        updateTasks.clear();
+        /*
+         * Больше нет каждосекундных задач.
+         */
     }
 }
