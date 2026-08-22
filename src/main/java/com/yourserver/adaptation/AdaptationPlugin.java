@@ -12,9 +12,6 @@ import org.bukkit.boss.BossBar;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.enchantments.Enchantment;
-import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -25,9 +22,7 @@ import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
@@ -38,75 +33,90 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
     private final Map<UUID, Map<String, Integer>> damageCounters = new HashMap<>();
     private final Map<UUID, Map<String, Integer>> superDamageCounters = new HashMap<>();
+
     private final Map<UUID, BukkitTask> activeTimers = new HashMap<>();
     private final Map<UUID, String> activeAdaptations = new HashMap<>();
     private final Map<UUID, Boolean> superAdaptations = new HashMap<>();
+
     private final Map<UUID, Long> lastHitTime = new HashMap<>();
+
     private final Map<UUID, BossBar> activeBossBars = new HashMap<>();
     private final Map<UUID, Double> activeTimesLeft = new HashMap<>();
     private final Map<UUID, Double> activeMaxTimes = new HashMap<>();
+
     private final Map<UUID, Long> cooldownEndTimes = new HashMap<>();
+
     private DiceRollListener diceRollListener;
     private RollbackListener rollbackListener;
     private FlaskListener flaskListener;
 
-    // Кешированные объекты для частиц (ИСПРАВЛЕНО)
-    private final Particle.DustOptions meleeDust = new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
-    private final Particle.DustOptions rangedDust = new Particle.DustOptions(Color.fromRGB(0, 255, 0), 1.2f);
-    private final Particle.DustOptions magicDust = new Particle.DustOptions(Color.fromRGB(200, 0, 255), 1.2f);
+    private final Particle.DustOptions meleeDust =
+            new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
 
-    // Константы для опознавания чаров в lore
-    private final String ADAPTATION_LORE = "§dАдаптация";
-    private final String D20_LORE = "§dБросок I";
+    private final Particle.DustOptions rangedDust =
+            new Particle.DustOptions(Color.fromRGB(0, 255, 0), 1.2f);
+
+    private final Particle.DustOptions magicDust =
+            new Particle.DustOptions(Color.fromRGB(200, 0, 255), 1.2f);
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
+
         getServer().getPluginManager().registerEvents(this, this);
+
         if (getCommand("adaptation") != null) {
             getCommand("adaptation").setExecutor(this);
         }
 
-        // ===== РЕГИСТРАЦИЯ D20 =====
-        this.diceRollListener = new DiceRollListener(this);
-        getServer().getPluginManager().registerEvents(this.diceRollListener, this);
+        diceRollListener = new DiceRollListener(this);
+        getServer().getPluginManager().registerEvents(diceRollListener, this);
+
         if (getCommand("d20") != null) {
-            getCommand("d20").setExecutor(this.diceRollListener);
+            getCommand("d20").setExecutor(diceRollListener);
         }
 
-        // ===== РЕГИСТРАЦИЯ ФЛАКОНОВ (ИСПРАВЛЕНО) =====
-        this.flaskListener = new FlaskListener(this);
-        getServer().getPluginManager().registerEvents(this.flaskListener, this);
+        flaskListener = new FlaskListener(this);
+        getServer().getPluginManager().registerEvents(flaskListener, this);
+
         if (getCommand("flask") != null) {
-            getCommand("flask").setExecutor(new FlaskCommand(this.flaskListener));
+            getCommand("flask").setExecutor(new FlaskCommand(flaskListener));
         }
 
-        // ===== РЕГИСТРАЦИЯ ОТКАТА =====
-        this.rollbackListener = new RollbackListener(this);
-        getServer().getPluginManager().registerEvents(this.rollbackListener, this);
+        rollbackListener = new RollbackListener(this);
+        getServer().getPluginManager().registerEvents(rollbackListener, this);
+
         if (getCommand("rollback") != null) {
-            getCommand("rollback").setExecutor(new RollbackCommand(this.rollbackListener));
+            getCommand("rollback").setExecutor(new RollbackCommand(rollbackListener));
         }
 
-        getLogger().info("Плагин AdaptationPlugin [FULLY FIXED] успешно запущен!");
+        getLogger().info("AdaptationPlugin успешно запущен.");
     }
 
     @Override
     public void onDisable() {
         cleanupAll();
-        if (this.diceRollListener != null) {
-            this.diceRollListener.disable();
+
+        if (diceRollListener != null) {
+            diceRollListener.disable();
         }
-        if (this.rollbackListener != null) {
-            this.rollbackListener.disable();
+
+        if (rollbackListener != null) {
+            rollbackListener.disable();
         }
-        if (this.flaskListener != null) {
-            this.flaskListener.disable();
+
+        if (flaskListener != null) {
+            flaskListener.disable();
         }
     }
 
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    public boolean onCommand(
+            CommandSender sender,
+            Command command,
+            String label,
+            String[] args
+    ) {
         if (!sender.hasPermission("adaptation.admin")) {
             sender.sendMessage(ChatColor.RED + "У вас нет прав на использование этой команды!");
             return true;
@@ -114,25 +124,37 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
         if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
             reloadConfig();
-            sender.sendMessage(ChatColor.GREEN + "Конфигурация AdaptationPlugin успешно перезагружена!");
+            sender.sendMessage(
+                    ChatColor.GREEN +
+                    "Конфигурация AdaptationPlugin успешно перезагружена!"
+            );
             return true;
         }
 
         if (args.length < 3 || !args[0].equalsIgnoreCase("give")) {
-            sender.sendMessage(ChatColor.RED + "Использование: /adaptation give <игрок> <1/2/3> ИЛИ /adaptation reload");
+            sender.sendMessage(
+                    ChatColor.RED +
+                    "Использование: /adaptation give <игрок> <1/2/3> ИЛИ /adaptation reload"
+            );
             return true;
         }
 
         Player target = Bukkit.getPlayer(args[1]);
+
         if (target == null || !target.isOnline()) {
             sender.sendMessage(ChatColor.RED + "Игрок не найден или оффлайн!");
             return true;
         }
 
         int lvl;
+
         try {
             lvl = Integer.parseInt(args[2]);
-            if (lvl < 1 || lvl > 3) throw new NumberFormatException();
+
+            if (lvl < 1 || lvl > 3) {
+                throw new NumberFormatException();
+            }
+
         } catch (NumberFormatException e) {
             sender.sendMessage(ChatColor.RED + "Уровень должен быть от 1 до 3!");
             return true;
@@ -140,132 +162,229 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
         ItemStack book = new ItemStack(Material.ENCHANTED_BOOK);
         ItemMeta meta = book.getItemMeta();
+
         if (meta != null) {
             meta.setDisplayName("§bЧародейская книга");
-            String strLvl = lvl == 1 ? "I" : lvl == 2 ? "II" : "III";
-            List<String> lore = new ArrayList<>();
-            lore.add("§dАдаптация " + strLvl);
-            meta.setLore(lore);
+
+            String strLvl =
+                    lvl == 1 ? "I" :
+                    lvl == 2 ? "II" : "III";
+
+            meta.setLore(Collections.singletonList("§dАдаптация " + strLvl));
             meta.setEnchantmentGlintOverride(true);
+
             book.setItemMeta(meta);
         }
 
         target.getInventory().addItem(book);
-        sender.sendMessage(ChatColor.GREEN + "Книга Адаптация " + args[2] + " выдана игроку " + target.getName());
+
+        sender.sendMessage(
+                ChatColor.GREEN +
+                "Книга Адаптация " + args[2] +
+                " выдана игроку " + target.getName()
+        );
+
         return true;
     }
 
-    // ===== ПУБЛИЧНЫЙ МЕТОД ДЛЯ ЛОМКИ АДАПТАЦИИ (ВЫЗЫВАЕТСЯ ИЗ D20) =====
     public void breakAdaptation(Player player) {
-        if (player == null) return;
+        if (player == null) {
+            return;
+        }
+
         UUID uuid = player.getUniqueId();
 
-        if (!activeAdaptations.containsKey(uuid)) return;
-
-        if (activeTimers.containsKey(uuid)) {
-            activeTimers.get(uuid).cancel();
-            activeTimers.remove(uuid);
+        if (!activeAdaptations.containsKey(uuid)) {
+            return;
         }
 
-        if (activeBossBars.containsKey(uuid)) {
-            activeBossBars.get(uuid).removeAll();
-            activeBossBars.remove(uuid);
-        }
+        cancelTimer(uuid);
+        removeBossBar(uuid);
 
         activeAdaptations.remove(uuid);
         superAdaptations.remove(uuid);
         superDamageCounters.remove(uuid);
         damageCounters.remove(uuid);
+        activeTimesLeft.remove(uuid);
+        activeMaxTimes.remove(uuid);
 
-        player.getWorld().playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 1.0f, 0.8f);
-        player.getWorld().spawnParticle(Particle.SMOKE, player.getLocation().add(0, 1, 0), 10, 0.2, 0.3, 0.2, 0.05);
+        int cooldown = getConfig().getInt(
+                "settings.cooldown-super",
+                4
+        );
 
-        player.sendMessage(ChatColor.RED + "Бафф чара \"Адаптация\" был разбит критическим ударом врага!");
+        cooldownEndTimes.put(
+                uuid,
+                System.currentTimeMillis() + cooldown * 1000L
+        );
 
-        cooldownEndTimes.put(uuid, System.currentTimeMillis() + 4000L);
+        player.getWorld().playSound(
+                player.getLocation(),
+                Sound.BLOCK_GLASS_BREAK,
+                1.0f,
+                0.8f
+        );
+
+        player.getWorld().spawnParticle(
+                Particle.SMOKE,
+                player.getLocation().add(0, 1, 0),
+                10,
+                0.2,
+                0.3,
+                0.2,
+                0.05
+        );
+
+        player.sendMessage(
+                ChatColor.RED +
+                "Бафф чара \"Адаптация\" был разбит критическим ударом врага!"
+        );
     }
 
-    // ===== ПРОВЕРКА НАЛИЧИЯ ЧАРА В ЛОРЕ =====
     private boolean hasAdaptationLore(ItemStack item) {
-        if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) return false;
+        if (item == null ||
+                item.getType() == Material.AIR ||
+                !item.hasItemMeta()) {
+            return false;
+        }
+
         ItemMeta meta = item.getItemMeta();
-        if (meta == null || !meta.hasLore()) return false;
+
+        if (meta == null || !meta.hasLore()) {
+            return false;
+        }
 
         for (String line : meta.getLore()) {
-            String cleanLine = ChatColor.stripColor(line).trim();
-            if (cleanLine.startsWith("Адаптация")) {
+            String clean = ChatColor.stripColor(line).trim();
+
+            if (clean.startsWith("Адаптация")) {
                 return true;
             }
         }
+
         return false;
     }
 
     private boolean hasD20Lore(ItemStack item) {
-        if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) return false;
+        if (item == null ||
+                item.getType() == Material.AIR ||
+                !item.hasItemMeta()) {
+            return false;
+        }
+
         ItemMeta meta = item.getItemMeta();
-        if (meta == null || !meta.hasLore()) return false;
+
+        if (meta == null || !meta.hasLore()) {
+            return false;
+        }
 
         for (String line : meta.getLore()) {
-            String cleanLine = ChatColor.stripColor(line).trim();
-            if (cleanLine.equals("Бросок I")) {
+            String clean = ChatColor.stripColor(line).trim();
+
+            if (clean.equals("Бросок I")) {
                 return true;
             }
         }
+
         return false;
     }
 
     private int getAdaptationLevel(ItemStack item) {
-        if (item == null || !item.hasItemMeta() || !item.getItemMeta().hasLore()) return 0;
-        for (String line : item.getItemMeta().getLore()) {
-            String cleanLine = ChatColor.stripColor(line).trim();
-            if (cleanLine.contains("Адаптация III")) return 3;
-            if (cleanLine.contains("Адаптация II")) return 2;
-            if (cleanLine.contains("Адаптация I")) return 1;
+        if (item == null ||
+                !item.hasItemMeta() ||
+                !item.getItemMeta().hasLore()) {
+            return 0;
         }
+
+        for (String line : item.getItemMeta().getLore()) {
+            String clean = ChatColor.stripColor(line).trim();
+
+            if (clean.contains("Адаптация III")) {
+                return 3;
+            }
+
+            if (clean.contains("Адаптация II")) {
+                return 2;
+            }
+
+            if (clean.contains("Адаптация I")) {
+                return 1;
+            }
+        }
+
         return 0;
     }
 
     private void addAdaptationToItem(ItemStack item, int level) {
-        if (item == null) return;
+        if (item == null) {
+            return;
+        }
+
         ItemMeta meta = item.getItemMeta();
-        if (meta == null) return;
 
-        List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
-        lore.removeIf(line -> ChatColor.stripColor(line).trim().startsWith("Адаптация"));
+        if (meta == null) {
+            return;
+        }
 
-        String strLvl = level == 1 ? "I" : level == 2 ? "II" : "III";
+        List<String> lore = meta.hasLore()
+                ? new ArrayList<>(meta.getLore())
+                : new ArrayList<>();
+
+        lore.removeIf(line ->
+                ChatColor.stripColor(line)
+                        .trim()
+                        .startsWith("Адаптация")
+        );
+
+        String strLvl =
+                level == 1 ? "I" :
+                level == 2 ? "II" : "III";
+
         lore.add("§dАдаптация " + strLvl);
+
         meta.setLore(lore);
         meta.setEnchantmentGlintOverride(true);
+
         item.setItemMeta(meta);
     }
 
     private boolean isArmorItem(Material material) {
         String name = material.name();
-        return name.contains("HELMET") || name.contains("CHESTPLATE") ||
-               name.contains("LEGGINGS") || name.contains("BOOTS");
+
+        return name.contains("HELMET") ||
+               name.contains("CHESTPLATE") ||
+               name.contains("LEGGINGS") ||
+               name.contains("BOOTS");
     }
 
-    // ===== НАКОВАЛЬНЯ С ЗАПРЕТОМ ОБЪЕДИНЕНИЯ АДАПТАЦИИ И БРОСКА =====
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onAnvilPrepare(PrepareAnvilEvent event) {
+
         AnvilInventory inv = event.getInventory();
+
         ItemStack left = inv.getItem(0);
         ItemStack right = inv.getItem(1);
 
-        if (left == null || right == null) return;
+        if (left == null || right == null) {
+            return;
+        }
 
-        boolean leftHasAdaptation = hasAdaptationLore(left);
-        boolean rightHasAdaptation = hasAdaptationLore(right);
-        boolean leftHasD20 = hasD20Lore(left);
-        boolean rightHasD20 = hasD20Lore(right);
+        boolean leftAdaptation = hasAdaptationLore(left);
+        boolean rightAdaptation = hasAdaptationLore(right);
 
-        if ((leftHasAdaptation && rightHasD20) || (leftHasD20 && rightHasAdaptation)) {
+        boolean leftD20 = hasD20Lore(left);
+        boolean rightD20 = hasD20Lore(right);
+
+        if ((leftAdaptation && rightD20) ||
+                (leftD20 && rightAdaptation)) {
+
             event.setResult(null);
             return;
         }
 
-        if (!leftHasAdaptation && !rightHasAdaptation) return;
+        if (!leftAdaptation && !rightAdaptation) {
+            return;
+        }
 
         boolean isArmor = isArmorItem(left.getType());
         boolean isBook = left.getType() == Material.ENCHANTED_BOOK;
@@ -276,392 +395,1060 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         }
 
         ItemStack result = event.getResult();
+
         if (result == null || result.getType() == Material.AIR) {
             result = left.clone();
         }
 
-        if (right.getType() == Material.ENCHANTED_BOOK && rightHasAdaptation && isArmor) {
+        if (right.getType() == Material.ENCHANTED_BOOK &&
+                rightAdaptation &&
+                isArmor) {
+
             int bookLevel = getAdaptationLevel(right);
             int currentLevel = getAdaptationLevel(left);
 
             if (currentLevel > 0) {
-                if (currentLevel == bookLevel && currentLevel < 3) {
-                    int newLevel = currentLevel + 1;
-                    addAdaptationToItem(result, newLevel);
+
+                if (currentLevel == bookLevel &&
+                        currentLevel < 3) {
+
+                    addAdaptationToItem(
+                            result,
+                            currentLevel + 1
+                    );
+
                     event.setResult(result);
-                    try { inv.setRepairCost(5); } catch (Exception ignored) {}
-                    return;
-                } else {
-                    event.setResult(null);
+
+                    try {
+                        inv.setRepairCost(5);
+                    } catch (Exception ignored) {
+                    }
+
                     return;
                 }
+
+                event.setResult(null);
+                return;
+
             } else {
+
                 addAdaptationToItem(result, bookLevel);
+
                 event.setResult(result);
-                try { inv.setRepairCost(5); } catch (Exception ignored) {}
+
+                try {
+                    inv.setRepairCost(5);
+                } catch (Exception ignored) {
+                }
+
                 return;
             }
         }
 
-        if (left.getType() == Material.ENCHANTED_BOOK && right.getType() == Material.ENCHANTED_BOOK) {
-            if (leftHasAdaptation && rightHasAdaptation) {
-                int lvlLeft = getAdaptationLevel(left);
-                int lvlRight = getAdaptationLevel(right);
+        if (left.getType() == Material.ENCHANTED_BOOK &&
+                right.getType() == Material.ENCHANTED_BOOK &&
+                leftAdaptation &&
+                rightAdaptation) {
 
-                if (lvlLeft == lvlRight && lvlLeft < 3) {
-                    int newLevel = lvlLeft + 1;
-                    ItemStack newBook = left.clone();
-                    addAdaptationToItem(newBook, newLevel);
-                    event.setResult(newBook);
-                    try { inv.setRepairCost(5); } catch (Exception ignored) {}
-                    return;
-                } else {
-                    event.setResult(null);
-                    return;
+            int leftLevel = getAdaptationLevel(left);
+            int rightLevel = getAdaptationLevel(right);
+
+            if (leftLevel == rightLevel &&
+                    leftLevel < 3) {
+
+                ItemStack newBook = left.clone();
+
+                addAdaptationToItem(
+                        newBook,
+                        leftLevel + 1
+                );
+
+                event.setResult(newBook);
+
+                try {
+                    inv.setRepairCost(5);
+                } catch (Exception ignored) {
                 }
+
+                return;
             }
+
+            event.setResult(null);
+            return;
         }
 
         event.setResult(null);
     }
 
-    // ===== ОСТАЛЬНАЯ ЛОГИКА ПЛАГИНА =====
     @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerDamage(EntityDamageEvent event) {
-        if (!(event.getEntity() instanceof Player)) return;
-        Player player = (Player) event.getEntity();
-        UUID uuid = player.getUniqueId();
 
-        // Проверяем, можно ли считать удары
-        boolean canCountHits = true;
-
-        if (superAdaptations.containsKey(uuid) && superAdaptations.get(uuid)) {
-            canCountHits = false;
-        }
-
-        if (cooldownEndTimes.containsKey(uuid) && System.currentTimeMillis() < cooldownEndTimes.get(uuid)) {
-            canCountHits = false;
-        }
-
-        if (activeAdaptations.containsKey(uuid)) {
-            canCountHits = false;
-        }
-
-        // ===== ВСЕГДА применяем эффекты адаптации, если она активна =====
-        if (activeAdaptations.containsKey(uuid)) {
-            applyAdaptationEffects(player, event, uuid);
-        }
-
-        // Если нельзя считать удары — выходим (но эффекты уже применены)
-        if (!canCountHits) {
+        if (!(event.getEntity() instanceof Player)) {
             return;
         }
 
-        // ===== СЧЕТ УДАРОВ ДЛЯ АКТИВАЦИИ АДАПТАЦИИ =====
-        int totalLvl = 0, pieceCount = 0;
-        for (ItemStack armor : player.getInventory().getArmorContents()) {
-            int lvl = getAdaptationLevel(armor);
-            if (lvl > 0) {
-                totalLvl += lvl;
+        Player player = (Player) event.getEntity();
+        UUID uuid = player.getUniqueId();
+
+        /*
+         * Если адаптация уже активна,
+         * сначала применяем её защиту.
+         */
+        if (activeAdaptations.containsKey(uuid)) {
+            applyAdaptationEffects(
+                    player,
+                    event,
+                    uuid
+            );
+
+            return;
+        }
+
+        /*
+         * Во время cooldown новые адаптации
+         * не набираются.
+         */
+        if (cooldownEndTimes.containsKey(uuid)) {
+
+            if (System.currentTimeMillis() <
+                    cooldownEndTimes.get(uuid)) {
+
+                return;
+
+            } else {
+
+                cooldownEndTimes.remove(uuid);
+            }
+        }
+
+        int totalLevel = 0;
+        int pieceCount = 0;
+
+        for (ItemStack armor :
+                player.getInventory().getArmorContents()) {
+
+            int level = getAdaptationLevel(armor);
+
+            if (level > 0) {
+                totalLevel += level;
                 pieceCount++;
             }
         }
-        if (pieceCount == 0) return;
+
+        if (pieceCount == 0) {
+            return;
+        }
 
         String type = getDamageType(event.getCause());
-        if (type.equals("IGNORE")) return;
+
+        if (type.equals("IGNORE")) {
+            return;
+        }
 
         long now = System.currentTimeMillis();
-        boolean isSpam = (now - lastHitTime.getOrDefault(uuid, 0L) < 450);
-        if (!isSpam) lastHitTime.put(uuid, now);
 
-        if (isSpam) return;
+        boolean spam =
+                now - lastHitTime.getOrDefault(uuid, 0L) < 450L;
 
-        double avg = (double) totalLvl / pieceCount;
-        int req = (avg > 2.0) ? getConfig().getInt("settings.required-hits.lvl3", 6)
-                : (avg > 1.0) ? getConfig().getInt("settings.required-hits.lvl2", 8)
-                : getConfig().getInt("settings.required-hits.lvl1", 10);
+        if (spam) {
+            return;
+        }
 
-        damageCounters.putIfAbsent(uuid, new HashMap<>());
-        int hits = damageCounters.get(uuid).getOrDefault(type, 0) + 1;
-        damageCounters.get(uuid).put(type, hits);
+        lastHitTime.put(uuid, now);
 
-        if (hits >= req) {
+        double average =
+                (double) totalLevel / pieceCount;
+
+        int requiredHits;
+
+        if (average > 2.0) {
+
+            requiredHits =
+                    getConfig().getInt(
+                            "settings.required-hits.lvl3",
+                            6
+                    );
+
+        } else if (average > 1.0) {
+
+            requiredHits =
+                    getConfig().getInt(
+                            "settings.required-hits.lvl2",
+                            8
+                    );
+
+        } else {
+
+            requiredHits =
+                    getConfig().getInt(
+                            "settings.required-hits.lvl1",
+                            10
+                    );
+        }
+
+        damageCounters.putIfAbsent(
+                uuid,
+                new HashMap<>()
+        );
+
+        Map<String, Integer> counters =
+                damageCounters.get(uuid);
+
+        int hits =
+                counters.getOrDefault(type, 0) + 1;
+
+        counters.put(type, hits);
+
+        if (hits >= requiredHits) {
             activateNormal(player, type);
         }
     }
 
-    private void applyAdaptationEffects(Player player, EntityDamageEvent event, UUID uuid) {
-        if (!activeAdaptations.containsKey(uuid)) return;
+    private void applyAdaptationEffects(
+            Player player,
+            EntityDamageEvent event,
+            UUID uuid
+    ) {
 
-        String type = getDamageType(event.getCause());
-        if (type.equals("IGNORE")) return;
+        String activeType =
+                activeAdaptations.get(uuid);
+
+        if (activeType == null) {
+            return;
+        }
+
+        String damageType =
+                getDamageType(event.getCause());
+
+        if (damageType.equals("IGNORE")) {
+            return;
+        }
 
         int pieceCount = 0;
-        for (ItemStack armor : player.getInventory().getArmorContents()) {
-            if (getAdaptationLevel(armor) > 0) pieceCount++;
+
+        for (ItemStack armor :
+                player.getInventory().getArmorContents()) {
+
+            if (getAdaptationLevel(armor) > 0) {
+                pieceCount++;
+            }
         }
-        if (pieceCount == 0) return;
 
-        if (type.equals(activeAdaptations.get(uuid))) {
-            // Совпадает — защита + добавление времени
-            spawnAdaptationParticles(player, type);
+        if (pieceCount == 0) {
+            return;
+        }
 
-            if (superAdaptations.getOrDefault(uuid, false)) {
-                // ===== СУПЕР-АДАПТАЦИЯ =====
-                double perPieceSuper = getConfig().getDouble("settings.super-protection-per-piece", 0.125);
-                event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceSuper)));
+        if (damageType.equals(activeType)) {
 
-                // ===== ДОБАВЛЯЕМ ВРЕМЯ =====
+            spawnAdaptationParticles(
+                    player,
+                    damageType
+            );
+
+            if (superAdaptations.getOrDefault(
+                    uuid,
+                    false
+            )) {
+
+                double protection =
+                        getConfig().getDouble(
+                                "settings.super-protection-per-piece",
+                                0.125
+                        );
+
+                event.setDamage(
+                        event.getDamage() *
+                        (1.0 - pieceCount * protection)
+                );
+
+                /*
+                 * ПОВЫШЕННАЯ АДАПТАЦИЯ:
+                 *
+                 * каждый подходящий удар
+                 * добавляет +0.4 секунды.
+                 *
+                 * Таймер хранится в десятых долях
+                 * секунды, поэтому:
+                 *
+                 * 0.4 * 10 = 4.
+                 */
                 if (activeTimesLeft.containsKey(uuid)) {
-                    double currentLeft = activeTimesLeft.get(uuid);
-                    double maxTime = activeMaxTimes.getOrDefault(uuid, 40.0);
-                    double bonus = getConfig().getDouble("settings.hit-bonus-super", 0.4);
-                    double newLeft = Math.min(maxTime, currentLeft + (bonus * 10.0));
-                    activeTimesLeft.put(uuid, newLeft);
+
+                    double current =
+                            activeTimesLeft.get(uuid);
+
+                    double max =
+                            activeMaxTimes.getOrDefault(
+                                    uuid,
+                                    40.0
+                            );
+
+                    double bonus =
+                            getConfig().getDouble(
+                                    "settings.hit-bonus-super",
+                                    0.4
+                            );
+
+                    double newTime =
+                            Math.min(
+                                    max,
+                                    current + bonus * 10.0
+                            );
+
+                    activeTimesLeft.put(
+                            uuid,
+                            newTime
+                    );
                 }
+
             } else {
-                // ===== ОБЫЧНАЯ АДАПТАЦИЯ =====
-                double perPieceNormal = getConfig().getDouble("settings.normal-protection-per-piece", 0.075);
-                event.setDamage(event.getDamage() * (1.0 - (pieceCount * perPieceNormal)));
 
-                // ===== ДОБАВЛЯЕМ ВРЕМЯ =====
+                double protection =
+                        getConfig().getDouble(
+                                "settings.normal-protection-per-piece",
+                                0.075
+                        );
+
+                event.setDamage(
+                        event.getDamage() *
+                        (1.0 - pieceCount * protection)
+                );
+
+                /*
+                 * Обычная адаптация:
+                 * +0.2 секунды за подходящий удар.
+                 */
                 if (activeTimesLeft.containsKey(uuid)) {
-                    double currentLeft = activeTimesLeft.get(uuid);
-                    double maxTime = activeMaxTimes.getOrDefault(uuid, 100.0);
-                    double bonus = getConfig().getDouble("settings.hit-bonus-normal", 0.2);
-                    double newLeft = Math.min(maxTime, currentLeft + (bonus * 10.0));
-                    activeTimesLeft.put(uuid, newLeft);
+
+                    double current =
+                            activeTimesLeft.get(uuid);
+
+                    double max =
+                            activeMaxTimes.getOrDefault(
+                                    uuid,
+                                    100.0
+                            );
+
+                    double bonus =
+                            getConfig().getDouble(
+                                    "settings.hit-bonus-normal",
+                                    0.2
+                            );
+
+                    double newTime =
+                            Math.min(
+                                    max,
+                                    current + bonus * 10.0
+                            );
+
+                    activeTimesLeft.put(
+                            uuid,
+                            newTime
+                    );
                 }
 
-                // ===== СЧЕТЧИК ДЛЯ СУПЕР-АДАПТАЦИИ =====
-                superDamageCounters.putIfAbsent(uuid, new HashMap<>());
-                int sHits = superDamageCounters.get(uuid).getOrDefault(type, 0) + 1;
-                superDamageCounters.get(uuid).put(type, sHits);
+                /*
+                 * Набор ударов для повышенной адаптации.
+                 */
+                superDamageCounters.putIfAbsent(
+                        uuid,
+                        new HashMap<>()
+                );
 
-                int requiredSuperHits = getConfig().getInt("settings.required-super-hits", 8);
-                if (sHits >= requiredSuperHits) {
-                    activateSuper(player, type);
+                Map<String, Integer> counters =
+                        superDamageCounters.get(uuid);
+
+                int hits =
+                        counters.getOrDefault(
+                                damageType,
+                                0
+                        ) + 1;
+
+                counters.put(
+                        damageType,
+                        hits
+                );
+
+                int required =
+                        getConfig().getInt(
+                                "settings.required-super-hits",
+                                8
+                        );
+
+                if (hits >= required) {
+                    activateSuper(
+                            player,
+                            damageType
+                    );
                 }
             }
+
         } else {
-            // ===== ШТРАФ =====
-            double penaltyPerPiece;
-            if (superAdaptations.getOrDefault(uuid, false)) {
-                penaltyPerPiece = getConfig().getDouble("settings.super-penalty-per-piece", 0.125);
+
+            /*
+             * Неподходящий тип урона:
+             * увеличенный урон.
+             */
+            double penalty;
+
+            if (superAdaptations.getOrDefault(
+                    uuid,
+                    false
+            )) {
+
+                penalty =
+                        getConfig().getDouble(
+                                "settings.super-penalty-per-piece",
+                                0.125
+                        );
+
             } else {
-                penaltyPerPiece = getConfig().getDouble("settings.penalty-per-piece", 0.10);
+
+                penalty =
+                        getConfig().getDouble(
+                                "settings.penalty-per-piece",
+                                0.10
+                        );
             }
-            event.setDamage(event.getDamage() * (1.0 + (pieceCount * penaltyPerPiece)));
-            player.getWorld().spawnParticle(Particle.SMOKE, player.getLocation().add(0, 1, 0), 5, 0.2, 0.3, 0.2, 0.05);
+
+            event.setDamage(
+                    event.getDamage() *
+                    (1.0 + pieceCount * penalty)
+            );
+
+            player.getWorld().spawnParticle(
+                    Particle.SMOKE,
+                    player.getLocation().add(0, 1, 0),
+                    5,
+                    0.2,
+                    0.3,
+                    0.2,
+                    0.05
+            );
         }
     }
 
-    private void spawnAdaptationParticles(Player player, String type) {
-        Particle.DustOptions dustOptions;
+    private void spawnAdaptationParticles(
+            Player player,
+            String type
+    ) {
+
+        Particle.DustOptions dust;
+
         switch (type) {
+
             case "MELEE":
-                dustOptions = meleeDust;
+                dust = meleeDust;
                 break;
+
             case "RANGED":
-                dustOptions = rangedDust;
+                dust = rangedDust;
                 break;
+
             case "MAGIC":
-                dustOptions = magicDust;
+                dust = magicDust;
                 break;
+
             default:
                 return;
         }
-        player.getWorld().spawnParticle(Particle.DUST, player.getLocation().add(0, 1, 0), 6, 0.3, 0.4, 0.3, 0.0, dustOptions);
+
+        player.getWorld().spawnParticle(
+                Particle.DUST,
+                player.getLocation().add(0, 1, 0),
+                6,
+                0.3,
+                0.4,
+                0.3,
+                0.0,
+                dust
+        );
     }
 
-    private void activateNormal(Player player, String type) {
-        UUID uuid = player.getUniqueId();
-        cleanupPlayerData(uuid, true);
+    private void activateNormal(
+            Player player,
+            String type
+    ) {
 
-        activeAdaptations.put(uuid, type);
+        UUID uuid = player.getUniqueId();
+
+        cleanupPlayerData(
+                uuid,
+                true
+        );
+
+        activeAdaptations.put(
+                uuid,
+                type
+        );
+
+        superAdaptations.remove(uuid);
+
         damageCounters.remove(uuid);
         superDamageCounters.remove(uuid);
 
-        playBell(player, 0.9f, 20L);
+        playBell(
+                player,
+                0.9f,
+                20L
+        );
 
-        String typeStr = type.equals("MELEE") ? "БЛИЖ. УРОН!" : type.equals("RANGED") ? "СНАРЯДАМ!" : "МАГИИ!";
-        ChatColor color = type.equals("MELEE") ? ChatColor.RED : type.equals("RANGED") ? ChatColor.GREEN : ChatColor.LIGHT_PURPLE;
-        String line = ChatColor.WHITE + "" + ChatColor.BOLD + "АДАПТАЦИЯ К: " + color + ChatColor.BOLD + typeStr;
+        String typeText =
+                type.equals("MELEE")
+                        ? "БЛИЖ. УРОН!"
+                        : type.equals("RANGED")
+                        ? "СНАРЯДАМ!"
+                        : "МАГИИ!";
 
-        BarColor barColor = type.equals("MELEE") ? BarColor.RED : type.equals("RANGED") ? BarColor.GREEN : BarColor.PURPLE;
-        int duration = getConfig().getInt("settings.duration-normal", 10);
-        createBossBarTimer(player, line, barColor, duration, false);
+        ChatColor color =
+                type.equals("MELEE")
+                        ? ChatColor.RED
+                        : type.equals("RANGED")
+                        ? ChatColor.GREEN
+                        : ChatColor.LIGHT_PURPLE;
+
+        String title =
+                ChatColor.WHITE +
+                "" +
+                ChatColor.BOLD +
+                "АДАПТАЦИЯ К: " +
+                color +
+                ChatColor.BOLD +
+                typeText;
+
+        BarColor barColor =
+                type.equals("MELEE")
+                        ? BarColor.RED
+                        : type.equals("RANGED")
+                        ? BarColor.GREEN
+                        : BarColor.PURPLE;
+
+        int duration =
+                getConfig().getInt(
+                        "settings.duration-normal",
+                        10
+                );
+
+        createBossBarTimer(
+                player,
+                title,
+                barColor,
+                duration,
+                false
+        );
     }
 
-    private void activateSuper(Player player, String type) {
-        UUID uuid = player.getUniqueId();
-        cleanupPlayerData(uuid, true);
+    private void activateSuper(
+            Player player,
+            String type
+    ) {
 
-        superAdaptations.put(uuid, true);
+        UUID uuid = player.getUniqueId();
+
+        cleanupPlayerData(
+                uuid,
+                true
+        );
+
+        /*
+         * КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ:
+         *
+         * раньше здесь сохранялся только boolean
+         * superAdaptations, но НЕ type.
+         *
+         * Поэтому applyAdaptationEffects()
+         * не знала, к какому типу урона
+         * относится повышенная адаптация.
+         */
+        activeAdaptations.put(
+                uuid,
+                type
+        );
+
+        superAdaptations.put(
+                uuid,
+                true
+        );
+
+        damageCounters.remove(uuid);
         superDamageCounters.remove(uuid);
 
-        player.addPotionEffect(new PotionEffect(PotionEffectType.ABSORPTION, 160, 1, false, false, true));
-        playBell(player, 1.4f, 15L);
+        player.addPotionEffect(
+                new org.bukkit.potion.PotionEffect(
+                        org.bukkit.potion.PotionEffectType.ABSORPTION,
+                        160,
+                        1,
+                        false,
+                        false,
+                        true
+                )
+        );
 
-        String prefix = ChatColor.WHITE + "" + ChatColor.UNDERLINE + "" + ChatColor.BOLD + "ПОВЫШ. АДАПТАЦИЯ К: ";
-        String typeStr = type.equals("MELEE") ? "БЛИЖ. УРОН!" : type.equals("RANGED") ? "СНАРЯДАМ!" : "МАГИИ!";
-        ChatColor color = type.equals("MELEE") ? ChatColor.DARK_RED : type.equals("RANGED") ? ChatColor.DARK_GREEN : ChatColor.DARK_PURPLE;
-        String line = prefix + color + ChatColor.UNDERLINE + "" + ChatColor.BOLD + typeStr;
+        playBell(
+                player,
+                1.4f,
+                15L
+        );
 
-        BarColor barColor = type.equals("MELEE") ? BarColor.RED : type.equals("RANGED") ? BarColor.GREEN : BarColor.PURPLE;
-        int duration = getConfig().getInt("settings.duration-super", 4);
-        createBossBarTimer(player, line, barColor, duration, true);
+        String typeText =
+                type.equals("MELEE")
+                        ? "БЛИЖ. УРОН!"
+                        : type.equals("RANGED")
+                        ? "СНАРЯДАМ!"
+                        : "МАГИИ!";
+
+        ChatColor color =
+                type.equals("MELEE")
+                        ? ChatColor.DARK_RED
+                        : type.equals("RANGED")
+                        ? ChatColor.DARK_GREEN
+                        : ChatColor.DARK_PURPLE;
+
+        String title =
+                ChatColor.WHITE +
+                "" +
+                ChatColor.UNDERLINE +
+                ChatColor.BOLD +
+                "ПОВЫШ. АДАПТАЦИЯ К: " +
+                color +
+                ChatColor.UNDERLINE +
+                ChatColor.BOLD +
+                typeText;
+
+        BarColor barColor =
+                type.equals("MELEE")
+                        ? BarColor.RED
+                        : type.equals("RANGED")
+                        ? BarColor.GREEN
+                        : BarColor.PURPLE;
+
+        int duration =
+                getConfig().getInt(
+                        "settings.duration-super",
+                        4
+                );
+
+        createBossBarTimer(
+                player,
+                title,
+                barColor,
+                duration,
+                true
+        );
     }
 
-    private void createBossBarTimer(Player player, String msg, BarColor color, int sec, boolean wasSuper) {
+    private void createBossBarTimer(
+            Player player,
+            String message,
+            BarColor color,
+            int seconds,
+            boolean superMode
+    ) {
+
         UUID uuid = player.getUniqueId();
-        BossBar bossBar = Bukkit.createBossBar(msg, color, BarStyle.SOLID);
+
+        BossBar bossBar =
+                Bukkit.createBossBar(
+                        message,
+                        color,
+                        BarStyle.SOLID
+                );
+
         bossBar.addPlayer(player);
-        activeBossBars.put(uuid, bossBar);
 
-        double totalTicks = sec * 10.0;
-        activeTimesLeft.put(uuid, totalTicks);
-        activeMaxTimes.put(uuid, totalTicks);
+        activeBossBars.put(
+                uuid,
+                bossBar
+        );
 
-        activeTimers.put(uuid, new BukkitRunnable() {
-            boolean isCooldownMode = false;
-            double maxTime = totalTicks;
+        double totalTime =
+                seconds * 10.0;
 
-            @Override
-            public void run() {
-                Player p = Bukkit.getPlayer(uuid);
-                Double timeLeft = activeTimesLeft.get(uuid);
+        activeTimesLeft.put(
+                uuid,
+                totalTime
+        );
 
-                if (p == null || !p.isOnline() || timeLeft == null) {
-                    cleanupPlayerData(uuid, false);
-                    cancel();
-                    return;
-                }
+        activeMaxTimes.put(
+                uuid,
+                totalTime
+        );
 
-                if (!isCooldownMode && timeLeft <= 0) {
-                    p.getWorld().playSound(p.getLocation(), Sound.BLOCK_GLASS_BREAK, 1.0f, 0.8f);
-                    p.getWorld().spawnParticle(Particle.SMOKE, p.getLocation().add(0, 1, 0), 10, 0.2, 0.3, 0.2, 0.05);
+        BukkitTask task =
+                new BukkitRunnable() {
 
-                    activeAdaptations.remove(uuid);
-                    superAdaptations.remove(uuid);
-                    superDamageCounters.remove(uuid);
-                    damageCounters.remove(uuid);
+                    boolean cooldown = false;
+                    double cooldownMax = totalTime;
 
-                    int cdSec = wasSuper ? getConfig().getInt("settings.cooldown-super", 4)
-                                         : getConfig().getInt("settings.cooldown-normal", 4);
-                    cooldownEndTimes.put(uuid, System.currentTimeMillis() + cdSec * 1000L);
-                    activeTimesLeft.put(uuid, cdSec * 10.0);
-                    maxTime = cdSec * 10.0;
-                    isCooldownMode = true;
+                    @Override
+                    public void run() {
 
-                    p.sendMessage(ChatColor.RED + "Адаптация закончилась! Перезарядка " + cdSec + " секунд.");
-                    bossBar.setTitle("§c§lПЕРЕЗАРЯДКА: " + cdSec + "с");
-                    bossBar.setColor(BarColor.RED);
-                    bossBar.setProgress(1.0);
-                    return;
-                }
+                        Player p =
+                                Bukkit.getPlayer(uuid);
 
-                if (isCooldownMode) {
-                    timeLeft--;
-                    activeTimesLeft.put(uuid, timeLeft);
-                    double progress = Math.max(0.0, timeLeft / maxTime);
-                    bossBar.setProgress(Math.min(1.0, progress));
-                    int secondsLeft = (int) Math.ceil(timeLeft / 10.0);
-                    bossBar.setTitle("§c§lПЕРЕЗАРЯДКА: " + secondsLeft + "с");
+                        Double time =
+                                activeTimesLeft.get(uuid);
 
-                    if (timeLeft <= 0) {
-                        cleanupPlayerData(uuid, false);
-                        p.sendMessage(ChatColor.GREEN + "Перезарядка закончилась!");
-                        bossBar.removeAll();
-                        activeBossBars.remove(uuid);
-                        cancel();
+                        if (p == null ||
+                                !p.isOnline() ||
+                                time == null) {
+
+                            cleanupPlayerData(
+                                    uuid,
+                                    false
+                            );
+
+                            cancel();
+                            return;
+                        }
+
+                        if (!cooldown &&
+                                time <= 0) {
+
+                            activeAdaptations.remove(uuid);
+                            superAdaptations.remove(uuid);
+                            superDamageCounters.remove(uuid);
+                            damageCounters.remove(uuid);
+
+                            int cooldownSeconds =
+                                    superMode
+                                            ? getConfig().getInt(
+                                                    "settings.cooldown-super",
+                                                    4
+                                            )
+                                            : getConfig().getInt(
+                                                    "settings.cooldown-normal",
+                                                    4
+                                            );
+
+                            cooldownEndTimes.put(
+                                    uuid,
+                                    System.currentTimeMillis()
+                                            + cooldownSeconds * 1000L
+                            );
+
+                            double cooldownTime =
+                                    cooldownSeconds * 10.0;
+
+                            activeTimesLeft.put(
+                                    uuid,
+                                    cooldownTime
+                            );
+
+                            cooldownMax =
+                                    cooldownTime;
+
+                            cooldown = true;
+
+                            p.getWorld().playSound(
+                                    p.getLocation(),
+                                    Sound.BLOCK_GLASS_BREAK,
+                                    1.0f,
+                                    0.8f
+                            );
+
+                            p.getWorld().spawnParticle(
+                                    Particle.SMOKE,
+                                    p.getLocation().add(0, 1, 0),
+                                    10,
+                                    0.2,
+                                    0.3,
+                                    0.2,
+                                    0.05
+                            );
+
+                            p.sendMessage(
+                                    ChatColor.RED +
+                                    "Адаптация закончилась! Перезарядка " +
+                                    cooldownSeconds +
+                                    " секунд."
+                            );
+
+                            bossBar.setTitle(
+                                    "§c§lПЕРЕЗАРЯДКА: " +
+                                    cooldownSeconds +
+                                    "с"
+                            );
+
+                            bossBar.setColor(
+                                    BarColor.RED
+                            );
+
+                            bossBar.setProgress(1.0);
+
+                            return;
+                        }
+
+                        if (cooldown) {
+
+                            time -= 1.0;
+
+                            activeTimesLeft.put(
+                                    uuid,
+                                    time
+                            );
+
+                            double progress =
+                                    Math.max(
+                                            0.0,
+                                            time / cooldownMax
+                                    );
+
+                            bossBar.setProgress(
+                                    Math.min(
+                                            1.0,
+                                            progress
+                                    )
+                            );
+
+                            int secondsLeft =
+                                    (int) Math.ceil(
+                                            time / 10.0
+                                    );
+
+                            bossBar.setTitle(
+                                    "§c§lПЕРЕЗАРЯДКА: " +
+                                    secondsLeft +
+                                    "с"
+                            );
+
+                            if (time <= 0) {
+
+                                activeTimesLeft.remove(uuid);
+                                activeMaxTimes.remove(uuid);
+                                cooldownEndTimes.remove(uuid);
+
+                                bossBar.removeAll();
+                                activeBossBars.remove(uuid);
+
+                                p.sendMessage(
+                                        ChatColor.GREEN +
+                                        "Перезарядка закончилась!"
+                                );
+
+                                cancel();
+                            }
+
+                            return;
+                        }
+
+                        /*
+                         * Таймер адаптации.
+                         *
+                         * 1 единица = 0.1 секунды.
+                         *
+                         * Задача запускается каждые 2 тика
+                         * = каждые 0.1 секунды.
+                         */
+                        time -= 1.0;
+
+                        activeTimesLeft.put(
+                                uuid,
+                                time
+                        );
+
+                        double max =
+                                activeMaxTimes.getOrDefault(
+                                        uuid,
+                                        totalTime
+                                );
+
+                        double progress =
+                                Math.max(
+                                        0.0,
+                                        time / max
+                                );
+
+                        bossBar.setProgress(
+                                Math.min(
+                                        1.0,
+                                        progress
+                                )
+                        );
+
+                        int secondsLeft =
+                                (int) Math.ceil(
+                                        Math.max(
+                                                0.0,
+                                                time
+                                        ) / 10.0
+                                );
+
+                        if (superMode) {
+
+                            bossBar.setTitle(
+                                    "§6§l" +
+                                    message +
+                                    " §7[§6" +
+                                    secondsLeft +
+                                    "с§7]"
+                            );
+
+                        } else {
+
+                            bossBar.setTitle(
+                                    message +
+                                    " §7[§f" +
+                                    secondsLeft +
+                                    "с§7]"
+                            );
+                        }
                     }
-                    return;
-                }
 
-                // Обычный режим
-                timeLeft--;
-                activeTimesLeft.put(uuid, timeLeft);
-                double progress = Math.max(0.0, timeLeft / maxTime);
-                bossBar.setProgress(Math.min(1.0, progress));
+                }.runTaskTimer(
+                        this,
+                        0L,
+                        2L
+                );
 
-                if (wasSuper) {
-                    bossBar.setTitle("§6§l" + msg + " §7[§6" + (int) Math.ceil(timeLeft / 10.0) + "с§7]");
-                } else {
-                    bossBar.setTitle(msg + " §7[§f" + (int) Math.ceil(timeLeft / 10.0) + "с§7]");
-                }
-            }
-        }.runTaskTimer(this, 0L, 2L));
+        activeTimers.put(
+                uuid,
+                task
+        );
     }
 
-    private void playBell(Player player, float pitch, long delay) {
+    private void playBell(
+            Player player,
+            float pitch,
+            long delay
+    ) {
+
         for (int i = 0; i < 3; i++) {
+
             final int index = i;
-            Bukkit.getScheduler().runTaskLater(this, () -> {
-                if (player.isOnline()) {
-                    player.getWorld().playSound(player.getLocation(), Sound.BLOCK_BELL_USE, 1.0f, pitch + (index * 0.1f));
-                }
-            }, delay * (i + 1));
+
+            Bukkit.getScheduler().runTaskLater(
+                    this,
+                    () -> {
+
+                        if (player.isOnline()) {
+
+                            player.getWorld().playSound(
+                                    player.getLocation(),
+                                    Sound.BLOCK_BELL_USE,
+                                    1.0f,
+                                    pitch + index * 0.1f
+                            );
+                        }
+
+                    },
+                    delay * (i + 1)
+            );
         }
     }
 
-    private void cleanupPlayerData(UUID uuid, boolean keepCooldown) {
-        if (activeTimers.containsKey(uuid)) {
-            activeTimers.get(uuid).cancel();
-            activeTimers.remove(uuid);
+    private void cancelTimer(UUID uuid) {
+
+        BukkitTask task =
+                activeTimers.remove(uuid);
+
+        if (task != null) {
+            task.cancel();
         }
-        if (activeBossBars.containsKey(uuid)) {
-            activeBossBars.get(uuid).removeAll();
-            activeBossBars.remove(uuid);
+    }
+
+    private void removeBossBar(UUID uuid) {
+
+        BossBar bar =
+                activeBossBars.remove(uuid);
+
+        if (bar != null) {
+            bar.removeAll();
         }
+    }
+
+    private void cleanupPlayerData(
+            UUID uuid,
+            boolean keepCooldown
+    ) {
+
+        cancelTimer(uuid);
+        removeBossBar(uuid);
+
         activeTimesLeft.remove(uuid);
         activeMaxTimes.remove(uuid);
+
         if (!keepCooldown) {
             cooldownEndTimes.remove(uuid);
         }
     }
 
     private void cleanupAll() {
-        for (BossBar bar : activeBossBars.values()) {
+
+        for (UUID uuid :
+                new ArrayList<>(activeTimers.keySet())) {
+
+            cancelTimer(uuid);
+        }
+
+        for (BossBar bar :
+                activeBossBars.values()) {
+
             bar.removeAll();
         }
+
         activeBossBars.clear();
-        for (BukkitTask task : activeTimers.values()) {
-            task.cancel();
-        }
-        activeTimers.clear();
+
         activeTimesLeft.clear();
         activeMaxTimes.clear();
-        cooldownEndTimes.clear();
+
         activeAdaptations.clear();
         superAdaptations.clear();
+
         damageCounters.clear();
         superDamageCounters.clear();
+
+        cooldownEndTimes.clear();
+        lastHitTime.clear();
     }
 
     private String getDamageType(DamageCause cause) {
+
         switch (cause) {
+
             case ENTITY_ATTACK:
             case ENTITY_SWEEP_ATTACK:
                 return "MELEE";
+
             case PROJECTILE:
                 return "RANGED";
+
             case MAGIC:
             case POISON:
             case WITHER:
             case DRAGON_BREATH:
             case THORNS:
                 return "MAGIC";
+
             default:
                 return "IGNORE";
         }
     }
 
-    // ===== ВСПОМОГАТЕЛЬНЫЙ МЕТОД ДЛЯ D20 (ЧТОБЫ НЕ БЫЛО ОШИБОК) =====
     public void disableDiceRollListener() {
+
         if (diceRollListener != null) {
             diceRollListener.disable();
         }
+    }
+
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+
+        UUID uuid =
+                event.getPlayer().getUniqueId();
+
+        cleanupPlayerData(
+                uuid,
+                false
+        );
+
+        activeAdaptations.remove(uuid);
+        superAdaptations.remove(uuid);
+
+        damageCounters.remove(uuid);
+        superDamageCounters.remove(uuid);
+
+        lastHitTime.remove(uuid);
     }
 }
