@@ -6,28 +6,15 @@ api-version: 1.20
 commands:
   d20:
     description: Выдать книгу с чаром Бросок I
-    permission: diceroll.admin
+    permission: f8.admin
     usage: /d20 give <игрок>, /d20 cheat <1-20> или /d20 enchant <ID>
-  adaptation:
-    description: управление плагином f9-daptation-sosika-bobr551
-    permission: adaptation.admin
-    usage: /adaptation <give/reload>
-  rollback:
-    description: Выдать тотем с чаром "Откат I"
-    usage: /rollback give <игрок>
-    permission: rollback.admin
-  flask:
-    description: Управление флаконами
-    usage: /flask give <игрок> <water/poison> [количество]
-    permission: flask.admin
 
+  f8:
+    description: Меню дополнительных возможностей F8
+    permission: f8.admin
+    usage: /f8
+    
 permissions:
-  adaptation.admin:
-    description: Право на использование команд адаптации
-    default: op
-  rollback.admin:
-    description: Право на использование команды /rollback
-    default: op
-  flask.admin:
-    description: Право на использование команды /flask
+  f8.admin:
+    description: Доступ к меню F8
     default: op
