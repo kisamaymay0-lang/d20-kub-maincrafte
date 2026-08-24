@@ -65,8 +65,8 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 
         getServer().getPluginManager().registerEvents(this, this);
 
-        if (getCommand("adaptation") != null) {
-            getCommand("adaptation").setExecutor(this);
+        if (getCommand("f8") != null) {
+            getCommand("f8").setExecutor(this);
         }
 
         diceRollListener = new DiceRollListener(this);
