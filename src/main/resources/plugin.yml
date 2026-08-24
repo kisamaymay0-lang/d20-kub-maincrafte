@@ -1,23 +1,12 @@
-name: f8-daptation-sosicka-bobr551
+name: f8-plugin
 version: 8
 main: com.yourserver.adaptation.AdaptationPlugin
-api-version: 1.20
-
+api-version: '1.21'
+author: kisamaymay0-lang
 commands:
-  d20:
-    description: Выдать книгу с чаром Бросок I
-    permission: f8.admin
-    usage: /d20 give <игрок>, /d20 cheat <1-20> или /d20 enchant <ID>
   f8:
-    description: Открывает меню администратора
-    permission: f8.admin
-    usage: /<command>
-    aliases:  # <-- ДОБАВЬТЕ ЭТОТ БЛОК
-      - adminmenu
-      - am
-      - меню
-      - админменю
-    
+    description: Меню дополнительных возможностей F8
+    usage: /f8
 permissions:
   f8.admin:
     description: Доступ к меню F8
