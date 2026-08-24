@@ -250,8 +250,12 @@ public class FlaskListener implements Listener {
             if (random.nextDouble() < 0.35) {
                 double fall = 0.10 + random.nextDouble() * 0.18;
 
-                Vector falling = position.clone()
-                        .add((random.nextDouble() - 0.5) * 0.08, -fall, (random.nextDouble() - 0.5) * 0.08);
+              Vector falling = position.clone()
+        .add(new Vector(
+                (random.nextDouble() - 0.5) * 0.08,
+                -fall,
+                (random.nextDouble() - 0.5) * 0.08
+        ));
 
                 player.getWorld().spawnParticle(
                         Particle.DUST,
