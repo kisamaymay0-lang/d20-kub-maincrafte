@@ -59,39 +59,47 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
     private final Particle.DustOptions magicDust =
             new Particle.DustOptions(Color.fromRGB(200, 0, 255), 1.2f);
 
-    @Override
-    public void onEnable() {
-        saveDefaultConfig();
+@Override
+public void onEnable() {
+    saveDefaultConfig();
 
-        getServer().getPluginManager().registerEvents(this, this);
+    getServer().getPluginManager().registerEvents(this, this);
 
-        if (getCommand("f8") != null) {
-            getCommand("f8").setExecutor(this);
-        }
-
-        diceRollListener = new DiceRollListener(this);
-        getServer().getPluginManager().registerEvents(diceRollListener, this);
-
-        if (getCommand("d20") != null) {
-            getCommand("d20").setExecutor(diceRollListener);
-        }
-
-        flaskListener = new FlaskListener(this);
-        getServer().getPluginManager().registerEvents(flaskListener, this);
-
-        if (getCommand("flask") != null) {
-            getCommand("flask").setExecutor(new FlaskCommand(flaskListener));
-        }
-
-        rollbackListener = new RollbackListener(this);
-        getServer().getPluginManager().registerEvents(rollbackListener, this);
-
-        if (getCommand("rollback") != null) {
-            getCommand("rollback").setExecutor(new RollbackCommand(rollbackListener));
-        }
-
-        getLogger().info("AdaptationPlugin успешно запущен.");
+    if (getCommand("adaptation") != null) {
+        getCommand("adaptation").setExecutor(this);
     }
+
+    F8Command f8Command = new F8Command(this);
+
+    if (getCommand("f8") != null) {
+        getCommand("f8").setExecutor(f8Command);
+    }
+
+    getServer().getPluginManager().registerEvents(f8Command, this);
+
+    diceRollListener = new DiceRollListener(this);
+    getServer().getPluginManager().registerEvents(diceRollListener, this);
+
+    if (getCommand("d20") != null) {
+        getCommand("d20").setExecutor(diceRollListener);
+    }
+
+    flaskListener = new FlaskListener(this);
+    getServer().getPluginManager().registerEvents(flaskListener, this);
+
+    if (getCommand("flask") != null) {
+        getCommand("flask").setExecutor(new FlaskCommand(flaskListener));
+    }
+
+    rollbackListener = new RollbackListener(this);
+    getServer().getPluginManager().registerEvents(rollbackListener, this);
+
+    if (getCommand("rollback") != null) {
+        getCommand("rollback").setExecutor(new RollbackCommand(rollbackListener));
+    }
+
+    getLogger().info("AdaptationPlugin успешно запущен.");
+}
 
     @Override
     public void onDisable() {
