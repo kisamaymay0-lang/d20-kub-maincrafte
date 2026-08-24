@@ -9,9 +9,14 @@ commands:
     permission: f8.admin
     usage: /d20 give <игрок>, /d20 cheat <1-20> или /d20 enchant <ID>
   f8:
-    description: Меню дополнительных возможностей F8
+    description: Открывает меню администратора
     permission: f8.admin
-    usage: /f8
+    usage: /<command>
+    aliases:  # <-- ДОБАВЬТЕ ЭТОТ БЛОК
+      - adminmenu
+      - am
+      - меню
+      - админменю
     
 permissions:
   f8.admin:
