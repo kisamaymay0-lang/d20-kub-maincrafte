@@ -65,42 +65,33 @@ public void onEnable() {
 
     getServer().getPluginManager().registerEvents(this, this);
 
-    if (getCommand("adaptation") != null) {
-        getCommand("adaptation").setExecutor(this);
-    }
+    diceRollListener = new DiceRollListener(this);
+    getServer().getPluginManager().registerEvents(diceRollListener, this);
 
-    F8Command f8Command = new F8Command(this);
+    flaskListener = new FlaskListener(this);
+    getServer().getPluginManager().registerEvents(flaskListener, this);
+
+    rollbackListener = new RollbackListener(this);
+    getServer().getPluginManager().registerEvents(rollbackListener, this);
+
+    F8Command f8Command = new F8Command(
+            this,
+            flaskListener,
+            rollbackListener
+    );
+
+    getServer().getPluginManager().registerEvents(
+            f8Command,
+            this
+    );
 
     if (getCommand("f8") != null) {
         getCommand("f8").setExecutor(f8Command);
     }
 
-    getServer().getPluginManager().registerEvents(f8Command, this);
-
-    diceRollListener = new DiceRollListener(this);
-    getServer().getPluginManager().registerEvents(diceRollListener, this);
-
-    if (getCommand("d20") != null) {
-        getCommand("d20").setExecutor(diceRollListener);
-    }
-
-    flaskListener = new FlaskListener(this);
-    getServer().getPluginManager().registerEvents(flaskListener, this);
-
-    if (getCommand("flask") != null) {
-        getCommand("flask").setExecutor(new FlaskCommand(flaskListener));
-    }
-
-    rollbackListener = new RollbackListener(this);
-    getServer().getPluginManager().registerEvents(rollbackListener, this);
-
-    if (getCommand("rollback") != null) {
-        getCommand("rollback").setExecutor(new RollbackCommand(rollbackListener));
-    }
-
     getLogger().info("AdaptationPlugin успешно запущен.");
 }
-
+    
     @Override
     public void onDisable() {
         cleanupAll();
