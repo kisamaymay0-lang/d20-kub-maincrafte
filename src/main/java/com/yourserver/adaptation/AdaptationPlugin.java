@@ -110,9 +110,6 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
         }
     }
 
-        return true;
-    }
-
     public void breakAdaptation(Player player) {
         if (player == null) {
             return;
