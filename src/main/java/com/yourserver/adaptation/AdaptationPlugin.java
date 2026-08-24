@@ -63,22 +63,51 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 public void onEnable() {
     saveDefaultConfig();
 
-    getServer().getPluginManager().registerEvents(this, this);
-
-    diceRollListener = new DiceRollListener(this);
-    getServer().getPluginManager().registerEvents(diceRollListener, this);
-
-    flaskListener = new FlaskListener(this);
-    getServer().getPluginManager().registerEvents(flaskListener, this);
-
-    rollbackListener = new RollbackListener(this);
-    getServer().getPluginManager().registerEvents(rollbackListener, this);
-
-    F8Command f8Command = new F8Command(
+    getServer().getPluginManager().registerEvents(
             this,
-            flaskListener,
-            rollbackListener
+            this
     );
+
+    diceRollListener =
+            new DiceRollListener(this);
+
+    getServer().getPluginManager().registerEvents(
+            diceRollListener,
+            this
+    );
+
+    flaskListener =
+            new FlaskListener(this);
+
+    getServer().getPluginManager().registerEvents(
+            flaskListener,
+            this
+    );
+
+    rollbackListener =
+            new RollbackListener(this);
+
+    getServer().getPluginManager().registerEvents(
+            rollbackListener,
+            this
+    );
+
+    CopperBlockListener copperBlockListener =
+            new CopperBlockListener(this);
+
+    getServer().getPluginManager().registerEvents(
+            copperBlockListener,
+            this
+    );
+
+    F8Command f8Command =
+            new F8Command(
+                    this,
+                    diceRollListener,
+                    flaskListener,
+                    rollbackListener,
+                    copperBlockListener
+            );
 
     getServer().getPluginManager().registerEvents(
             f8Command,
@@ -86,10 +115,14 @@ public void onEnable() {
     );
 
     if (getCommand("f8") != null) {
-        getCommand("f8").setExecutor(f8Command);
+        getCommand("f8").setExecutor(
+                f8Command
+        );
     }
 
-    getLogger().info("AdaptationPlugin успешно запущен.");
+    getLogger().info(
+            "AdaptationPlugin успешно запущен."
+    );
 }
     
     @Override
