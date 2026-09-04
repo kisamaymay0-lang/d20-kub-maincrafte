@@ -14,7 +14,16 @@ commands:
     permission: f8.admin
     usage: /f8
 
+  stars:
+    description: Управление созвездиями
+    permission: stars.admin
+    usage: /stars <reload|list|add|edge|pin|unpin|model|reset|give>
+
 permissions:
   f8.admin:
     description: Доступ к меню F8
+    default: op
+
+  stars.admin:
+    description: Управление созвездиями
     default: op

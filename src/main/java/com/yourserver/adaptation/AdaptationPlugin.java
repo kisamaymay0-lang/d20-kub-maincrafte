@@ -48,6 +48,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private FlaskListener flaskListener;
     private CopperBlockListener copperBlockListener;
     private CaviarListener caviarListener;
+    private ConstellationManager constellationManager;
 
     private final Particle.DustOptions meleeDust =
             new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -107,6 +108,20 @@ public void onEnable() {
             this
     );
 
+    constellationManager =
+            new ConstellationManager(this);
+
+    getServer().getPluginManager().registerEvents(
+            constellationManager,
+            this
+    );
+
+    if (getCommand("stars") != null) {
+        getCommand("stars").setExecutor(
+                constellationManager
+        );
+    }
+
     F8Command f8Command =
             new F8Command(
                     this,
@@ -158,6 +173,10 @@ public void onEnable() {
 
         if (copperBlockListener != null) {
             copperBlockListener.disable();
+        }
+
+        if (constellationManager != null) {
+            constellationManager.disable();
         }
     }
 
