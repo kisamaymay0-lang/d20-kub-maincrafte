@@ -1,7 +1,7 @@
 name: f8-plugin
 version: 8
 main: com.yourserver.adaptation.AdaptationPlugin
-api-version: 1.20
+api-version: '1.21'
 
 commands:
   d20:
@@ -14,7 +14,16 @@ commands:
     permission: f8.admin
     usage: /f8
 
+  stars:
+    description: Управление созвездиями
+    permission: stars.admin
+    usage: /stars <reload|list|add|edge|pin|unpin|model|reset|give>
+
 permissions:
   f8.admin:
     description: Доступ к меню F8
+    default: op
+
+  stars.admin:
+    description: Управление созвездиями
     default: op

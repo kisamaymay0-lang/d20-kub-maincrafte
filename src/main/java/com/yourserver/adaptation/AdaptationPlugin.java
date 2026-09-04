@@ -9,9 +9,6 @@ import org.bukkit.Color;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -29,7 +26,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 
-public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExecutor {
+public class AdaptationPlugin extends JavaPlugin implements Listener {
 
     private final Map<UUID, Map<String, Integer>> damageCounters = new HashMap<>();
     private final Map<UUID, Map<String, Integer>> superDamageCounters = new HashMap<>();
@@ -38,7 +35,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
     private final Map<UUID, String> activeAdaptations = new HashMap<>();
     private final Map<UUID, Boolean> superAdaptations = new HashMap<>();
 
-    private final Map<UUID, Long> lastHitTime = new HashMap<>();
+    private final Map<UUID, Map<String, Long>> lastHitByType = new HashMap<>();
 
     private final Map<UUID, BossBar> activeBossBars = new HashMap<>();
     private final Map<UUID, Double> activeTimesLeft = new HashMap<>();
@@ -49,6 +46,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
     private DiceRollListener diceRollListener;
     private RollbackListener rollbackListener;
     private FlaskListener flaskListener;
+    private CopperBlockListener copperBlockListener;
+    private CaviarListener caviarListener;
+    private ConstellationManager constellationManager;
 
     private final Particle.DustOptions meleeDust =
             new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -92,13 +92,35 @@ public void onEnable() {
             this
     );
 
-    CopperBlockListener copperBlockListener =
+    copperBlockListener =
             new CopperBlockListener(this);
 
     getServer().getPluginManager().registerEvents(
             copperBlockListener,
             this
     );
+
+    caviarListener =
+            new CaviarListener(this);
+
+    getServer().getPluginManager().registerEvents(
+            caviarListener,
+            this
+    );
+
+    constellationManager =
+            new ConstellationManager(this);
+
+    getServer().getPluginManager().registerEvents(
+            constellationManager,
+            this
+    );
+
+    if (getCommand("stars") != null) {
+        getCommand("stars").setExecutor(
+                constellationManager
+        );
+    }
 
     F8Command f8Command =
             new F8Command(
@@ -117,6 +139,14 @@ public void onEnable() {
     if (getCommand("f8") != null) {
         getCommand("f8").setExecutor(
                 f8Command
+        );
+    }
+
+    // Регистрируем обработчик команды /d20.
+    // Без этого команда из plugin.yml не будет работать.
+    if (getCommand("d20") != null) {
+        getCommand("d20").setExecutor(
+                diceRollListener
         );
     }
 
@@ -139,6 +169,14 @@ public void onEnable() {
 
         if (flaskListener != null) {
             flaskListener.disable();
+        }
+
+        if (copperBlockListener != null) {
+            copperBlockListener.disable();
+        }
+
+        if (constellationManager != null) {
+            constellationManager.disable();
         }
     }
 
@@ -188,11 +226,6 @@ public void onEnable() {
                 0.3,
                 0.2,
                 0.05
-        );
-
-        player.sendMessage(
-                ChatColor.RED +
-                "Бафф чара \"Адаптация\" был разбит критическим ударом врага!"
         );
     }
 
@@ -502,14 +535,38 @@ public void onEnable() {
 
         long now = System.currentTimeMillis();
 
-        boolean spam =
-                now - lastHitTime.getOrDefault(uuid, 0L) < 450L;
+        /*
+         * Защита от "спама" урона. Для огня/лавы/удушья урон приходит
+         * каждый тик, поэтому для них интервал длиннее — иначе адаптация
+         * заполняется слишком быстро.
+         */
+        boolean environmental =
+                isEnvironmentalCause(event.getCause());
 
-        if (spam) {
+        long interval = environmental
+                ? getConfig().getLong(
+                        "settings.damage-interval-environment-ms",
+                        2000L
+                )
+                : getConfig().getLong(
+                        "settings.damage-interval-normal-ms",
+                        450L
+                );
+
+        Map<String, Long> lastByType =
+                lastHitByType.computeIfAbsent(
+                        uuid,
+                        k -> new HashMap<>()
+                );
+
+        long lastHit =
+                lastByType.getOrDefault(type, 0L);
+
+        if (now - lastHit < interval) {
             return;
         }
 
-        lastHitTime.put(uuid, now);
+        lastByType.put(type, now);
 
         double average =
                 (double) totalLevel / pieceCount;
@@ -1112,21 +1169,12 @@ public void onEnable() {
                                     0.05
                             );
 
-                            p.sendMessage(
-                                    ChatColor.RED +
-                                    "Адаптация закончилась! Перезарядка " +
-                                    cooldownSeconds +
-                                    " секунд."
-                            );
-
                             bossBar.setTitle(
-                                    "§c§lПЕРЕЗАРЯДКА: " +
-                                    cooldownSeconds +
-                                    "с"
+                                    "§7§lПЕРЕЗАРЯДКА"
                             );
 
                             bossBar.setColor(
-                                    BarColor.RED
+                                    BarColor.WHITE
                             );
 
                             bossBar.setProgress(1.0);
@@ -1156,17 +1204,6 @@ public void onEnable() {
                                     )
                             );
 
-                            int secondsLeft =
-                                    (int) Math.ceil(
-                                            time / 10.0
-                                    );
-
-                            bossBar.setTitle(
-                                    "§c§lПЕРЕЗАРЯДКА: " +
-                                    secondsLeft +
-                                    "с"
-                            );
-
                             if (time <= 0) {
 
                                 activeTimesLeft.remove(uuid);
@@ -1175,11 +1212,6 @@ public void onEnable() {
 
                                 bossBar.removeAll();
                                 activeBossBars.remove(uuid);
-
-                                p.sendMessage(
-                                        ChatColor.GREEN +
-                                        "Перезарядка закончилась!"
-                                );
 
                                 cancel();
                             }
@@ -1221,31 +1253,17 @@ public void onEnable() {
                                 )
                         );
 
-                        int secondsLeft =
-                                (int) Math.ceil(
-                                        Math.max(
-                                                0.0,
-                                                time
-                                        ) / 10.0
-                                );
-
                         if (superMode) {
 
                             bossBar.setTitle(
                                     "§6§l" +
-                                    message +
-                                    " §7[§6" +
-                                    secondsLeft +
-                                    "с§7]"
+                                    message
                             );
 
                         } else {
 
                             bossBar.setTitle(
-                                    message +
-                                    " §7[§f" +
-                                    secondsLeft +
-                                    "с§7]"
+                                    message
                             );
                         }
                     }
@@ -1287,7 +1305,7 @@ public void onEnable() {
                         }
 
                     },
-                    delay * (i + 1)
+                    delay * i
             );
         }
     }
@@ -1354,7 +1372,7 @@ public void onEnable() {
         superDamageCounters.clear();
 
         cooldownEndTimes.clear();
-        lastHitTime.clear();
+        lastHitByType.clear();
     }
 
     private String getDamageType(DamageCause cause) {
@@ -1363,6 +1381,19 @@ public void onEnable() {
 
             case ENTITY_ATTACK:
             case ENTITY_SWEEP_ATTACK:
+                return "MELEE";
+
+            // Огонь и удушье приписаны к ближнему урону.
+            case FIRE:
+            case FIRE_TICK:
+            case LAVA:
+            case HOT_FLOOR:
+            case CAMPFIRE:
+            case SUFFOCATION:
+            case DROWNING:
+            case FREEZE:
+            case CRAMMING:
+            case DRYOUT:
                 return "MELEE";
 
             case PROJECTILE:
@@ -1377,6 +1408,27 @@ public void onEnable() {
 
             default:
                 return "IGNORE";
+        }
+    }
+
+    private boolean isEnvironmentalCause(DamageCause cause) {
+
+        switch (cause) {
+
+            case FIRE:
+            case FIRE_TICK:
+            case LAVA:
+            case HOT_FLOOR:
+            case CAMPFIRE:
+            case SUFFOCATION:
+            case DROWNING:
+            case FREEZE:
+            case CRAMMING:
+            case DRYOUT:
+                return true;
+
+            default:
+                return false;
         }
     }
 
@@ -1404,6 +1456,6 @@ public void onEnable() {
         damageCounters.remove(uuid);
         superDamageCounters.remove(uuid);
 
-        lastHitTime.remove(uuid);
+        lastHitByType.remove(uuid);
     }
 }

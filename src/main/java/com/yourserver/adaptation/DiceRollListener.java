@@ -54,13 +54,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     public DiceRollListener(JavaPlugin plugin) {
         this.plugin = plugin;
-        // Если AdaptationPlugin запущен в том же плагине
-        if (plugin instanceof AdaptationPlugin) {
-            this.adaptationPlugin = (AdaptationPlugin) plugin;
-        } else {
-            // Если классы в одном плагине, но plugin - это JavaPlugin
-            this.adaptationPlugin = (AdaptationPlugin) plugin;
-        }
+        // Один и тот же плагин, поэтому безопасно сохраняем ссылку.
+        // Если вдруг класс используется отдельно — просто не ломаем адаптацию.
+        this.adaptationPlugin =
+                plugin instanceof AdaptationPlugin
+                        ? (AdaptationPlugin) plugin
+                        : null;
     }
 
     @Override
@@ -569,12 +568,15 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
             }, 1L);
 
-            finalPlugin.getServer().getScheduler().runTaskTimer(finalPlugin, new Runnable() {
+            // ВАЖНО: отменяем ТОЛЬКО этот таймер, а не все задачи плагина.
+            // Раньше здесь был Bukkit.getScheduler().cancelTasks(...), который
+            // гасил вообще все таймеры (адаптацию, откат, отравление, нотные блоки).
+            finalPlugin.getServer().getScheduler().runTaskTimer(finalPlugin, new BukkitRunnable() {
                 int timer = 30;
                 @Override
                 public void run() {
                     if (finalVictim.isDead() || timer <= 0 || finalVictim.isOnGround()) {
-                        Bukkit.getScheduler().cancelTasks(finalPlugin);
+                        this.cancel();
                         return;
                     }
                     finalVictim.getWorld().spawnParticle(Particle.EXPLOSION, finalVictim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);

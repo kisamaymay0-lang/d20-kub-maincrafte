@@ -22,9 +22,32 @@ jobs:
         cache: maven
 
     - name: Build with Maven
-      run: mvn clean package
+      id: maven
+      shell: bash
+      run: |
+        set +e
+        mvn clean package > mvn-build.log 2>&1
+        code=$?
+        echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+        cat mvn-build.log
+        exit 0
+
+    - name: Emit Maven errors as annotations
+      if: always() && steps.maven.outputs.exit_code != '0'
+      shell: bash
+      run: |
+        grep -E "ERROR|error:|BUILD FAILURE|\.java:\[|\.java:[0-9]" mvn-build.log \
+          | head -80 \
+          | while IFS= read -r line; do
+              printf '::error::%s\n' "$line" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g'
+            done
+
+    - name: Fail on Maven error
+      if: steps.maven.outputs.exit_code != '0'
+      run: exit 1
 
     - name: Upload Artifact
+      if: steps.maven.outputs.exit_code == '0'
       uses: actions/upload-artifact@v4
       with:
         name: AdaptationPlugin-Jar

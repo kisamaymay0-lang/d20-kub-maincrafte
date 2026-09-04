@@ -91,7 +91,7 @@ public class F8Command implements CommandExecutor, Listener {
         inventory.setItem(
                 13,
                 createMenuItem(
-                        Material.WAXED_CHISELED_COPPER,
+                        Material.NOTE_BLOCK,
                         "§6Новые блоки",
                         List.of("§7Новые блоки"),
                         "blocks"
@@ -154,7 +154,10 @@ public class F8Command implements CommandExecutor, Listener {
 
         inventory.setItem(
                 22,
-                rollbackListener.createRollbackTotem()
+                createTaggedItem(
+                        rollbackListener.createRollbackTotem(),
+                        "rollback_totem"
+                )
         );
 
         inventory.setItem(
@@ -182,7 +185,7 @@ public class F8Command implements CommandExecutor, Listener {
         inventory.setItem(
                 13,
                 createMenuItem(
-                        Material.WAXED_CHISELED_COPPER,
+                        Material.NOTE_BLOCK,
                         "§6Медный нотный блок",
                         List.of("§7Нажмите, чтобы получить блок"),
                         "copper_note_block"
@@ -213,7 +216,7 @@ public class F8Command implements CommandExecutor, Listener {
 
         inventory.setItem(
                 11,
-                createFlaskMenuItem(
+                createTaggedItem(
                         flaskListener.createWaterFlask(),
                         "water_flask"
                 )
@@ -221,7 +224,7 @@ public class F8Command implements CommandExecutor, Listener {
 
         inventory.setItem(
                 15,
-                createFlaskMenuItem(
+                createTaggedItem(
                         flaskListener.createPoisonFlask(),
                         "poison_flask"
                 )
@@ -271,7 +274,7 @@ public class F8Command implements CommandExecutor, Listener {
         return book;
     }
 
-    private ItemStack createFlaskMenuItem(
+    private ItemStack createTaggedItem(
             ItemStack item,
             String id
     ) {
@@ -443,6 +446,14 @@ public class F8Command implements CommandExecutor, Listener {
                 player.closeInventory();
             }
 
+            case "rollback_totem" -> {
+                giveItem(
+                        player,
+                        rollbackListener.createRollbackTotem()
+                );
+                player.closeInventory();
+            }
+
             case "water_flask" -> {
                 giveItem(
                         player,
@@ -540,8 +551,6 @@ public class F8Command implements CommandExecutor, Listener {
     }
 
     private ItemStack createCopperBlock() {
-        return new ItemStack(
-                Material.WAXED_CHISELED_COPPER
-        );
+        return copperBlockListener.createCopperBlockItem();
     }
 }
