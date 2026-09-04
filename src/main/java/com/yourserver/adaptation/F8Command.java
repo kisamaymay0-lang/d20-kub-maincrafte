@@ -154,7 +154,10 @@ public class F8Command implements CommandExecutor, Listener {
 
         inventory.setItem(
                 22,
-                rollbackListener.createRollbackTotem()
+                createTaggedItem(
+                        rollbackListener.createRollbackTotem(),
+                        "rollback_totem"
+                )
         );
 
         inventory.setItem(
@@ -213,7 +216,7 @@ public class F8Command implements CommandExecutor, Listener {
 
         inventory.setItem(
                 11,
-                createFlaskMenuItem(
+                createTaggedItem(
                         flaskListener.createWaterFlask(),
                         "water_flask"
                 )
@@ -221,7 +224,7 @@ public class F8Command implements CommandExecutor, Listener {
 
         inventory.setItem(
                 15,
-                createFlaskMenuItem(
+                createTaggedItem(
                         flaskListener.createPoisonFlask(),
                         "poison_flask"
                 )
@@ -271,7 +274,7 @@ public class F8Command implements CommandExecutor, Listener {
         return book;
     }
 
-    private ItemStack createFlaskMenuItem(
+    private ItemStack createTaggedItem(
             ItemStack item,
             String id
     ) {
@@ -439,6 +442,14 @@ public class F8Command implements CommandExecutor, Listener {
                 giveItem(
                         player,
                         createD20Book()
+                );
+                player.closeInventory();
+            }
+
+            case "rollback_totem" -> {
+                giveItem(
+                        player,
+                        rollbackListener.createRollbackTotem()
                 );
                 player.closeInventory();
             }

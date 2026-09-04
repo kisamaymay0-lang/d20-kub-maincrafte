@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "": {
+      "model": "minecraft:block/note_block"
+    },
+    "note=24": {
+      "model": "f8resurs:block/copper_note_block"
+    }
+  }
+}

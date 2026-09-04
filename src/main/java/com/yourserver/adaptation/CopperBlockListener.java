@@ -574,7 +574,9 @@ public class CopperBlockListener implements Listener {
             return;
         }
 
-        if (!block.isBlockPowered()) {
+        // Используем косвенное питание: так учитывается и рычаг на блоке,
+        // и редстоун-линия, направленная в блок (как у обычного нотного блока).
+        if (!block.isBlockIndirectlyPowered()) {
             if (session.playing) {
                 session.playing = false;
                 stopDiscSound(session);
@@ -626,7 +628,7 @@ public class CopperBlockListener implements Listener {
         }
 
         // Пластинку положили в уже запитанный блок — запускаем сразу.
-        if (session == null && block.isBlockPowered()) {
+        if (session == null && block.isBlockIndirectlyPowered()) {
             startOrResumeDisc(block, key, disc);
         }
     }
@@ -686,10 +688,22 @@ public class CopperBlockListener implements Listener {
     }
 
     private static Sound discSound(Material disc) {
-        // Ключ звука пластинки совпадает с ключом предмета
-        // (например, minecraft:music_disc_13), поэтому ищем в реестре
-        // напрямую — без deprecated Sound.valueOf(...).
-        return Registry.SOUNDS.get(disc.getKey());
+        // ВАЖНО: у ПРЕДМЕТА ключ с подчёркиванием (minecraft:music_disc_13),
+        // а у ЗВУКА — с точкой (minecraft:music_disc.13). Поэтому ключ нужно
+        // преобразовать, иначе реестр вернёт null и пластинка будет молчать.
+        String matKey = disc.getKey().getKey();
+
+        if (!matKey.startsWith("music_disc_")) {
+            return null;
+        }
+
+        String soundKey =
+                "music_disc."
+                        + matKey.substring("music_disc_".length());
+
+        return Registry.SOUNDS.get(
+                NamespacedKey.minecraft(soundKey)
+        );
     }
 
     // Длительности пластинок в тиках (20 тиков = 1 секунда).

@@ -9,6 +9,10 @@ settings:
   duration-super: 4
   cooldown-normal: 2
   cooldown-super: 4
+  # Минимальный интервал между засчитываемыми ударами (в миллисекундах)
+  damage-interval-normal-ms: 450
+  # Для огня/лавы/удушья интервал длиннее, иначе адаптация заполняется слишком быстро
+  damage-interval-environment-ms: 2000
   required-hits:
     lvl1: 10
     lvl2: 8
@@ -29,3 +33,10 @@ rollback:
     slowness-duration: 60    # в тиках (60 = 3 секунды)
     slowness-level: 1
     confusion-duration: 60   # в тиках
+
+# Икра (шифт + ПКМ по треске/лососю)
+caviar:
+  # Шанс найти икру в рыбе (в процентах). Редкий, но возможный.
+  chance-percent: 12
+  # Максимальное количество икры за раз
+  max-amount: 8

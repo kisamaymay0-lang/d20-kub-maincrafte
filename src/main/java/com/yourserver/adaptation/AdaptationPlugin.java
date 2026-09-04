@@ -35,7 +35,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private final Map<UUID, String> activeAdaptations = new HashMap<>();
     private final Map<UUID, Boolean> superAdaptations = new HashMap<>();
 
-    private final Map<UUID, Long> lastHitTime = new HashMap<>();
+    private final Map<UUID, Map<String, Long>> lastHitByType = new HashMap<>();
 
     private final Map<UUID, BossBar> activeBossBars = new HashMap<>();
     private final Map<UUID, Double> activeTimesLeft = new HashMap<>();
@@ -47,6 +47,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private RollbackListener rollbackListener;
     private FlaskListener flaskListener;
     private CopperBlockListener copperBlockListener;
+    private CaviarListener caviarListener;
 
     private final Particle.DustOptions meleeDust =
             new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -95,6 +96,14 @@ public void onEnable() {
 
     getServer().getPluginManager().registerEvents(
             copperBlockListener,
+            this
+    );
+
+    caviarListener =
+            new CaviarListener(this);
+
+    getServer().getPluginManager().registerEvents(
+            caviarListener,
             this
     );
 
@@ -507,14 +516,38 @@ public void onEnable() {
 
         long now = System.currentTimeMillis();
 
-        boolean spam =
-                now - lastHitTime.getOrDefault(uuid, 0L) < 450L;
+        /*
+         * Защита от "спама" урона. Для огня/лавы/удушья урон приходит
+         * каждый тик, поэтому для них интервал длиннее — иначе адаптация
+         * заполняется слишком быстро.
+         */
+        boolean environmental =
+                isEnvironmentalCause(event.getCause());
 
-        if (spam) {
+        long interval = environmental
+                ? getConfig().getLong(
+                        "settings.damage-interval-environment-ms",
+                        2000L
+                )
+                : getConfig().getLong(
+                        "settings.damage-interval-normal-ms",
+                        450L
+                );
+
+        Map<String, Long> lastByType =
+                lastHitByType.computeIfAbsent(
+                        uuid,
+                        k -> new HashMap<>()
+                );
+
+        long lastHit =
+                lastByType.getOrDefault(type, 0L);
+
+        if (now - lastHit < interval) {
             return;
         }
 
-        lastHitTime.put(uuid, now);
+        lastByType.put(type, now);
 
         double average =
                 (double) totalLevel / pieceCount;
@@ -1118,11 +1151,11 @@ public void onEnable() {
                             );
 
                             bossBar.setTitle(
-                                    "§c§lПЕРЕЗАРЯДКА"
+                                    "§7§lПЕРЕЗАРЯДКА"
                             );
 
                             bossBar.setColor(
-                                    BarColor.RED
+                                    BarColor.WHITE
                             );
 
                             bossBar.setProgress(1.0);
@@ -1253,7 +1286,7 @@ public void onEnable() {
                         }
 
                     },
-                    delay * (i + 1)
+                    delay * i
             );
         }
     }
@@ -1320,7 +1353,7 @@ public void onEnable() {
         superDamageCounters.clear();
 
         cooldownEndTimes.clear();
-        lastHitTime.clear();
+        lastHitByType.clear();
     }
 
     private String getDamageType(DamageCause cause) {
@@ -1359,6 +1392,27 @@ public void onEnable() {
         }
     }
 
+    private boolean isEnvironmentalCause(DamageCause cause) {
+
+        switch (cause) {
+
+            case FIRE:
+            case FIRE_TICK:
+            case LAVA:
+            case HOT_FLOOR:
+            case CAMPFIRE:
+            case SUFFOCATION:
+            case DROWNING:
+            case FREEZE:
+            case CRAMMING:
+            case DRYOUT:
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
     public void disableDiceRollListener() {
 
         if (diceRollListener != null) {
@@ -1383,6 +1437,6 @@ public void onEnable() {
         damageCounters.remove(uuid);
         superDamageCounters.remove(uuid);
 
-        lastHitTime.remove(uuid);
+        lastHitByType.remove(uuid);
     }
 }

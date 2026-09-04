@@ -22,6 +22,7 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
@@ -200,6 +201,14 @@ public class RollbackListener implements Listener {
                 totem.getItemMeta();
 
         if (meta != null) {
+
+            meta.setDisplayName("§6Тотем бессмертия");
+            meta.setLore(
+                    Collections.singletonList(
+                            "§dОткат I"
+                    )
+            );
+            meta.setEnchantmentGlintOverride(true);
 
             meta.getPersistentDataContainer()
                     .set(
