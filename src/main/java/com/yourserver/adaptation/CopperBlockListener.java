@@ -7,6 +7,7 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Note;
 import org.bukkit.Particle;
+import org.bukkit.Registry;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.World;
@@ -211,7 +212,7 @@ public class CopperBlockListener implements Listener {
             return;
         }
 
-        Block block = event.getBlockPlaced().getBlock();
+        Block block = event.getBlockPlaced();
 
         if (block.getType() != Material.NOTE_BLOCK) {
             return;
@@ -685,11 +686,10 @@ public class CopperBlockListener implements Listener {
     }
 
     private static Sound discSound(Material disc) {
-        try {
-            return Sound.valueOf(disc.name());
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        // Ключ звука пластинки совпадает с ключом предмета
+        // (например, minecraft:music_disc_13), поэтому ищем в реестре
+        // напрямую — без deprecated Sound.valueOf(...).
+        return Registry.SOUNDS.get(disc.getKey());
     }
 
     // Длительности пластинок в тиках (20 тиков = 1 секунда).
