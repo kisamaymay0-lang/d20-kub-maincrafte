@@ -91,7 +91,7 @@ public class F8Command implements CommandExecutor, Listener {
         inventory.setItem(
                 13,
                 createMenuItem(
-                        Material.WAXED_CHISELED_COPPER,
+                        Material.NOTE_BLOCK,
                         "§6Новые блоки",
                         List.of("§7Новые блоки"),
                         "blocks"
@@ -182,7 +182,7 @@ public class F8Command implements CommandExecutor, Listener {
         inventory.setItem(
                 13,
                 createMenuItem(
-                        Material.WAXED_CHISELED_COPPER,
+                        Material.NOTE_BLOCK,
                         "§6Медный нотный блок",
                         List.of("§7Нажмите, чтобы получить блок"),
                         "copper_note_block"
@@ -540,8 +540,6 @@ public class F8Command implements CommandExecutor, Listener {
     }
 
     private ItemStack createCopperBlock() {
-        return new ItemStack(
-                Material.WAXED_CHISELED_COPPER
-        );
+        return copperBlockListener.createCopperBlockItem();
     }
 }

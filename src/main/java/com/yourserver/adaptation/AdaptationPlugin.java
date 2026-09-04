@@ -46,6 +46,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private DiceRollListener diceRollListener;
     private RollbackListener rollbackListener;
     private FlaskListener flaskListener;
+    private CopperBlockListener copperBlockListener;
 
     private final Particle.DustOptions meleeDust =
             new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -89,7 +90,7 @@ public void onEnable() {
             this
     );
 
-    CopperBlockListener copperBlockListener =
+    copperBlockListener =
             new CopperBlockListener(this);
 
     getServer().getPluginManager().registerEvents(
@@ -145,6 +146,10 @@ public void onEnable() {
         if (flaskListener != null) {
             flaskListener.disable();
         }
+
+        if (copperBlockListener != null) {
+            copperBlockListener.disable();
+        }
     }
 
     public void breakAdaptation(Player player) {
@@ -193,11 +198,6 @@ public void onEnable() {
                 0.3,
                 0.2,
                 0.05
-        );
-
-        player.sendMessage(
-                ChatColor.RED +
-                "Бафф чара \"Адаптация\" был разбит критическим ударом врага!"
         );
     }
 
@@ -1117,17 +1117,8 @@ public void onEnable() {
                                     0.05
                             );
 
-                            p.sendMessage(
-                                    ChatColor.RED +
-                                    "Адаптация закончилась! Перезарядка " +
-                                    cooldownSeconds +
-                                    " секунд."
-                            );
-
                             bossBar.setTitle(
-                                    "§c§lПЕРЕЗАРЯДКА: " +
-                                    cooldownSeconds +
-                                    "с"
+                                    "§c§lПЕРЕЗАРЯДКА"
                             );
 
                             bossBar.setColor(
@@ -1161,17 +1152,6 @@ public void onEnable() {
                                     )
                             );
 
-                            int secondsLeft =
-                                    (int) Math.ceil(
-                                            time / 10.0
-                                    );
-
-                            bossBar.setTitle(
-                                    "§c§lПЕРЕЗАРЯДКА: " +
-                                    secondsLeft +
-                                    "с"
-                            );
-
                             if (time <= 0) {
 
                                 activeTimesLeft.remove(uuid);
@@ -1180,11 +1160,6 @@ public void onEnable() {
 
                                 bossBar.removeAll();
                                 activeBossBars.remove(uuid);
-
-                                p.sendMessage(
-                                        ChatColor.GREEN +
-                                        "Перезарядка закончилась!"
-                                );
 
                                 cancel();
                             }
@@ -1226,31 +1201,17 @@ public void onEnable() {
                                 )
                         );
 
-                        int secondsLeft =
-                                (int) Math.ceil(
-                                        Math.max(
-                                                0.0,
-                                                time
-                                        ) / 10.0
-                                );
-
                         if (superMode) {
 
                             bossBar.setTitle(
                                     "§6§l" +
-                                    message +
-                                    " §7[§6" +
-                                    secondsLeft +
-                                    "с§7]"
+                                    message
                             );
 
                         } else {
 
                             bossBar.setTitle(
-                                    message +
-                                    " §7[§f" +
-                                    secondsLeft +
-                                    "с§7]"
+                                    message
                             );
                         }
                     }
@@ -1368,6 +1329,19 @@ public void onEnable() {
 
             case ENTITY_ATTACK:
             case ENTITY_SWEEP_ATTACK:
+                return "MELEE";
+
+            // Огонь и удушье приписаны к ближнему урону.
+            case FIRE:
+            case FIRE_TICK:
+            case LAVA:
+            case HOT_FLOOR:
+            case CAMPFIRE:
+            case SUFFOCATION:
+            case DROWNING:
+            case FREEZE:
+            case CRAMMING:
+            case DRYOUT:
                 return "MELEE";
 
             case PROJECTILE:
