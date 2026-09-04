@@ -9,9 +9,6 @@ import org.bukkit.Color;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -29,7 +26,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 
-public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExecutor {
+public class AdaptationPlugin extends JavaPlugin implements Listener {
 
     private final Map<UUID, Map<String, Integer>> damageCounters = new HashMap<>();
     private final Map<UUID, Map<String, Integer>> superDamageCounters = new HashMap<>();
@@ -117,6 +114,14 @@ public void onEnable() {
     if (getCommand("f8") != null) {
         getCommand("f8").setExecutor(
                 f8Command
+        );
+    }
+
+    // Регистрируем обработчик команды /d20.
+    // Без этого команда из plugin.yml не будет работать.
+    if (getCommand("d20") != null) {
+        getCommand("d20").setExecutor(
+                diceRollListener
         );
     }
 
