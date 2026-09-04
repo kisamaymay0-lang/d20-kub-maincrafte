@@ -139,7 +139,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private double renderDistance() {
         return plugin.getConfig().getDouble(
                 "constellations.render-distance",
-                96.0
+                80.0
         );
     }
 
@@ -167,7 +167,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private double reanchorDistance() {
         return plugin.getConfig().getDouble(
                 "constellations.reanchor-distance",
-                24.0
+                40.0
         );
     }
 
