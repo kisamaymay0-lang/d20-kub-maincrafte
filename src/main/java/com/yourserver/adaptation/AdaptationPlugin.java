@@ -35,7 +35,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private final Map<UUID, String> activeAdaptations = new HashMap<>();
     private final Map<UUID, Boolean> superAdaptations = new HashMap<>();
 
-    private final Map<UUID, Map<String, Long>> lastHitByType = new HashMap<>();
+    private final DamageHitLimiter damageHitLimiter = new DamageHitLimiter();
 
     private final Map<UUID, BossBar> activeBossBars = new HashMap<>();
     private final Map<UUID, Double> activeTimesLeft = new HashMap<>();
@@ -468,10 +468,10 @@ public void onEnable() {
         event.setResult(null);
     }
 
-    @EventHandler(priority = EventPriority.HIGH)
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onPlayerDamage(EntityDamageEvent event) {
 
-        if (!(event.getEntity() instanceof Player)) {
+        if (!(event.getEntity() instanceof Player) || event.getDamage() <= 0.0) {
             return;
         }
 
@@ -533,40 +533,9 @@ public void onEnable() {
             return;
         }
 
-        long now = System.currentTimeMillis();
-
-        /*
-         * Защита от "спама" урона. Для огня/лавы/удушья урон приходит
-         * каждый тик, поэтому для них интервал длиннее — иначе адаптация
-         * заполняется слишком быстро.
-         */
-        boolean environmental =
-                isEnvironmentalCause(event.getCause());
-
-        long interval = environmental
-                ? getConfig().getLong(
-                        "settings.damage-interval-environment-ms",
-                        2000L
-                )
-                : getConfig().getLong(
-                        "settings.damage-interval-normal-ms",
-                        450L
-                );
-
-        Map<String, Long> lastByType =
-                lastHitByType.computeIfAbsent(
-                        uuid,
-                        k -> new HashMap<>()
-                );
-
-        long lastHit =
-                lastByType.getOrDefault(type, 0L);
-
-        if (now - lastHit < interval) {
+        if (!tryCountAdaptationHit(uuid, type, event.getCause())) {
             return;
         }
-
-        lastByType.put(type, now);
 
         double average =
                 (double) totalLevel / pieceCount;
@@ -651,147 +620,40 @@ public void onEnable() {
         }
 
         if (damageType.equals(activeType)) {
-
-            spawnAdaptationParticles(
-                    player,
-                    damageType
+            boolean superMode = superAdaptations.getOrDefault(uuid, false);
+            double protection = getConfig().getDouble(
+                    superMode ? "settings.super-protection-per-piece" : "settings.normal-protection-per-piece",
+                    superMode ? 0.125 : 0.075
             );
 
-            if (superAdaptations.getOrDefault(
-                    uuid,
-                    false
-            )) {
+            // Защита работает на КАЖДЫЙ удар, даже когда он не засчитывается
+            // для продления/повышения. Интервал не должен выключать защиту.
+            event.setDamage(event.getDamage() * Math.max(0.0, 1.0 - pieceCount * protection));
 
-                double protection =
-                        getConfig().getDouble(
-                                "settings.super-protection-per-piece",
-                                0.125
-                        );
+            double current = activeTimesLeft.getOrDefault(uuid, 0.0);
+            if (current <= 0.0 || !tryCountAdaptationHit(uuid, damageType, event.getCause())) {
+                return;
+            }
 
-                event.setDamage(
-                        event.getDamage() *
-                        (1.0 - pieceCount * protection)
+            spawnAdaptationParticles(player, damageType);
+
+            double max = activeMaxTimes.getOrDefault(uuid, superMode ? 40.0 : 100.0);
+            double bonus = getConfig().getDouble(
+                    superMode ? "settings.hit-bonus-super" : "settings.hit-bonus-normal",
+                    superMode ? 0.4 : 0.2
+            );
+            if (Double.isFinite(bonus) && bonus > 0.0) {
+                activeTimesLeft.put(uuid, Math.min(max, current + bonus * 10.0));
+            }
+
+            if (!superMode) {
+                Map<String, Integer> counters = superDamageCounters.computeIfAbsent(
+                        uuid, id -> new HashMap<>()
                 );
-
-                /*
-                 * ПОВЫШЕННАЯ АДАПТАЦИЯ:
-                 *
-                 * каждый подходящий удар
-                 * добавляет +0.4 секунды.
-                 *
-                 * Таймер хранится в десятых долях
-                 * секунды, поэтому:
-                 *
-                 * 0.4 * 10 = 4.
-                 */
-                if (activeTimesLeft.containsKey(uuid)) {
-
-                    double current =
-                            activeTimesLeft.get(uuid);
-
-                    double max =
-                            activeMaxTimes.getOrDefault(
-                                    uuid,
-                                    40.0
-                            );
-
-                    double bonus =
-                            getConfig().getDouble(
-                                    "settings.hit-bonus-super",
-                                    0.4
-                            );
-
-                    double newTime =
-                            Math.min(
-                                    max,
-                                    current + bonus * 10.0
-                            );
-
-                    activeTimesLeft.put(
-                            uuid,
-                            newTime
-                    );
-                }
-
-            } else {
-
-                double protection =
-                        getConfig().getDouble(
-                                "settings.normal-protection-per-piece",
-                                0.075
-                        );
-
-                event.setDamage(
-                        event.getDamage() *
-                        (1.0 - pieceCount * protection)
-                );
-
-                /*
-                 * Обычная адаптация:
-                 * +0.2 секунды за подходящий удар.
-                 */
-                if (activeTimesLeft.containsKey(uuid)) {
-
-                    double current =
-                            activeTimesLeft.get(uuid);
-
-                    double max =
-                            activeMaxTimes.getOrDefault(
-                                    uuid,
-                                    100.0
-                            );
-
-                    double bonus =
-                            getConfig().getDouble(
-                                    "settings.hit-bonus-normal",
-                                    0.2
-                            );
-
-                    double newTime =
-                            Math.min(
-                                    max,
-                                    current + bonus * 10.0
-                            );
-
-                    activeTimesLeft.put(
-                            uuid,
-                            newTime
-                    );
-                }
-
-                /*
-                 * Набор ударов для повышенной адаптации.
-                 */
-                superDamageCounters.putIfAbsent(
-                        uuid,
-                        new HashMap<>()
-                );
-
-                Map<String, Integer> counters =
-                        superDamageCounters.get(uuid);
-
-                int hits =
-                        counters.getOrDefault(
-                                damageType,
-                                0
-                        ) + 1;
-
-                counters.put(
-                        damageType,
-                        hits
-                );
-
-                int required =
-                        getConfig().getInt(
-                                "settings.required-super-hits",
-                                8
-                        );
-
+                int hits = counters.merge(damageType, 1, Integer::sum);
+                int required = Math.max(1, getConfig().getInt("settings.required-super-hits", 8));
                 if (hits >= required) {
-                    activateSuper(
-                            player,
-                            damageType
-                    );
+                    activateSuper(player, damageType);
                 }
             }
 
@@ -838,6 +700,22 @@ public void onEnable() {
                     0.05
             );
         }
+    }
+
+    private boolean tryCountAdaptationHit(UUID uuid, String type, DamageCause cause) {
+        boolean environment = isEnvironmentalCause(cause);
+        long fallback = environment ? 2000L : 450L;
+        long interval = getConfig().getLong(
+                environment ? "settings.damage-interval-environment-ms" : "settings.damage-interval-normal-ms",
+                fallback
+        );
+        if (interval <= 0) {
+            interval = fallback;
+        }
+
+        // Не сбрасываем лимитер при переходе обычная -> повышенная адаптация:
+        // иначе один поток событий сможет обойти интервал на границе фаз.
+        return damageHitLimiter.tryAcquire(uuid, type, Bukkit.getCurrentTick(), interval);
     }
 
     private void spawnAdaptationParticles(
@@ -1372,7 +1250,7 @@ public void onEnable() {
         superDamageCounters.clear();
 
         cooldownEndTimes.clear();
-        lastHitByType.clear();
+        damageHitLimiter.clear();
     }
 
     private String getDamageType(DamageCause cause) {
@@ -1456,6 +1334,6 @@ public void onEnable() {
         damageCounters.remove(uuid);
         superDamageCounters.remove(uuid);
 
-        lastHitByType.remove(uuid);
+        damageHitLimiter.remove(uuid);
     }
 }

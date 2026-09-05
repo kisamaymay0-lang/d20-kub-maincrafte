@@ -1,7 +1,7 @@
 name: f8-plugin
-version: 8
+version: '9.0'
 main: com.yourserver.adaptation.AdaptationPlugin
-api-version: '1.21'
+api-version: '1.21.11'
 
 commands:
   d20:

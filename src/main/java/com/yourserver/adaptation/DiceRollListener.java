@@ -571,7 +571,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             // ВАЖНО: отменяем ТОЛЬКО этот таймер, а не все задачи плагина.
             // Раньше здесь был Bukkit.getScheduler().cancelTasks(...), который
             // гасил вообще все таймеры (адаптацию, откат, отравление, нотные блоки).
-            finalPlugin.getServer().getScheduler().runTaskTimer(finalPlugin, new BukkitRunnable() {
+            new BukkitRunnable() {
                 int timer = 30;
                 @Override
                 public void run() {
@@ -582,7 +582,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                     finalVictim.getWorld().spawnParticle(Particle.EXPLOSION, finalVictim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
                     timer -= 2;
                 }
-            }, 2L, 2L);
+            }.runTaskTimer(finalPlugin, 2L, 2L);
 
             attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
 

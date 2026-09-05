@@ -6,7 +6,7 @@
 
     <groupId>com.yourserver</groupId>
     <artifactId>adaptation</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>9.0</version>
     <packaging>jar</packaging>
 
     <properties>
@@ -26,9 +26,15 @@
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <!-- Скорректированная стабильная релизная ветка для версии 1.21.1 -->
+            <!-- Целевая версия сервера: Paper 1.21.11 / Java 21 -->
             <version>1.21.11-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.11.4</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -44,6 +50,11 @@
                     <source>21</source>
                     <target>21</target>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
             </plugin>
         </plugins>
     </build>

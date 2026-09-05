@@ -21,19 +21,22 @@ jobs:
         distribution: 'temurin'
         cache: maven
 
+    - name: Validate resource pack
+      run: python3 scripts/build_resourcepack.py --check
+
     - name: Build with Maven
       id: maven
       shell: bash
       run: |
         set +e
-        mvn clean package > mvn-build.log 2>&1
+        mvn --batch-mode clean verify > mvn-build.log 2>&1
         code=$?
         echo "exit_code=$code" >> "$GITHUB_OUTPUT"
         cat mvn-build.log
         exit 0
 
     - name: Emit Maven errors as annotations
-      if: always() && steps.maven.outputs.exit_code != '0'
+      if: always() && steps.maven.outputs.exit_code != '' && steps.maven.outputs.exit_code != '0'
       shell: bash
       run: |
         grep -E "ERROR|error:|BUILD FAILURE|\.java:\[|\.java:[0-9]" mvn-build.log \
@@ -50,5 +53,8 @@ jobs:
       if: steps.maven.outputs.exit_code == '0'
       uses: actions/upload-artifact@v4
       with:
-        name: AdaptationPlugin-Jar
-        path: target/*.jar
+        name: f8-plugin-9.0
+        path: |
+          target/*.jar
+          f8resurs-resourcepack.zip
+          docs/UPDATE-9.md

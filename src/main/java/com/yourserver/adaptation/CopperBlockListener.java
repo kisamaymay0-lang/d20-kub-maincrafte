@@ -22,10 +22,18 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.block.BlockPistonExtendEvent;
+import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.NotePlayEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.RecipeChoice;
+import org.bukkit.inventory.ShapelessRecipe;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.metadata.FixedMetadataValue;
@@ -42,16 +50,17 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Медный нотный блок.
  *
  * В основе лежит обычный NOTE_BLOCK:
- *  - редстоун-поведение (рычаг на блоке, линия, направленная в блок и т.п.)
- *    обрабатывается самой игрой через NotePlayEvent — это даёт точно такое же
- *    поведение, как у ванильного нотного блока;
- *  - наш блок помечается нотой №24 (MARKER_NOTE), которая выставляется при
- *    установке, поэтому обычные нотные блоки не затрагиваются.
+ *  - запуск ТОЛЬКО по изменению физического питания с 0 на 1;
+ *  - ванильная нота, в том числе от удара рукой, всегда заглушена;
+ *  - Paper не посылает BlockRedstoneEvent для самого NOTE_BLOCK, поэтому
+ *    заполненные блоки проверяются раз в тик (без загрузки чанков);
+ *  - нота №24 (MARKER_NOTE) зарезервирована для модели поставленного блока.
  *
  * В слоте "таймера" (слот №10) может лежать:
  *  - пластинка — тогда блок работает как проигрыватель (см. ниже);
@@ -71,6 +80,11 @@ public class CopperBlockListener implements Listener {
     private final HashMap<String, ItemStack[]> sessionInventories =
             new HashMap<>();
 
+    // У всех зрителей блока один инвентарь. Проверка поршней читает его
+    // напрямую, а не снимок прошлого тика: drag/shift-клик не обходят запрет.
+    private final Map<String, Inventory> openInventories = new HashMap<>();
+    private boolean shuttingDown;
+
     private final Map<String, DiscSession> discSessions =
             new HashMap<>();
 
@@ -78,6 +92,9 @@ public class CopperBlockListener implements Listener {
             new HashSet<>();
 
     private final NamespacedKey copperBlockKey;
+    private final Map<String, Location> powerTrackedBlocks = new HashMap<>();
+    private final PowerEdgeTracker powerEdges = new PowerEdgeTracker();
+    private BukkitTask powerTask;
 
     public CopperBlockListener(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -94,8 +111,6 @@ public class CopperBlockListener implements Listener {
 
         this.blockData =
                 YamlConfiguration.loadConfiguration(configFile);
-
-        loadAllBlocksFromFile();
 
         blockedSlots.add(0);
         blockedSlots.add(9);
@@ -120,6 +135,30 @@ public class CopperBlockListener implements Listener {
         blockedSlots.add(17);
         blockedSlots.add(26);
         blockedSlots.add(35);
+
+        loadAllBlocksFromFile();
+        registerRecipe();
+        powerTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickRedstone, 1L, 1L);
+    }
+
+    private void registerRecipe() {
+        NamespacedKey key = new NamespacedKey(plugin, "copper_note_block");
+        ShapelessRecipe recipe = new ShapelessRecipe(key, createCopperBlockItem());
+        recipe.addIngredient(Material.NOTE_BLOCK);
+        recipe.addIngredient(Material.COPPER_NUGGET);
+        recipe.addIngredient(Material.REDSTONE);
+        recipe.addIngredient(new RecipeChoice.MaterialChoice(List.of(
+                Material.COPPER_GRATE,
+                Material.EXPOSED_COPPER_GRATE,
+                Material.WEATHERED_COPPER_GRATE,
+                Material.OXIDIZED_COPPER_GRATE,
+                Material.WAXED_COPPER_GRATE,
+                Material.WAXED_EXPOSED_COPPER_GRATE,
+                Material.WAXED_WEATHERED_COPPER_GRATE,
+                Material.WAXED_OXIDIZED_COPPER_GRATE
+        )));
+        Bukkit.removeRecipe(key);
+        Bukkit.addRecipe(recipe);
     }
 
     // ===== ПРЕДМЕТ БЛОКА =====
@@ -193,7 +232,7 @@ public class CopperBlockListener implements Listener {
 
         ItemStack it = items[slot];
 
-        if (it == null || it.getType() == Material.AIR) {
+        if (it == null || it.getType().isAir() || it.getAmount() <= 0) {
             return null;
         }
 
@@ -202,7 +241,7 @@ public class CopperBlockListener implements Listener {
 
     // ===== УСТАНОВКА БЛОКА =====
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockPlace(BlockPlaceEvent event) {
         if (event.isCancelled()) {
             return;
@@ -220,12 +259,14 @@ public class CopperBlockListener implements Listener {
 
         NoteBlock data = (NoteBlock) block.getBlockData();
         data.setNote(new Note(MARKER_NOTE));
-        block.setBlockData(data);
+        // Не вызываем лишнюю физику во время BlockPlaceEvent. Свойства
+        // powered/instrument сохраняются; ресурспак выбирает модель по note.
+        block.setBlockData(data, false);
     }
 
     // ===== ОТКРЫТИЕ МЕНЮ =====
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBlockInteract(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) {
             return;
@@ -239,95 +280,184 @@ public class CopperBlockListener implements Listener {
 
         event.setCancelled(true);
 
-        openCopperMenu(event.getPlayer(), block);
+        // Запрещаем ванильную настройку обеими руками, иначе второй
+        // interact может переключить зарезервированную ноту 24 обратно на 0.
+        if (event.getHand() == EquipmentSlot.HAND) {
+            openCopperMenu(event.getPlayer(), block);
+        }
     }
 
     private void openCopperMenu(Player player, Block block) {
-        Inventory gui = Bukkit.createInventory(
-                new CopperHolder(block),
-                36,
-                "§6Медный нотный блок"
-        );
-
         String key = getBlockKey(block);
+        Inventory gui = openInventories.get(key);
+        if (gui == null) {
+            CopperHolder holder = new CopperHolder(block);
+            gui = Bukkit.createInventory(holder, 36, "§6Медный нотный блок");
+            holder.inventory = gui;
+            ItemStack[] saved = sessionInventories.get(key);
+            if (saved != null) {
+                for (int i = 0; i < Math.min(saved.length, gui.getSize()); i++) {
+                    if (!blockedSlots.contains(i) && saved[i] != null) {
+                        gui.setItem(i, saved[i].clone());
+                    }
+                }
+            }
 
-        if (sessionInventories.containsKey(key)) {
-            gui.setContents(sessionInventories.get(key));
-        } else {
-            ItemStack separator = new ItemStack(
-                    Material.BLACK_STAINED_GLASS_PANE
-            );
-
+            ItemStack separator = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
             ItemMeta meta = separator.getItemMeta();
-
             if (meta != null) {
                 meta.setDisplayName(" ");
                 separator.setItemMeta(meta);
             }
-
             for (int slot : blockedSlots) {
                 gui.setItem(slot, separator);
             }
+            openInventories.put(key, gui);
         }
-
         player.openInventory(gui);
     }
 
     // ===== СОХРАНЕНИЕ ИНВЕНТАРЯ =====
 
-    @EventHandler
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (!(event.getInventory().getHolder()
-                instanceof CopperHolder holder)) {
+    private ItemStack[] contentsOf(String key) {
+        Inventory live = openInventories.get(key);
+        return live != null ? live.getContents() : sessionInventories.get(key);
+    }
+
+    private void saveBlockData() {
+        try {
+            blockData.save(configFile);
+        } catch (IOException ex) {
+            plugin.getLogger().warning("Не удалось сохранить blocks.yml: " + ex.getMessage());
+        }
+    }
+
+    private void saveInventory(Inventory inventory) {
+        if (!(inventory.getHolder() instanceof CopperHolder holder)) {
             return;
         }
+        Block block = holder.getBlock();
+        String key = getBlockKey(block);
+        // Старый GUI после разрушения/сдвига не должен воскресить содержимое.
+        if (openInventories.get(key) != inventory || !isCopperBlock(block)) {
+            return;
+        }
+        ItemStack[] contents = inventory.getContents();
+        sessionInventories.put(key, contents);
+        blockData.set("blocks." + key, contents);
+        saveBlockData();
+        if (!shuttingDown) {
+            if (hasContents(block)) {
+                if (powerTrackedBlocks.putIfAbsent(key, block.getLocation()) == null) {
+                    // Вложение предметов — не новый фронт сигнала для нот.
+                    powerEdges.update(key, hasPower(block));
+                }
+            } else {
+                powerTrackedBlocks.remove(key);
+                powerEdges.remove(key);
+            }
+            reevaluateDisc(block, key, contents);
+        }
+    }
 
-        int slot = event.getRawSlot();
-
-        if (blockedSlots.contains(slot)) {
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (!(event.getView().getTopInventory().getHolder() instanceof CopperHolder)) {
+            return;
+        }
+        if (blockedSlots.contains(event.getRawSlot())
+                || event.getAction() == InventoryAction.COLLECT_TO_CURSOR) {
             event.setCancelled(true);
             return;
         }
-
+        Inventory inventory = event.getView().getTopInventory();
         Bukkit.getScheduler().runTask(plugin, () -> {
-            ItemStack[] contents =
-                    event.getInventory().getContents();
-
-            String key = getBlockKey(holder.getBlock());
-
-            sessionInventories.put(key, contents);
-
-            blockData.set("blocks." + key, contents);
-
-            try {
-                blockData.save(configFile);
-            } catch (IOException ignored) {
+            if (!event.isCancelled()) {
+                saveInventory(inventory);
             }
-
-            reevaluateDisc(holder.getBlock(), key, contents);
         });
     }
 
-    // ===== РЕДСТОУН (как у обычного нотного блока) =====
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (!(event.getView().getTopInventory().getHolder() instanceof CopperHolder)) {
+            return;
+        }
+        if (event.getRawSlots().stream().anyMatch(blockedSlots::contains)) {
+            event.setCancelled(true);
+            return;
+        }
+        Inventory inventory = event.getView().getTopInventory();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!event.isCancelled()) {
+                saveInventory(inventory);
+            }
+        });
+    }
+
+    @EventHandler
+    public void onInventoryClose(InventoryCloseEvent event) {
+        Inventory inventory = event.getInventory();
+        if (!(inventory.getHolder() instanceof CopperHolder holder) || shuttingDown) {
+            return;
+        }
+        saveInventory(inventory);
+        String key = getBlockKey(holder.getBlock());
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (inventory.getViewers().isEmpty() && openInventories.get(key) == inventory) {
+                saveInventory(inventory);
+                openInventories.remove(key);
+            }
+        });
+    }
+
+    // ===== РЕДСТОУН: ТОЛЬКО ФРОНТ СИГНАЛА, НЕ УДАР РУКОЙ =====
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onNotePlay(NotePlayEvent event) {
         Block block = event.getBlock();
-
-        if (!isCopperBlock(block)) {
-            return;
+        if (isCopperBlock(block)) {
+            // Отменяется лишь звук. ЛКМ по-прежнему позволяет ломать блок.
+            event.setCancelled(true);
+            // Не запускаем музыку здесь вообще: событие бывает и от ЛКМ.
+            // Фронты физического питания независимо проверяет tickRedstone().
         }
+    }
 
-        // Глушим ванильный звук нотного блока — играем сами.
-        event.setCancelled(true);
+    private void observePower(Block block) {
+        if (powerEdges.update(getBlockKey(block), hasPower(block))) {
+            handleTrigger(block);
+        }
+    }
 
-        handleTrigger(block);
+    private void tickRedstone() {
+        var iterator = powerTrackedBlocks.entrySet().iterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            Location location = entry.getValue();
+            World world = location.getWorld();
+            if (world == null || !world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
+                powerEdges.remove(entry.getKey());
+                continue;
+            }
+            Block block = world.getBlockAt(location);
+            if (!isCopperBlock(block)) {
+                powerEdges.remove(entry.getKey());
+                iterator.remove();
+                continue;
+            }
+            observePower(block);
+        }
+    }
+
+    private boolean hasPower(Block block) {
+        return block.isBlockPowered() || block.isBlockIndirectlyPowered();
     }
 
     private void handleTrigger(Block block) {
         String key = getBlockKey(block);
 
-        ItemStack[] items = sessionInventories.get(key);
+        ItemStack[] items = contentsOf(key);
 
         ItemStack timerItem = getSlot(items, TIMER_SLOT);
 
@@ -412,7 +542,8 @@ public class CopperBlockListener implements Listener {
 
             @Override
             public void run() {
-                if (step >= 4) {
+                if (step >= 4 || !block.getWorld().isChunkLoaded(block.getX() >> 4, block.getZ() >> 4)
+                        || !isCopperBlock(block)) {
                     block.removeMetadata(
                             "copper_playing",
                             plugin
@@ -488,6 +619,9 @@ public class CopperBlockListener implements Listener {
             String key,
             Material disc
     ) {
+        if (!hasPower(block)) {
+            return;
+        }
         DiscSession session = discSessions.get(key);
 
         if (session != null) {
@@ -498,6 +632,7 @@ public class CopperBlockListener implements Listener {
                 // чтобы время цикла совпадало со звуком.
                 if (!session.playing) {
                     session.elapsedTicks = 0;
+                    session.particleTicks = 0;
                     session.playing = true;
                     playDiscSound(session);
                 }
@@ -548,6 +683,7 @@ public class CopperBlockListener implements Listener {
             // Чанк выгружен — пауза, но сессию не удаляем.
             if (session.playing) {
                 session.playing = false;
+                session.particleTicks = 0;
                 stopDiscSound(session);
             }
             return;
@@ -561,7 +697,7 @@ public class CopperBlockListener implements Listener {
         }
 
         ItemStack[] items =
-                sessionInventories.get(session.key);
+                contentsOf(session.key);
 
         ItemStack timerItem = getSlot(items, TIMER_SLOT);
 
@@ -576,9 +712,10 @@ public class CopperBlockListener implements Listener {
 
         // Используем косвенное питание: так учитывается и рычаг на блоке,
         // и редстоун-линия, направленная в блок (как у обычного нотного блока).
-        if (!block.isBlockIndirectlyPowered()) {
+        if (!hasPower(block)) {
             if (session.playing) {
                 session.playing = false;
+                session.particleTicks = 0;
                 stopDiscSound(session);
             }
             return;
@@ -587,11 +724,22 @@ public class CopperBlockListener implements Listener {
         // Питание есть.
         if (!session.playing) {
             session.elapsedTicks = 0;
+            session.particleTicks = 0;
             session.playing = true;
             playDiscSound(session);
         }
 
         session.elapsedTicks += 2;
+        session.particleTicks += 2;
+        if (session.particleTicks >= 20) {
+            session.particleTicks = 0;
+            // NOTE, как у проигрывателя: одна цветная нота в секунду,
+            // только пока трек действительно играет и блок запитан.
+            world.spawnParticle(
+                    Particle.NOTE, session.loc.clone().add(0.5, 1.2, 0.5),
+                    0, ThreadLocalRandom.current().nextInt(25) / 24.0, 0.0, 0.0, 1.0
+            );
+        }
 
         if (session.elapsedTicks >= session.totalTicks) {
             // Пластинка доиграла, а сигнал всё ещё есть —
@@ -628,7 +776,7 @@ public class CopperBlockListener implements Listener {
         }
 
         // Пластинку положили в уже запитанный блок — запускаем сразу.
-        if (session == null && block.isBlockIndirectlyPowered()) {
+        if (session == null && hasPower(block)) {
             startOrResumeDisc(block, key, disc);
         }
     }
@@ -814,9 +962,87 @@ public class CopperBlockListener implements Listener {
         return Sound.BLOCK_NOTE_BLOCK_HARP;
     }
 
+    // ===== ПОРШНИ =====
+
+    private boolean hasContents(Block block) {
+        ItemStack[] contents = contentsOf(getBlockKey(block));
+        if (contents == null) {
+            return false;
+        }
+        for (int i = 0; i < contents.length; i++) {
+            if (!blockedSlots.contains(i) && getSlot(contents, i) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsFilledCopperBlock(List<Block> blocks) {
+        return blocks.stream().anyMatch(block -> isCopperBlock(block) && hasContents(block));
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPistonExtend(BlockPistonExtendEvent event) {
+        if (containsFilledCopperBlock(event.getBlocks())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPistonRetract(BlockPistonRetractEvent event) {
+        if (containsFilledCopperBlock(event.getBlocks())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void afterPistonExtend(BlockPistonExtendEvent event) {
+        forgetMovingEmptyBlocks(event.getBlocks());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void afterPistonRetract(BlockPistonRetractEvent event) {
+        forgetMovingEmptyBlocks(event.getBlocks());
+    }
+
+    private void closeBlockInventory(String key) {
+        Inventory inventory = openInventories.remove(key);
+        if (inventory != null) {
+            // Сначала убираем ссылку, затем закрываем: обработчик Close и
+            // отложенные Click/Drag уже не смогут записать старый инвентарь.
+            for (var viewer : new ArrayList<>(inventory.getViewers())) {
+                viewer.closeInventory();
+            }
+        }
+    }
+
+    private void forgetMovingEmptyBlocks(List<Block> blocks) {
+        boolean changed = false;
+        for (Block block : blocks) {
+            if (!isCopperBlock(block) || hasContents(block)) {
+                continue;
+            }
+            String key = getBlockKey(block);
+            closeBlockInventory(key);
+            stopDiscSession(discSessions.get(key));
+            sessionInventories.remove(key);
+            powerTrackedBlocks.remove(key);
+            powerEdges.remove(key);
+            blockData.set("blocks." + key, null);
+            block.removeMetadata("copper_playing", plugin);
+            block.removeMetadata("last_copper_trigger", plugin);
+            // Сам MARKER_NOTE перемещает поршень вместе с BlockData.
+            // Данных в новом месте пока нет: блок гарантированно пустой.
+            changed = true;
+        }
+        if (changed) {
+            saveBlockData();
+        }
+    }
+
     // ===== РАЗРУШЕНИЕ БЛОКА =====
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
 
@@ -833,15 +1059,13 @@ public class CopperBlockListener implements Listener {
             stopDiscSession(session);
         }
 
-        ItemStack[] items = sessionInventories.remove(key);
-
-        if (items == null
-                && blockData.contains("blocks." + key)) {
-
-            items = ((List<ItemStack>)
-                    blockData.get("blocks." + key))
-                    .toArray(new ItemStack[0]);
-        }
+        ItemStack[] items = contentsOf(key);
+        closeBlockInventory(key);
+        sessionInventories.remove(key);
+        powerTrackedBlocks.remove(key);
+        powerEdges.remove(key);
+        block.removeMetadata("copper_playing", plugin);
+        block.removeMetadata("last_copper_trigger", plugin);
 
         // Отменяем ванильный дроп нотного блока.
         event.setDropItems(false);
@@ -871,11 +1095,7 @@ public class CopperBlockListener implements Listener {
         }
 
         blockData.set("blocks." + key, null);
-
-        try {
-            blockData.save(configFile);
-        } catch (IOException ignored) {
-        }
+        saveBlockData();
     }
 
     // ===== ЗАГРУЗКА ИЗ ФАЙЛА =====
@@ -896,17 +1116,55 @@ public class CopperBlockListener implements Listener {
                     );
 
             if (list != null) {
-                sessionInventories.put(
-                        key,
-                        list.toArray(new ItemStack[0])
-                );
+                sessionInventories.put(key, list.toArray(new ItemStack[0]));
+                Location location = locationFromKey(key);
+                if (location != null) {
+                    // Пока не загружаем чанк и не вызываем getBlockAt().
+                    // При первой проверке загруженного блока считываем питание.
+                    powerTrackedBlocks.put(key, location);
+                }
             }
+        }
+    }
+
+    private Location locationFromKey(String key) {
+        // Имя мира тоже может содержать '_': координаты отделяем с конца.
+        int zSeparator = key.lastIndexOf('_');
+        int ySeparator = key.lastIndexOf('_', zSeparator - 1);
+        int xSeparator = key.lastIndexOf('_', ySeparator - 1);
+        if (xSeparator <= 0) {
+            return null;
+        }
+        World world = Bukkit.getWorld(key.substring(0, xSeparator));
+        if (world == null) {
+            return null;
+        }
+        try {
+            return new Location(world,
+                    Integer.parseInt(key.substring(xSeparator + 1, ySeparator)),
+                    Integer.parseInt(key.substring(ySeparator + 1, zSeparator)),
+                    Integer.parseInt(key.substring(zSeparator + 1)));
+        } catch (NumberFormatException ex) {
+            plugin.getLogger().warning("Некорректная позиция медного блока в blocks.yml: " + key);
+            return null;
         }
     }
 
     // ===== ВЫКЛЮЧЕНИЕ =====
 
     public void disable() {
+        shuttingDown = true;
+        if (powerTask != null) {
+            powerTask.cancel();
+        }
+        powerTrackedBlocks.clear();
+        powerEdges.clear();
+        for (Inventory inventory : new ArrayList<>(openInventories.values())) {
+            saveInventory(inventory);
+        }
+        for (String key : new ArrayList<>(openInventories.keySet())) {
+            closeBlockInventory(key);
+        }
         for (DiscSession session :
                 new ArrayList<>(discSessions.values())) {
 
@@ -925,6 +1183,7 @@ public class CopperBlockListener implements Listener {
 
         boolean playing;
         long elapsedTicks;
+        int particleTicks;
         BukkitTask task;
 
         DiscSession(
@@ -944,6 +1203,7 @@ public class CopperBlockListener implements Listener {
             implements org.bukkit.inventory.InventoryHolder {
 
         private final Block block;
+        private Inventory inventory;
 
         public CopperHolder(Block block) {
             this.block = block;
@@ -955,7 +1215,7 @@ public class CopperBlockListener implements Listener {
 
         @Override
         public Inventory getInventory() {
-            return null;
+            return inventory;
         }
     }
 }
