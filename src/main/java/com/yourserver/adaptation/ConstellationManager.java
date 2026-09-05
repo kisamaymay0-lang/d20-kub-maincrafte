@@ -21,7 +21,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerItemHeldEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
@@ -30,6 +31,9 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
+import org.bukkit.util.Transformation;
+import org.joml.Vector3d;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.joml.Matrix4f;
 
@@ -38,7 +42,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +77,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private final File constellationsDir;
     private final File playerDataFile;
     private YamlConfiguration playerData;
+    private final BatchedYamlFile progressStorage;
 
     private final Map<String, Constellation> constellations =
             new LinkedHashMap<>();
@@ -82,6 +86,54 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private BukkitTask animationTask;
     private double starSpinRadians;
     private boolean renderErrorReported;
+    private final Map<String, StarTemplate> starTemplates = new LinkedHashMap<>();
+    private final Map<String, Vector3f> starOffsets = new LinkedHashMap<>();
+    private final Map<String, BeamTemplate> lineTemplates = new HashMap<>();
+    private ItemStack solidBeamItem;
+    private ItemStack previewBeamItem;
+    private double radius;
+    private float starSize;
+    private float lineWidth;
+    private double tolerance;
+    private double rotationSpeed;
+    private int fadeTicks;
+    private int followInterpolationTicks;
+    private int rotationIntervalTicks;
+    private int lastRotationTick;
+    private static final Display.Brightness[] LIGHTS = java.util.stream.IntStream.rangeClosed(0, 15)
+            .mapToObj(level -> new Display.Brightness(level, level)).toArray(Display.Brightness[]::new);
+
+    private static final class StarTemplate {
+        final Vector3f offset;
+        final Quaternionf faceObserver;
+        final ItemStack item;
+        Quaternionf rotation;
+        StarTemplate(Vector3f direction, float radius, ItemStack item) {
+            Transformation base = SkyGeometry.starTransform(direction, radius, 1f);
+            offset = base.getTranslation();
+            faceObserver = base.getLeftRotation();
+            rotation = new Quaternionf(faceObserver);
+            this.item = item;
+        }
+        Transformation transform(float scale) {
+            return new Transformation(offset, rotation, new Vector3f(scale), new Quaternionf());
+        }
+    }
+
+    private static final class BeamTemplate {
+        final Vector3f translation;
+        final Quaternionf rotation;
+        final Vector3f scale;
+        BeamTemplate(Matrix4f matrix) {
+            translation = matrix.getTranslation(new Vector3f());
+            rotation = matrix.getUnnormalizedRotation(new Quaternionf());
+            scale = matrix.getScale(new Vector3f());
+        }
+        Transformation transform(float visibility) {
+            return new Transformation(translation, rotation, new Vector3f(scale.x * visibility, scale.y, scale.z),
+                    new Quaternionf());
+        }
+    }
 
     // Пер-игровое состояние отрисовки
     private static class PlayerView {
@@ -91,10 +143,14 @@ public class ConstellationManager implements Listener, CommandExecutor {
         ItemDisplay preview = null;
         String previewTargetKey = null;
         String selectedKey = null;
-
-        // Следует за координатами глаз, но всегда имеет yaw=pitch=0.
-        // Направления звёзд относительно игрока постоянны всю ночь.
-        Location anchor = null;
+        BeamTemplate previewTemplate;
+        final SkyFade fade = new SkyFade();
+        SkyFollow follow;
+        float lastAppearance = -1;
+        int lastBrightness = -1;
+        boolean relocate;
+        // Общая нейтральная целевая позиция, сглаживаемая клиентом.
+        Location anchor;
     }
 
     private final Map<UUID, PlayerView> views = new HashMap<>();
@@ -108,7 +164,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
 
     private final Map<UUID, PlayerProgress> progress = new HashMap<>();
 
-    public ConstellationManager(JavaPlugin plugin) {
+    public ConstellationManager(JavaPlugin plugin, AsyncTextWriter writer) {
         this.plugin = plugin;
 
         this.constellationsDir =
@@ -123,11 +179,13 @@ public class ConstellationManager implements Listener, CommandExecutor {
 
         this.playerData =
                 YamlConfiguration.loadConfiguration(playerDataFile);
+        progressStorage = new BatchedYamlFile(plugin, writer, playerDataFile.toPath(), () -> playerData.saveToString());
 
         createExampleFile();
         loadConstellations();
         loadProgress();
-
+        readRenderSettings();
+        rebuildRenderCache();
         startRenderTask();
     }
 
@@ -144,6 +202,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
         if (animationTask != null) {
             animationTask.cancel();
         }
+        lastRotationTick = Bukkit.getCurrentTick();
         animationTask = Bukkit.getScheduler().runTaskTimer(
                 plugin, this::animateStars, STAR_ANIMATION_TICKS, STAR_ANIMATION_TICKS
         );
@@ -154,26 +213,23 @@ public class ConstellationManager implements Listener, CommandExecutor {
         return Double.isFinite(value) && value > 0.0 ? value : fallback;
     }
 
-    private double renderDistance() {
-        return Math.clamp(positiveSetting("render-distance", 80.0), 4.0, 256.0);
-    }
-
-    private float starScale() {
-        return (float) Math.min(32.0, positiveSetting("star-scale", 2.0));
-    }
-
-    private float lineThickness() {
-        return (float) Math.min(16.0, positiveSetting("line-thickness", 0.4));
-    }
-
-    private double clickToleranceDeg() {
-        return Math.min(45.0, positiveSetting("click-tolerance-degrees", 2.0));
-    }
-
-    private double starRotationSpeed() {
+    private void readRenderSettings() {
+        radius = Math.clamp(positiveSetting("render-distance", 80.0), 4.0, 256.0);
+        starSize = (float) Math.min(32.0, positiveSetting("star-scale", 2.0));
+        lineWidth = (float) Math.min(16.0, positiveSetting("line-thickness", 0.4));
+        tolerance = Math.min(45.0, positiveSetting("click-tolerance-degrees", 2.0));
         double speed = plugin.getConfig().getDouble("constellations.star-rotation-degrees-per-second", 4.0);
-        return Double.isFinite(speed) ? Math.clamp(speed, -90.0, 90.0) : 4.0;
+        rotationSpeed = Double.isFinite(speed) ? Math.clamp(speed, -90.0, 90.0) : 4.0;
+        fadeTicks = Math.clamp(plugin.getConfig().getInt("constellations.fade-duration-ticks", 40), 1, 200);
+        followInterpolationTicks = Math.clamp(plugin.getConfig().getInt("constellations.follow-interpolation-ticks", 3), 1, 5);
+        int interval = Math.clamp(plugin.getConfig().getInt("constellations.rotation-update-ticks", 4), 2, 20);
+        rotationIntervalTicks = (interval + 1) / 2 * 2;
     }
+
+    private double renderDistance() { return radius; }
+    private float starScale() { return starSize; }
+    private float lineThickness() { return lineWidth; }
+    private double clickToleranceDeg() { return tolerance; }
 
     // ===== ЗАГРУЗКА =====
 
@@ -249,8 +305,12 @@ public class ConstellationManager implements Listener, CommandExecutor {
                     Object raw = starsSec.get(sid);
 
                     if (raw instanceof List<?> l && l.size() >= 2) {
-                        az = ((Number) l.get(0)).doubleValue();
-                        el = ((Number) l.get(1)).doubleValue();
+                        if (!(l.get(0) instanceof Number azimuth) || !(l.get(1) instanceof Number elevation)) {
+                            plugin.getLogger().warning("Некорректные координаты звезды " + id + ":" + sid);
+                            continue;
+                        }
+                        az = azimuth.doubleValue();
+                        el = elevation.doubleValue();
                     } else if (raw instanceof String s) {
                         String[] parts = s.split("[, ]+");
                         if (parts.length >= 2) {
@@ -262,6 +322,10 @@ public class ConstellationManager implements Listener, CommandExecutor {
                         }
                     }
 
+                    if (!Double.isFinite(az) || !Double.isFinite(el)) {
+                        plugin.getLogger().warning("Неконечные координаты звезды " + id + ":" + sid);
+                        continue;
+                    }
                     c.stars.put(
                             sid,
                             new Constellation.StarDef(sid, az, el)
@@ -400,252 +464,228 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
     }
 
-    private void saveProgress() {
-        for (Map.Entry<UUID, PlayerProgress> e :
-                progress.entrySet()) {
-
-            String path = "players." + e.getKey();
-
-            playerData.set(
-                    path + ".edges",
-                    new ArrayList<>(e.getValue().drawn)
-            );
-            playerData.set(
-                    path + ".completed",
-                    new ArrayList<>(e.getValue().completed)
-            );
+    private void saveProgress(UUID uuid) {
+        PlayerProgress pp = progress.get(uuid);
+        String path = "players." + uuid;
+        if (pp == null) {
+            playerData.set(path, null);
+        } else {
+            playerData.set(path + ".edges", new ArrayList<>(pp.drawn));
+            playerData.set(path + ".completed", new ArrayList<>(pp.completed));
         }
+        progressStorage.markDirty();
+    }
 
-        try {
-            playerData.save(playerDataFile);
-        } catch (IOException ignored) {
+    // ===== РЕНДЕР: КЭШИ И ПЛАВНЫЙ ЖИЗНЕННЫЙ ЦИКЛ =====
+
+    private void rebuildRenderCache() {
+        starTemplates.clear();
+        starOffsets.clear();
+        lineTemplates.clear();
+        solidBeamItem = beamItem(false);
+        previewBeamItem = beamItem(true);
+        for (Constellation c : constellations.values()) {
+            if (!c.pinned) continue;
+            ItemStack model = starItem(c);
+            for (var entry : c.stars.entrySet()) {
+                Vector3f direction = entry.getValue().direction();
+                if (!direction.isFinite()) continue;
+                String key = c.id + ":" + entry.getKey();
+                StarTemplate template = new StarTemplate(direction, (float) renderDistance(), model);
+                starTemplates.put(key, template);
+                starOffsets.put(key, template.offset);
+            }
+            for (Constellation.EdgeDef edge : c.edges) {
+                Vector3f a = starOffsets.get(c.id + ":" + edge.a);
+                Vector3f b = starOffsets.get(c.id + ":" + edge.b);
+                if (a == null || b == null) continue;
+                Matrix4f matrix = beamTransform(a, b);
+                if (matrix != null) lineTemplates.put(c.id + ":" + edge.key(), new BeamTemplate(matrix));
+            }
+        }
+        updateRotations();
+    }
+
+    private void updateRotations() {
+        for (StarTemplate template : starTemplates.values()) {
+            template.rotation = new Quaternionf(template.faceObserver).rotateZ((float) starSpinRadians);
         }
     }
 
-    // ===== ЦИКЛ ОТРИСОВКИ =====
+    private PlayerView viewFor(Player player) {
+        return views.computeIfAbsent(player.getUniqueId(), id -> {
+            PlayerView view = new PlayerView();
+            view.anchor = SkyGeometry.anchor(player.getEyeLocation());
+            view.follow = new SkyFollow(point(view.anchor), Bukkit.getCurrentTick());
+            return view;
+        });
+    }
+
+    private static Vector3d point(Location location) {
+        return new Vector3d(location.getX(), location.getY(), location.getZ());
+    }
 
     private void renderTick() {
-        for (Player p : Bukkit.getOnlinePlayers()) {
-            if (!shouldRender(p)) {
-                hideAll(p);
-                continue;
-            }
-
-            updateAnchor(p);
-            ensureStars(p);
-            updateLines(p);
-            updatePreview(p);
+        if (starTemplates.isEmpty() && views.isEmpty()) return;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (!shouldRender(player)) continue; // Уход уже созданного неба завершает visualTick.
+            viewFor(player);
+            ensureStars(player);
+            updateLines(player);
+            updatePreview(player);
         }
     }
 
     private void animateStars() {
-        double speed = starRotationSpeed();
-        starSpinRadians = Math.IEEEremainder(
-                starSpinRadians + Math.toRadians(speed) * STAR_ANIMATION_TICKS / 20.0,
-                Math.PI * 2.0
-        );
-        float radius = (float) renderDistance();
-        float scale = starScale();
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            PlayerView view = views.get(player.getUniqueId());
-            if (view == null) {
+        if (views.isEmpty()) return; // Днём нет обхода всех игроков каждые два тика.
+        int tick = Bukkit.getCurrentTick();
+        long elapsed = Integer.toUnsignedLong(tick - lastRotationTick);
+        boolean rotated = elapsed >= rotationIntervalTicks && rotationSpeed != 0.0;
+        if (elapsed >= rotationIntervalTicks) {
+            starSpinRadians = Math.IEEEremainder(starSpinRadians + Math.toRadians(rotationSpeed) * elapsed / 20.0,
+                    Math.PI * 2.0);
+            lastRotationTick = tick;
+            if (rotated) updateRotations(); // Один расчёт на звезду для ВСЕХ игроков.
+        }
+        var iterator = views.entrySet().iterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            Player player = Bukkit.getPlayer(entry.getKey());
+            PlayerView view = entry.getValue();
+            if (player == null || !player.isOnline() || player.isDead()
+                    || !player.getWorld().equals(view.anchor.getWorld())) {
+                clearEntities(view);
+                iterator.remove();
                 continue;
             }
-            if (!shouldRender(player)) {
-                hideAll(player);
-                continue;
-            }
-            if (speed == 0.0) {
-                continue;
-            }
-            for (var entry : view.stars.entrySet()) {
-                ItemDisplay display = entry.getValue();
-                Constellation constellation = constellationOf(entry.getKey());
-                Constellation.StarDef star = constellation == null
-                        ? null : constellation.stars.get(starIdOf(entry.getKey()));
-                if (!display.isValid() || star == null) {
-                    continue;
+            if (view.selectedKey != null && !hasSpyglass(player)) clearSelection(player, view, true);
+            boolean visible = shouldRender(player);
+            if (!visible) clearSelection(player, view, false);
+            Location eye = player.getEyeLocation();
+            Vector3d eyePoint = point(eye);
+            if (view.relocate || view.follow.isJump(eyePoint)) {
+                // Большой скачок/телепорт не растягиваем через весь мир:
+                // удаляем старое изображение и проявляем новое на месте прибытия.
+                clearEntities(view);
+                view.fade.reset();
+                view.lastAppearance = -1;
+                view.anchor = SkyGeometry.anchor(eye);
+                view.follow.reset(eyePoint, tick);
+                view.relocate = false;
+                if (visible) {
+                    ensureStars(player);
+                    updateLines(player);
                 }
-                // Клиент интерполирует поворот между редкими обновлениями.
-                // Translation и положение сущности при анимации не меняются.
-                display.setInterpolationDuration((int) STAR_ANIMATION_TICKS);
-                display.setInterpolationDelay(0);
-                display.setTransformation(SkyGeometry.starTransform(
-                        star.direction(), radius, scale, (float) starSpinRadians
-                ));
+            } else if (view.follow.follow(eyePoint, tick, followInterpolationTicks,
+                    Math.min(2.0, renderDistance() * 0.025))) {
+                Vector3d target = view.follow.target();
+                view.anchor = new Location(player.getWorld(), target.x, target.y, target.z, 0f, 0f);
+                for (ItemDisplay display : view.stars.values()) if (display.isValid()) display.teleport(view.anchor);
+                for (ItemDisplay display : view.lines.values()) if (display.isValid()) display.teleport(view.anchor);
+                if (view.preview != null && view.preview.isValid()) view.preview.teleport(view.anchor);
+            }
+            float appearance = (float) view.fade.advance(visible, (int) STAR_ANIMATION_TICKS, fadeTicks);
+            if (!visible && view.fade.hidden()) {
+                clearEntities(view);
+                iterator.remove();
+                continue;
+            }
+            boolean fading = Float.compare(appearance, view.lastAppearance) != 0;
+            if (rotated || fading) applyAppearance(view, appearance, fading);
+            view.lastAppearance = appearance;
+        }
+    }
+
+    private void applyAppearance(PlayerView view, float appearance, boolean fading) {
+        float visibility = Math.max(0.0001f, appearance);
+        int duration = fading ? (int) STAR_ANIMATION_TICKS : rotationIntervalTicks;
+        int brightness = Math.clamp(Math.round(15f * appearance), 0, 15);
+        for (var entry : view.stars.entrySet()) {
+            StarTemplate template = starTemplates.get(entry.getKey());
+            ItemDisplay display = entry.getValue();
+            if (template == null || !display.isValid()) continue;
+            if (display.getInterpolationDuration() != duration) display.setInterpolationDuration(duration);
+            display.setInterpolationDelay(0);
+            display.setTransformation(template.transform(starScale() * visibility));
+            if (brightness != view.lastBrightness) display.setBrightness(LIGHTS[brightness]);
+        }
+        if (fading) {
+            for (var entry : view.lines.entrySet()) {
+                BeamTemplate template = lineTemplates.get(entry.getKey());
+                if (template != null && entry.getValue().isValid()) fadeBeam(entry.getValue(), template, visibility);
+            }
+            if (view.preview != null && view.preview.isValid() && view.previewTemplate != null) {
+                fadeBeam(view.preview, view.previewTemplate, visibility);
             }
         }
+        view.lastBrightness = brightness;
     }
 
-    private boolean shouldRender(Player p) {
-        if (p.getWorld().getEnvironment()
-                != World.Environment.NORMAL) {
-            return false;
+    private void fadeBeam(ItemDisplay display, BeamTemplate template, float visibility) {
+        if (display.getInterpolationDuration() != STAR_ANIMATION_TICKS) {
+            display.setInterpolationDuration((int) STAR_ANIMATION_TICKS);
         }
-
-        return !p.isDead() && SkyGeometry.isNight(p.getWorld().getTime()) && hasPinned();
+        display.setInterpolationDelay(0);
+        display.setTransformation(template.transform(visibility));
     }
 
-    private boolean hasPinned() {
-        for (Constellation c : constellations.values()) {
-            if (c.pinned) {
-                return true;
-            }
-        }
-        return false;
+    private boolean shouldRender(Player player) {
+        return !starTemplates.isEmpty() && !player.isDead()
+                && player.getWorld().getEnvironment() == World.Environment.NORMAL
+                && SkyGeometry.isNight(player.getWorld().getTime());
     }
-
-    // ===== ЗВЁЗДЫ =====
 
     private ItemStack starItem(Constellation c) {
-        ItemStack is = new ItemStack(Material.PAPER);
-        ItemMeta im = is.getItemMeta();
-
-        if (im != null) {
-            NamespacedKey k = NamespacedKey.fromString(c.starModel);
-
-            if (k == null) {
-                k = new NamespacedKey("f8resurs", "star");
-            }
-
-            im.setItemModel(k);
-            is.setItemMeta(im);
+        ItemStack item = new ItemStack(Material.PAPER);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            NamespacedKey key = NamespacedKey.fromString(c.starModel);
+            meta.setItemModel(key == null ? new NamespacedKey("f8resurs", "star") : key);
+            item.setItemMeta(meta);
         }
-
-        return is;
+        return item;
     }
 
-    private Vector3f scaled(Vector3f dir) {
-        double r = renderDistance();
-        return new Vector3f(
-                (float) (dir.x * r),
-                (float) (dir.y * r),
-                (float) (dir.z * r)
-        );
+    private void configureDisplay(ItemDisplay display) {
+        display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
+        display.setBillboard(Display.Billboard.FIXED);
+        display.setTeleportDuration(followInterpolationTicks);
+        display.setInterpolationDuration(0);
+        display.setShadowRadius(0f);
+        display.setShadowStrength(0f);
+        display.setViewRange(160f);
+        display.setPersistent(false);
+        display.setVisibleByDefault(false);
     }
 
-    private void ensureStars(Player p) {
-        PlayerView v = views.computeIfAbsent(
-                p.getUniqueId(),
-                k -> new PlayerView()
-        );
-
-        Location eye = p.getEyeLocation();
-
-        if (v.anchor == null) {
-            v.anchor = SkyGeometry.anchor(eye);
+    private void ensureStars(Player player) {
+        PlayerView view = viewFor(player);
+        float appearance = (float) view.fade.value();
+        for (var entry : starTemplates.entrySet()) {
+            ItemDisplay existing = view.stars.get(entry.getKey());
+            if (existing != null && existing.isValid()) continue;
+            StarTemplate template = entry.getValue();
+            try {
+                ItemDisplay display = player.getWorld().spawn(view.anchor, ItemDisplay.class, e -> {
+                    configureDisplay(e);
+                    e.setItemStack(template.item);
+                    e.setTransformation(template.transform(starScale() * Math.max(0.0001f, appearance)));
+                    e.setBrightness(LIGHTS[Math.clamp(Math.round(appearance * 15f), 0, 15)]);
+                });
+                player.showEntity(plugin, display);
+                view.stars.put(entry.getKey(), display);
+            } catch (Exception ex) { reportRenderError(ex); }
         }
-
-        Location spawnAt = v.anchor;
-
-        for (Constellation c : constellations.values()) {
-            if (!c.pinned) {
-                continue;
-            }
-
-            for (Constellation.StarDef s : c.stars.values()) {
-                String key = c.id + ":" + s.id;
-
-                ItemDisplay existing = v.stars.get(key);
-
-                if (existing != null && existing.isValid()) {
-                    continue;
-                }
-
-                // Звезда могла быть выгружена (например, вышла за радиус
-                // отслеживания) — пересоздаём её.
-                v.stars.remove(key);
-
-                try {
-                    ItemDisplay d = p.getWorld().spawn(
-                            spawnAt,
-                            ItemDisplay.class,
-                            e -> {
-                                e.setItemStack(starItem(c));
-                                // CENTER поворачивал ещё и translation, уводя
-                                // звезду за камерой. Поворачиваем только модель.
-                                e.setBillboard(Display.Billboard.FIXED);
-                                e.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
-                                e.setTransformation(SkyGeometry.starTransform(
-                                        s.direction(), (float) renderDistance(), starScale(), (float) starSpinRadians
-                                ));
-                                e.setTeleportDuration(0);
-                                e.setInterpolationDuration(0);
-                                e.setShadowRadius(0f);
-                                e.setShadowStrength(0f);
-                                e.setBrightness(
-                                        new Display.Brightness(15, 15)
-                                );
-                                e.setViewRange(160f);
-                                e.setPersistent(false);
-                                e.setVisibleByDefault(false);
-                            }
-                    );
-
-                    p.showEntity(plugin, d);
-                    v.stars.put(key, d);
-                } catch (Exception ex) {
-                    reportRenderError(ex);
-                }
-            }
-        }
-    }
-
-    private void updateAnchor(Player p) {
-        updateAnchor(p, p.getEyeLocation());
-    }
-
-    private void updateAnchor(Player p, Location eye) {
-        PlayerView v = views.get(p.getUniqueId());
-        if (v == null) {
-            return;
-        }
-        Location anchor = SkyGeometry.anchor(eye);
-        if (v.anchor != null && !v.anchor.getWorld().equals(anchor.getWorld())) {
-            hideAll(p);
-            return;
-        }
-        if (v.anchor != null && v.anchor.distanceSquared(anchor) < 1e-10) {
-            return; // Только поворот головы — никаких телепортаций/поворотов неба.
-        }
-        v.anchor = anchor;
-        for (ItemDisplay d : v.stars.values()) {
-            if (d.isValid()) {
-                d.teleport(anchor);
-            }
-        }
-        for (ItemDisplay d : v.lines.values()) {
-            if (d.isValid()) {
-                d.teleport(anchor);
-            }
-        }
-        if (v.preview != null && v.preview.isValid()) {
-            v.preview.teleport(anchor);
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onMove(PlayerMoveEvent event) {
-        followMovement(event);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTeleport(PlayerTeleportEvent event) {
-        followMovement(event);
-    }
-
-    private void followMovement(PlayerMoveEvent event) {
-        Location to = event.getTo();
-        if (to == null || !views.containsKey(event.getPlayer().getUniqueId())) {
-            return;
+        PlayerView view = views.get(event.getPlayer().getUniqueId());
+        if (view != null && event.getTo() != null
+                && (!event.getFrom().getWorld().equals(event.getTo().getWorld())
+                || event.getFrom().distanceSquared(event.getTo()) > 16.0 * 16.0)) {
+            view.relocate = true;
         }
-        if (!shouldRender(event.getPlayer()) || !event.getFrom().getWorld().equals(to.getWorld())) {
-            hideAll(event.getPlayer());
-            return;
-        }
-        // PlayerMoveEvent вызывается ДО обновления координат Player:
-        // используем to, а не старый getEyeLocation().
-        updateAnchor(event.getPlayer(), to.clone().add(0, event.getPlayer().getEyeHeight(), 0));
     }
 
     private void reportRenderError(Exception ex) {
@@ -656,35 +696,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
     }
 
-    // ===== ЛИНИИ =====
-
-    private Vector3f[] edgeEndpoints(
-            Constellation c,
-            String edgeKey
-    ) {
-        String[] ids = edgeKey.split("\\|");
-
-        if (ids.length != 2) {
-            return null;
-        }
-
-        Constellation.StarDef a = c.stars.get(ids[0]);
-        Constellation.StarDef b = c.stars.get(ids[1]);
-
-        if (a == null || b == null) {
-            return null;
-        }
-
-        return new Vector3f[]{
-                scaled(a.direction()),
-                scaled(b.direction())
-        };
-    }
-
     private Matrix4f beamTransform(Vector3f a, Vector3f b) {
-        // В старой настройке line-thickness хранился масштаб END_ROD,
-        // стержень которого имеет ширину 2/16. Сохраняем привычную толщину,
-        // убирая основание, боковые грани и тени самого END_ROD.
         return SkyGeometry.beamTransform(a, b, lineThickness() / 8f, starScale() * 2f);
     }
 
@@ -698,28 +710,15 @@ public class ConstellationManager implements Listener, CommandExecutor {
         return item;
     }
 
-    private ItemDisplay spawnLine(Player p, Location spawnAt, Matrix4f transform, boolean preview) {
-        if (transform == null) {
-            return null;
-        }
+    private ItemDisplay spawnLine(Player player, PlayerView view, BeamTemplate template, boolean preview) {
         try {
-            ItemDisplay display = p.getWorld().spawn(
-                    SkyGeometry.anchor(spawnAt), ItemDisplay.class, e -> {
-                        e.setItemStack(beamItem(preview));
-                        e.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
-                        e.setBillboard(Display.Billboard.FIXED);
-                        e.setTeleportDuration(0);
-                        e.setInterpolationDuration(0);
-                        e.setShadowRadius(0f);
-                        e.setShadowStrength(0f);
-                        e.setBrightness(new Display.Brightness(15, 15));
-                        e.setViewRange(160f);
-                        e.setPersistent(false);
-                        e.setVisibleByDefault(false);
-                        e.setTransformationMatrix(transform);
-                    }
-            );
-            p.showEntity(plugin, display);
+            ItemDisplay display = player.getWorld().spawn(view.anchor, ItemDisplay.class, e -> {
+                configureDisplay(e);
+                e.setItemStack(preview ? previewBeamItem : solidBeamItem);
+                e.setBrightness(LIGHTS[15]);
+                e.setTransformation(template.transform(Math.max(0.0001f, (float) view.fade.value())));
+            });
+            player.showEntity(plugin, display);
             return display;
         } catch (Exception ex) {
             reportRenderError(ex);
@@ -727,163 +726,139 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
     }
 
-    private void updateLines(Player p) {
-        PlayerView v = views.get(p.getUniqueId());
-
-        if (v == null) {
-            return;
+    private BeamTemplate lineTemplate(String key) {
+        if (lineTemplates.containsKey(key)) return lineTemplates.get(key);
+        // Сохраняем прежнее поведение: уже проведённая связь остаётся
+        // видимой, пока существуют обе звезды, даже после правки списка рёбер.
+        BeamTemplate result = null;
+        int colon = key.indexOf(':');
+        if (colon > 0) {
+            String[] ids = key.substring(colon + 1).split("\\|", -1);
+            if (ids.length == 2) {
+                String prefix = key.substring(0, colon + 1);
+                Vector3f a = starOffsets.get(prefix + ids[0]);
+                Vector3f b = starOffsets.get(prefix + ids[1]);
+                if (a != null && b != null) {
+                    Matrix4f matrix = beamTransform(a, b);
+                    if (matrix != null) result = new BeamTemplate(matrix);
+                }
+            }
         }
+        lineTemplates.put(key, result);
+        return result;
+    }
 
-        PlayerProgress pp = progress.get(p.getUniqueId());
-
+    private void updateLines(Player player) {
+        PlayerView view = views.get(player.getUniqueId());
+        if (view == null) return;
+        PlayerProgress pp = progress.get(player.getUniqueId());
         if (pp != null) {
-            for (String drawnKey : new ArrayList<>(pp.drawn)) {
-                int idx = drawnKey.indexOf(':');
-
-                if (idx <= 0) {
-                    continue;
-                }
-
-                String cid = drawnKey.substring(0, idx);
-                String edgeKey = drawnKey.substring(idx + 1);
-
-                Constellation c = constellations.get(cid);
-
-                if (c == null || !c.pinned) {
-                    continue;
-                }
-
-                Vector3f[] ends = edgeEndpoints(c, edgeKey);
-
-                if (ends == null) {
-                    continue;
-                }
-
-                ItemDisplay line = v.lines.get(drawnKey);
-
-                if (line == null || !line.isValid()) {
-                    line = spawnLine(
-                            p,
-                            v.anchor != null
-                                    ? v.anchor
-                                    : p.getEyeLocation(),
-                            beamTransform(ends[0], ends[1]),
-                            false
-                    );
-
-                    if (line == null) {
-                        continue;
-                    }
-
-                    v.lines.put(drawnKey, line);
-                }
-                // Геометрия завершённой линии постоянна до /stars reload;
-                // при ходьбе переносится только общая точка привязки.
-
+            for (String key : pp.drawn) {
+                ItemDisplay existing = view.lines.get(key);
+                if (existing != null && existing.isValid()) continue;
+                BeamTemplate template = lineTemplate(key);
+                if (template == null) continue;
+                ItemDisplay line = spawnLine(player, view, template, false);
+                if (line != null) view.lines.put(key, line);
             }
         }
-
-        Iterator<Map.Entry<String, ItemDisplay>> it =
-                v.lines.entrySet().iterator();
-
-        while (it.hasNext()) {
-            Map.Entry<String, ItemDisplay> en = it.next();
-
-            boolean keep = pp != null
-                    && pp.drawn.contains(en.getKey());
-
-            if (!keep) {
-                if (en.getValue().isValid()) {
-                    en.getValue().remove();
-                }
-                it.remove();
+        var iterator = view.lines.entrySet().iterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            if (pp == null || !pp.drawn.contains(entry.getKey()) || lineTemplates.get(entry.getKey()) == null) {
+                entry.getValue().remove();
+                iterator.remove();
             }
         }
     }
 
-    // ===== ПРЕВЬЮ-ЛИНИЯ =====
-
-    private void updatePreview(Player p) {
-        PlayerView v = views.get(p.getUniqueId());
-        if (v == null) {
+    private void updatePreview(Player player) {
+        PlayerView view = views.get(player.getUniqueId());
+        if (view == null) return;
+        if (view.selectedKey == null) {
+            removePreview(player, view);
             return;
         }
-        if (v.selectedKey == null) {
-            removePreview(p, v);
+        if (!hasSpyglass(player)) {
+            clearSelection(player, view, true);
             return;
         }
-        Constellation source = constellationOf(v.selectedKey);
-        String sourceId = starIdOf(v.selectedKey);
-        if (source == null || !source.pinned || sourceId == null || !source.stars.containsKey(sourceId)) {
-            v.selectedKey = null;
-            removePreview(p, v);
+        Vector3f source = starOffsets.get(view.selectedKey);
+        if (source == null) {
+            clearSelection(player, view, false);
             return;
         }
-
-        // Не ограничиваем наведение исходным созвездием или списком рёбер.
-        // Иначе наличие/отсутствие превью заранее выдаёт ответ игроку.
-        String hoverKey = findAimedStar(p, v.selectedKey);
-        if (hoverKey == null) {
-            removePreview(p, v);
+        String hover = findAimedStar(player, view.selectedKey);
+        if (hover == null) {
+            removePreview(player, view);
             return;
         }
-        Constellation target = constellationOf(hoverKey);
-        String targetId = starIdOf(hoverKey);
-        if (target == null || targetId == null || !target.stars.containsKey(targetId)) {
-            removePreview(p, v);
+        if (hover.equals(view.previewTargetKey) && view.preview != null && view.preview.isValid()) return;
+        Matrix4f matrix = beamTransform(source, starOffsets.get(hover));
+        if (matrix == null) {
+            removePreview(player, view);
             return;
         }
-        if (hoverKey.equals(v.previewTargetKey) && v.preview != null && v.preview.isValid()) {
-            return;
-        }
-        Matrix4f transform = beamTransform(
-                scaled(source.stars.get(sourceId).direction()),
-                scaled(target.stars.get(targetId).direction())
-        );
-        if (transform == null) {
-            removePreview(p, v);
-            return;
-        }
-        if (v.preview == null || !v.preview.isValid()) {
-            v.preview = spawnLine(p, v.anchor != null ? v.anchor : p.getEyeLocation(), transform, true);
+        view.previewTemplate = new BeamTemplate(matrix);
+        if (view.preview == null || !view.preview.isValid()) {
+            view.preview = spawnLine(player, view, view.previewTemplate, true);
         } else {
-            v.preview.setTransformationMatrix(transform);
+            view.preview.setInterpolationDuration(0); // Наведение не растягиваем через чужие звёзды.
+            view.preview.setTransformation(view.previewTemplate.transform(Math.max(0.0001f, (float) view.fade.value())));
         }
-        v.previewTargetKey = hoverKey;
+        view.previewTargetKey = hover;
     }
 
-    private void removePreview(Player p, PlayerView v) {
-        if (v.preview != null) {
-            if (v.preview.isValid()) {
-                v.preview.remove();
-            }
-            v.preview = null;
-        }
-        v.previewTargetKey = null;
+    private void removePreview(Player player, PlayerView view) {
+        if (view.preview != null) view.preview.remove();
+        view.preview = null;
+        view.previewTemplate = null;
+        view.previewTargetKey = null;
     }
 
-    private void hideAll(Player p) {
-        PlayerView v = views.remove(p.getUniqueId());
+    private boolean hasSpyglass(Player player) {
+        return player.getInventory().getItemInMainHand().getType() == Material.SPYGLASS;
+    }
 
-        if (v == null) {
-            return;
-        }
+    private void clearSelection(Player player, PlayerView view, boolean notify) {
+        boolean selected = view.selectedKey != null;
+        view.selectedKey = null;
+        removePreview(player, view);
+        if (selected && notify) action(player, "§7Выбор сброшен.");
+    }
 
-        for (ItemDisplay d : v.stars.values()) {
-            if (d.isValid()) {
-                d.remove();
-            }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onHeldItem(PlayerItemHeldEvent event) {
+        PlayerView view = views.get(event.getPlayer().getUniqueId());
+        ItemStack next = event.getPlayer().getInventory().getItem(event.getNewSlot());
+        if (view != null && (next == null || next.getType() != Material.SPYGLASS)) {
+            clearSelection(event.getPlayer(), view, true);
         }
+    }
 
-        for (ItemDisplay d : v.lines.values()) {
-            if (d.isValid()) {
-                d.remove();
-            }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onSwapHands(PlayerSwapHandItemsEvent event) {
+        PlayerView view = views.get(event.getPlayer().getUniqueId());
+        ItemStack next = event.getMainHandItem();
+        if (view != null && (next == null || next.getType() != Material.SPYGLASS)) {
+            clearSelection(event.getPlayer(), view, true);
         }
+    }
 
-        if (v.preview != null && v.preview.isValid()) {
-            v.preview.remove();
-        }
+    private void clearEntities(PlayerView view) {
+        for (ItemDisplay display : view.stars.values()) display.remove();
+        for (ItemDisplay display : view.lines.values()) display.remove();
+        if (view.preview != null) view.preview.remove();
+        view.stars.clear();
+        view.lines.clear();
+        view.preview = null;
+        view.previewTemplate = null;
+        view.previewTargetKey = null;
+    }
+
+    private void hideAll(Player player) {
+        PlayerView view = views.remove(player.getUniqueId());
+        if (view != null) clearEntities(view);
     }
 
     // ===== ВЗАИМОДЕЙСТВИЕ ИГРОКА =====
@@ -911,21 +886,14 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
 
         // Прицеливание использует ту же точку привязки, что и картинка.
-        updateAnchor(p);
         ensureStars(p);
         String hitKey = findAimedStar(p, null);
 
-        PlayerView v = views.computeIfAbsent(
-                p.getUniqueId(),
-                k -> new PlayerView()
-        );
+        PlayerView v = viewFor(p);
 
         if (hitKey == null) {
-            // Обычная подзорная труба (например, в шахте) не должна спамить
-            // actionbar и затирать компас/HUD других плагинов. Даже сброс
-            // незавершённого выбора при промахе происходит совершенно тихо.
-            v.selectedKey = null;
-            removePreview(p, v);
+            // Промах без выбора тихий; активный выбор сбрасывается с сообщением.
+            clearSelection(p, v, true);
             return;
         }
 
@@ -937,9 +905,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
 
         if (v.selectedKey.equals(hitKey)) {
-            v.selectedKey = null;
-            removePreview(p, v);
-            action(p, "§7Выбор сброшен.");
+            clearSelection(p, v, true);
             playSound(p, Sound.UI_BUTTON_CLICK);
             return;
         }
@@ -992,7 +958,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
 
         pp.drawn.add(drawnKey);
-        saveProgress();
+        saveProgress(p.getUniqueId());
 
         playSound(p, Sound.BLOCK_NOTE_BLOCK_PLING);
         action(p, "§aЛиния проведена.");
@@ -1004,25 +970,15 @@ public class ConstellationManager implements Listener, CommandExecutor {
         checkCompletion(p, sc, pp);
     }
 
-    private Vector3f directionToStar(Player p, Constellation.StarDef star) {
-        PlayerView view = views.get(p.getUniqueId());
-        Location eye = p.getEyeLocation();
-        Location anchor = view != null && view.anchor != null ? view.anchor : eye;
-        Vector3f eyeFromAnchor = new Vector3f(
-                (float) (eye.getX() - anchor.getX()),
-                (float) (eye.getY() - anchor.getY()),
-                (float) (eye.getZ() - anchor.getZ())
-        );
-        return SkyGeometry.directionToStar(eyeFromAnchor, scaled(star.direction()));
-    }
-
-    private String findAimedStar(Player p, String excludedKey) {
-        Vector look = p.getEyeLocation().getDirection();
-        return StarTargeting.closest(
-                constellations.values(),
+    private String findAimedStar(Player player, String excludedKey) {
+        Location eye = player.getEyeLocation();
+        Vector look = eye.getDirection();
+        PlayerView view = views.get(player.getUniqueId());
+        Vector3d anchor = view == null ? point(eye) : view.follow.sample(Bukkit.getCurrentTick());
+        return StarTargeting.closestOffsets(starOffsets,
                 new Vector3f((float) look.getX(), (float) look.getY(), (float) look.getZ()),
-                clickToleranceDeg(), excludedKey, star -> directionToStar(p, star)
-        );
+                new Vector3f((float) (eye.getX() - anchor.x), (float) (eye.getY() - anchor.y), (float) (eye.getZ() - anchor.z)),
+                clickToleranceDeg(), excludedKey);
     }
 
     private void checkCompletion(
@@ -1041,8 +997,9 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
 
         pp.completed.add(c.id);
-        saveProgress();
-
+        saveProgress(p.getUniqueId());
+        // Редкое завершение сохраняем ДО выдачи награды, как и раньше.
+        progressStorage.flushBlocking();
         grantReward(p, c);
     }
 
@@ -1121,7 +1078,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
             hideAll(p);
         }
 
-        saveProgress();
+        progressStorage.flush();
     }
 
     // ===== КОМАНДЫ =====
@@ -1179,9 +1136,12 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private void reloadAll() {
         plugin.reloadConfig();
         renderErrorReported = false;
-        startRenderTask();
+        progressStorage.flush();
         loadConstellations();
-        loadProgress();
+        readRenderSettings();
+        rebuildRenderCache();
+        startRenderTask();
+        // progress уже актуален в памяти; не пересобираем всех игроков при каждой админ-команде.
 
         for (Player p : Bukkit.getOnlinePlayers()) {
             hideAll(p);
@@ -1427,8 +1387,8 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
 
         progress.remove(t.getUniqueId());
-        playerData.set("players." + t.getUniqueId(), null);
-        saveProgress();
+        saveProgress(t.getUniqueId());
+        progressStorage.flushBlocking();
         hideAll(t);
 
         sender.sendMessage(ChatColor.GREEN

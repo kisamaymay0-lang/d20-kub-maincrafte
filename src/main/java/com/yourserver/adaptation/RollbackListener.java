@@ -24,7 +24,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedList;
+import java.util.ArrayDeque;
 import java.util.Map;
 import java.util.Queue;
 import java.util.UUID;
@@ -38,8 +38,7 @@ public class RollbackListener implements Listener {
     private final Map<UUID, Queue<Location>> positionHistory =
             new HashMap<>();
 
-    private final Map<UUID, BukkitTask> saveTasks =
-            new HashMap<>();
+    private BukkitTask saveTask;
 
     private final NamespacedKey rollbackKey;
 
@@ -83,10 +82,7 @@ public class RollbackListener implements Listener {
                         SAVE_INTERVAL_TICKS
                 );
 
-        saveTasks.put(
-                UUID.randomUUID(),
-                task
-        );
+        saveTask = task;
     }
 
     private void savePlayerPosition(
@@ -98,11 +94,11 @@ public class RollbackListener implements Listener {
         Queue<Location> history =
                 positionHistory.computeIfAbsent(
                         uuid,
-                        k -> new LinkedList<>()
+                        k -> new ArrayDeque<>(HISTORY_SECONDS * (20 / SAVE_INTERVAL_TICKS) + 1)
                 );
 
         history.add(
-                player.getLocation().clone()
+                player.getLocation()
         );
 
         int maxSize =
@@ -386,12 +382,9 @@ public class RollbackListener implements Listener {
     public void disable() {
         positionHistory.clear();
 
-        saveTasks.values()
-                .forEach(
-                        BukkitTask::cancel
-                );
-
-        saveTasks.clear();
+        if (saveTask != null) {
+            saveTask.cancel();
+        }
 
         if (instance == this) {
             instance = null;

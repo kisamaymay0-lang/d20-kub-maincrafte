@@ -43,6 +43,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
 
     private final Map<UUID, Long> cooldownEndTimes = new HashMap<>();
 
+    private AsyncTextWriter dataWriter;
     private DiceRollListener diceRollListener;
     private RollbackListener rollbackListener;
     private FlaskListener flaskListener;
@@ -62,6 +63,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
 @Override
 public void onEnable() {
     saveDefaultConfig();
+    dataWriter = new AsyncTextWriter(getLogger());
 
     getServer().getPluginManager().registerEvents(
             this,
@@ -93,7 +95,7 @@ public void onEnable() {
     );
 
     copperBlockListener =
-            new CopperBlockListener(this);
+            new CopperBlockListener(this, dataWriter);
 
     getServer().getPluginManager().registerEvents(
             copperBlockListener,
@@ -109,7 +111,7 @@ public void onEnable() {
     );
 
     constellationManager =
-            new ConstellationManager(this);
+            new ConstellationManager(this, dataWriter);
 
     getServer().getPluginManager().registerEvents(
             constellationManager,
@@ -177,6 +179,9 @@ public void onEnable() {
 
         if (constellationManager != null) {
             constellationManager.disable();
+        }
+        if (dataWriter != null) {
+            dataWriter.close();
         }
     }
 
@@ -278,13 +283,14 @@ public void onEnable() {
     }
 
     private int getAdaptationLevel(ItemStack item) {
-        if (item == null ||
-                !item.hasItemMeta() ||
-                !item.getItemMeta().hasLore()) {
+        if (item == null || !item.hasItemMeta()) {
             return 0;
         }
-
-        for (String line : item.getItemMeta().getLore()) {
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null || !meta.hasLore()) {
+            return 0;
+        }
+        for (String line : meta.getLore()) {
             String clean = ChatColor.stripColor(line).trim();
 
             if (clean.contains("Адаптация III")) {
@@ -939,7 +945,7 @@ public void onEnable() {
 
         BossBar bossBar =
                 Bukkit.createBossBar(
-                        message,
+                        superMode ? "§6§l" + message : message,
                         color,
                         BarStyle.SOLID
                 );
@@ -1090,6 +1096,7 @@ public void onEnable() {
 
                                 bossBar.removeAll();
                                 activeBossBars.remove(uuid);
+                                activeTimers.remove(uuid);
 
                                 cancel();
                             }
@@ -1131,19 +1138,8 @@ public void onEnable() {
                                 )
                         );
 
-                        if (superMode) {
-
-                            bossBar.setTitle(
-                                    "§6§l" +
-                                    message
-                            );
-
-                        } else {
-
-                            bossBar.setTitle(
-                                    message
-                            );
-                        }
+                        // Заголовок постоянен: задаём при создании и при
+                        // переходе в cooldown, не пересобираем его 10 раз/сек.
                     }
 
                 }.runTaskTimer(

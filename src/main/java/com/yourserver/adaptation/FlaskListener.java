@@ -70,45 +70,23 @@ public class FlaskListener implements Listener {
     }
 
     private boolean isFlask(ItemStack item) {
-        if (item == null || item.getType() != Material.POTION || !item.hasItemMeta()) {
-            return false;
-        }
-
-        ItemMeta meta = item.getItemMeta();
-        if (meta == null) {
-            return false;
-        }
-
-        return meta.getPersistentDataContainer()
-                .has(flaskTypeKey, PersistentDataType.STRING);
+        return item != null && item.getType() == Material.POTION
+                && item.getPersistentDataContainer().has(flaskTypeKey, PersistentDataType.STRING);
     }
 
     private String getFlaskType(ItemStack item) {
         if (!isFlask(item)) {
             return null;
         }
-
-        ItemMeta meta = item.getItemMeta();
-        if (meta == null) {
-            return null;
-        }
-
-        return meta.getPersistentDataContainer()
-                .get(flaskTypeKey, PersistentDataType.STRING);
+        return item.getPersistentDataContainer().get(flaskTypeKey, PersistentDataType.STRING);
     }
 
     private Long getPoisonExpire(ItemStack sword) {
-        if (!isSword(sword) || !sword.hasItemMeta()) {
+        if (!isSword(sword)) {
             return null;
         }
-
-        ItemMeta meta = sword.getItemMeta();
-        if (meta == null) {
-            return null;
-        }
-
-        return meta.getPersistentDataContainer()
-                .get(poisonExpireKey, PersistentDataType.LONG);
+        // Paper даёт read-only PDC без глубокого копирования ItemMeta.
+        return sword.getPersistentDataContainer().get(poisonExpireKey, PersistentDataType.LONG);
     }
 
     private boolean hasPoison(ItemStack sword) {
@@ -180,16 +158,16 @@ public class FlaskListener implements Listener {
         }
     }
 
-    private String formatTimeLeft(long expire) {
+    private String formatTimeLeft(long expire, long now) {
         long seconds = Math.max(
                 0L,
-                (expire - System.currentTimeMillis() + 999L) / 1000L
+                (expire - now + 999L) / 1000L
         );
 
         long minutes = seconds / 60L;
         long remainingSeconds = seconds % 60L;
 
-        return String.format("%d:%02d", minutes, remainingSeconds);
+        return minutes + ":" + (remainingSeconds < 10 ? "0" : "") + remainingSeconds;
     }
 
     private void tickPoisonEffects() {
@@ -209,7 +187,7 @@ public class FlaskListener implements Listener {
             }
 
             // Таймер показывается в action bar и не меняет ItemStack каждую секунду.
-            player.sendActionBar("§7Отравление: " + formatTimeLeft(expire));
+            player.sendActionBar("§7Отравление: " + formatTimeLeft(expire, now));
 
             spawnSwordPoisonParticles(player);
         }

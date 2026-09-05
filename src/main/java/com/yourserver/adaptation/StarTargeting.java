@@ -11,6 +11,29 @@ final class StarTargeting {
     private StarTargeting() {
     }
 
+    /** Кэшированные смещения; одна позиция глаз на поиск, без аллокаций на каждую звезду. */
+    static String closestOffsets(Map<String, Vector3f> offsets, Vector3f look, Vector3f eyeFromAnchor,
+                                 double toleranceDegrees, String excludedKey) {
+        double threshold = Math.cos(Math.toRadians(toleranceDegrees));
+        double best = -1.0;
+        String result = null;
+        for (var entry : offsets.entrySet()) {
+            if (entry.getKey().equals(excludedKey)) continue;
+            Vector3f offset = entry.getValue();
+            double x = offset.x - eyeFromAnchor.x;
+            double y = offset.y - eyeFromAnchor.y;
+            double z = offset.z - eyeFromAnchor.z;
+            double lengthSquared = x * x + y * y + z * z;
+            if (lengthSquared < 1e-10) continue;
+            double dot = (look.x * x + look.y * y + look.z * z) / Math.sqrt(lengthSquared);
+            if (dot >= threshold && dot > best) {
+                best = dot;
+                result = entry.getKey();
+            }
+        }
+        return result;
+    }
+
     static String closest(Iterable<Constellation> constellations, Vector3f look,
                           double toleranceDegrees, String excludedKey,
                           Function<Constellation.StarDef, Vector3f> direction) {

@@ -80,4 +80,27 @@ class StarTargetingTest {
         assertEquals("second:centre", aimed(List.of(first, second), centre.direction(), null));
         assertEquals("second:centre", aimed(List.of(second, first), centre.direction(), null));
     }
+    @Test
+    void cachedLookupMatchesTheOriginalAndUsesTheInterpolatedAnchor() {
+        Constellation first = constellation("first", true);
+        Constellation second = constellation("second", true);
+        star(first, "Alpha", 0);
+        Constellation.StarDef target = star(second, "Beta", 40);
+        var sky = List.of(first, second);
+        java.util.Map<String, Vector3f> offsets = new java.util.LinkedHashMap<>();
+        for (Constellation c : sky) {
+            for (var entry : c.stars.entrySet()) {
+                offsets.put(c.id + ":" + entry.getKey(), entry.getValue().direction().mul(80));
+            }
+        }
+        Vector3f relativeEye = new Vector3f(0.4f, -0.2f, 0.1f);
+        Vector3f look = SkyGeometry.directionToStar(relativeEye, target.direction().mul(80));
+        String oldLookup = StarTargeting.closest(sky, look, 2, "first:Alpha",
+                definition -> SkyGeometry.directionToStar(relativeEye, definition.direction().mul(80)));
+        assertEquals(oldLookup, StarTargeting.closestOffsets(offsets, look, relativeEye, 2, "first:Alpha"));
+        assertEquals("second:Beta", oldLookup);
+        assertNull(StarTargeting.closestOffsets(offsets, new Vector3f(0, -1, 0), relativeEye, 2, null));
+        assertEquals(80f, offsets.get("second:Beta").length(), 0.0001f);
+    }
+
 }
