@@ -156,4 +156,18 @@ class SkyGeometryTest {
     void starsAppearAtNightAndDisappearAtDawn(long time, boolean visible) {
         assertEquals(visible, SkyGeometry.isNight(time));
     }
+    @Test
+    void beamEndpointsStillMeetStarsWhenTheObserverIsNotAtTheInertialSphereCenter() {
+        Vector3f a = new Vector3f(0, 1, 1).normalize().mul(80);
+        Vector3f b = new Vector3f(1, 1, 0).normalize().mul(80);
+        Vector3f observer = new Vector3f(3, 1.25f, -2);
+        Matrix4f transform = SkyGeometry.beamTransform(a, b, 0.05f, 4f, observer);
+        assertNotNull(transform);
+        Vector3f start = transform.transformPosition(new Vector3f(0, -0.5f, 0));
+        Vector3f end = transform.transformPosition(new Vector3f(0, 0.5f, 0));
+        assertTrue(new Vector3f(start).sub(observer).normalize().distance(new Vector3f(a).sub(observer).normalize()) < 0.0001f);
+        assertTrue(new Vector3f(end).sub(observer).normalize().distance(new Vector3f(b).sub(observer).normalize()) < 0.0001f);
+        assertTrue(start.length() > 80 && end.length() > 80);
+    }
+
 }

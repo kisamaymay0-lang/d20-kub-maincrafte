@@ -37,9 +37,33 @@ class SkyMotionTest {
     }
 
     @Test
-    void movementInterpolatesInsteadOfSnappingToTheNewTarget() {
+    void smallMovesAndShortJumpsDoNotMoveTheSky() {
+        SkyFollow follow = new SkyFollow(new Vector3d(0, 64, 0), 0);
+        assertFalse(follow.follow(new Vector3d(0.3, 64, 0), 2, 3, 6, true));
+        double[] heights = {0.42, 0.85, 1.15, 1.25, 1.0, 0.6, 0.2, 0};
+        for (int i = 0; i < heights.length; i++) {
+            assertFalse(follow.follow(new Vector3d(0.3, 64 + heights[i], 0), 4 + i * 2, 3, 6, heights[i] == 0));
+            assertEquals(64, follow.target().y, 1e-9);
+        }
+    }
+
+    @Test
+    void sustainedWalkingIsInertialBoundedAndDoesNotLeadThePlayer() {
         SkyFollow follow = new SkyFollow(new Vector3d(), 0);
-        assertTrue(follow.follow(new Vector3d(0.4, 0, 0), 2, 3, 2));
+        for (int tick = 2; tick <= 200; tick += 2) {
+            Vector3d reference = new Vector3d(tick * 0.2, 0, 0);
+            follow.follow(reference, tick, 3, 6, true);
+            assertTrue(follow.target().x <= reference.x);
+            assertTrue(reference.x - follow.target().x <= 6.000001);
+            assertTrue(follow.sample(tick).x + 80 - reference.x > 73);
+        }
+        assertTrue(40 - follow.target().x > 1.5); // Нет жёсткой привязки к каждому шагу.
+    }
+
+    @Test
+    void movingTargetsAreStillClientInterpolated() {
+        SkyFollow follow = new SkyFollow(new Vector3d(), 0);
+        assertTrue(follow.follow(new Vector3d(4, 0, 0), 2, 3, 6, true));
         assertEquals(0.0, follow.sample(2).x, 1e-9);
         assertTrue(follow.sample(3).x > 0);
         assertTrue(follow.sample(3).x < follow.target().x);
@@ -47,48 +71,35 @@ class SkyMotionTest {
     }
 
     @Test
-    void predictionRemovesSteadyWalkingLagWithoutLettingThePlayerApproachTheSky() {
+    void longFlightAndTeleportsCannotLeaveTheSphereBehind() {
         SkyFollow follow = new SkyFollow(new Vector3d(), 0);
-        for (int tick = 2; tick <= 100; tick += 2) {
-            Vector3d eye = new Vector3d(tick * 0.2, 64, -20);
-            if (tick == 2) follow.reset(new Vector3d(0, 64, -20), 0);
-            follow.follow(eye, tick, 3, 2);
-            if (tick > 30) assertEquals(eye.x, follow.sample(tick).x, 1e-6);
-            assertTrue(follow.target().distance(eye) <= 2.0);
-            // Сама звезда всегда далеко: +80 к общей точке неба.
-            assertTrue(follow.sample(tick).x + 80 - eye.x > 79);
+        for (int tick = 2; tick <= 200; tick += 2) {
+            Vector3d position = new Vector3d(0, tick * 0.4, 0);
+            follow.follow(position, tick, 3, 6, false);
+            assertTrue(position.y - follow.target().y <= 6.000001);
         }
-    }
-
-    @Test
-    void stoppingAndLargeTeleportsDoNotLeaveAnUnboundedPrediction() {
-        SkyFollow follow = new SkyFollow(new Vector3d(), 0);
-        follow.follow(new Vector3d(10, 0, 0), 2, 3, 0.5);
-        assertEquals(10.5, follow.target().x, 1e-9);
-        follow.follow(new Vector3d(10, 0, 0), 4, 3, 0.5);
-        assertEquals(10.0, follow.sample(7).x, 1e-9);
         assertTrue(follow.isJump(new Vector3d(1000, 100, 1000)));
-        follow.reset(new Vector3d(1000, 100, 1000), 8);
-        assertEquals(new Vector3d(1000, 100, 1000), follow.sample(8));
+        follow.reset(new Vector3d(1000, 100, 1000), 202);
+        assertEquals(new Vector3d(1000, 100, 1000), follow.sample(202));
     }
 
     @Test
-    void stationarySkySendsNoNewTargetsAndRetainsDoublePrecisionNearWorldBorder() {
+    void stationarySkyRetainsDoublePrecisionNearWorldBorder() {
         Vector3d eye = new Vector3d(29_000_000.123, 70.62, -29_000_000.456);
         SkyFollow follow = new SkyFollow(eye, 0);
-        assertFalse(follow.follow(eye, 2, 3, 2));
+        assertFalse(follow.follow(eye, 2, 3, 6, true));
         assertEquals(eye, follow.sample(2));
-        Vector3d moved = new Vector3d(eye).add(0.02, 0, 0);
-        assertTrue(follow.follow(moved, 4, 3, 2));
-        assertTrue(follow.target().x > eye.x);
-        assertEquals(29_000_000.123, eye.x, 1e-9); // Не мутируем аргумент.
+        Vector3d moved = new Vector3d(eye).add(4, 0, 0);
+        assertTrue(follow.follow(moved, 4, 3, 6, true));
+        assertTrue(follow.target().x > eye.x && follow.target().x < moved.x);
+        assertEquals(29_000_000.123, eye.x, 1e-9);
     }
 
     @Test
     void followSurvivesTheServerTickCounterWrapping() {
         int start = Integer.MAX_VALUE - 1;
         SkyFollow follow = new SkyFollow(new Vector3d(), start);
-        follow.follow(new Vector3d(1, 0, 0), start + 2, 3, 2);
+        follow.follow(new Vector3d(4, 0, 0), start + 2, 3, 6, true);
         assertEquals(follow.target().x, follow.sample(start + 5).x, 1e-9);
     }
 }

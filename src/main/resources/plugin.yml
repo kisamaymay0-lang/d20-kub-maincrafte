@@ -1,9 +1,13 @@
 name: f8-plugin
-version: '9.2'
+version: '9.3'
 main: com.yourserver.adaptation.AdaptationPlugin
 api-version: '1.21.11'
 
 commands:
+  profile:
+    description: Профиль игрока, описание, оценки и медали
+    usage: /profile или /profile medal give <игрок> <copper|silver|gold> <название> | <заслуга>
+
   d20:
     description: Выдать книгу с чаром Бросок I
     permission: f8.admin
@@ -20,6 +24,10 @@ commands:
     usage: /stars <reload|list|add|edge|pin|unpin|model|reset|give>
 
 permissions:
+  profiles.admin:
+    description: Создавать медали игрокам через /profile medal give
+    default: op
+
   f8.admin:
     description: Доступ к меню F8
     default: op

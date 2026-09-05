@@ -45,12 +45,19 @@ final class SkyGeometry {
      * Возвращает null для вырожденного/антиподального направления.
      */
     static Matrix4f beamTransform(Vector3f a, Vector3f b, float thickness, float depthOffset) {
-        if (!a.isFinite() || !b.isFinite() || a.lengthSquared() < 1e-8f || b.lengthSquared() < 1e-8f
+        return beamTransform(a, b, thickness, depthOffset, new Vector3f());
+    }
+
+    static Matrix4f beamTransform(Vector3f a, Vector3f b, float thickness, float depthOffset, Vector3f observer) {
+        if (!observer.isFinite() || !a.isFinite() || !b.isFinite() || a.lengthSquared() < 1e-8f || b.lengthSquared() < 1e-8f
                 || !Float.isFinite(thickness) || thickness <= 0 || !Float.isFinite(depthOffset)) {
             return null;
         }
-        Vector3f u = new Vector3f(a).normalize();
-        Vector3f v = new Vector3f(b).normalize();
+        Vector3f u = new Vector3f(a).sub(observer);
+        Vector3f v = new Vector3f(b).sub(observer);
+        if (u.lengthSquared() < 1e-8f || v.lengthSquared() < 1e-8f) return null;
+        u.normalize();
+        v.normalize();
         if (u.distanceSquared(v) < 1e-8f) {
             return null;
         }
@@ -61,8 +68,12 @@ final class SkyGeometry {
         normal.normalize();
         float radius = Math.max(a.length(), b.length());
         float depth = radius + Math.max(0.5f, depthOffset);
-        Vector3f behindA = u.mul(depth / u.dot(normal));
-        Vector3f behindB = v.mul(depth / v.dot(normal));
+        float eyeDepth = depth - observer.dot(normal);
+        if (eyeDepth <= 0) return null;
+        // Наблюдатель теперь может находиться не в центре инертной сферы.
+        // Проекция от реальных глаз удерживает концы луча на картинках звёзд.
+        Vector3f behindA = u.mul(eyeDepth / u.dot(normal)).add(observer);
+        Vector3f behindB = v.mul(eyeDepth / v.dot(normal)).add(observer);
         Vector3f along = new Vector3f(behindB).sub(behindA);
         float length = along.length();
         along.normalize();

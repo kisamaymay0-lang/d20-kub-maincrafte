@@ -74,6 +74,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private static final long STAR_ANIMATION_TICKS = 2L;
 
     private final JavaPlugin plugin;
+    private final ProfileManager profiles;
     private final File constellationsDir;
     private final File playerDataFile;
     private YamlConfiguration playerData;
@@ -124,7 +125,11 @@ public class ConstellationManager implements Listener, CommandExecutor {
         final Vector3f translation;
         final Quaternionf rotation;
         final Vector3f scale;
-        BeamTemplate(Matrix4f matrix) {
+        final Vector3f a;
+        final Vector3f b;
+        BeamTemplate(Matrix4f matrix, Vector3f a, Vector3f b) {
+            this.a = a;
+            this.b = b;
             translation = matrix.getTranslation(new Vector3f());
             rotation = matrix.getUnnormalizedRotation(new Quaternionf());
             scale = matrix.getScale(new Vector3f());
@@ -144,6 +149,9 @@ public class ConstellationManager implements Listener, CommandExecutor {
         String previewTargetKey = null;
         String selectedKey = null;
         BeamTemplate previewTemplate;
+        final Map<String, BeamTemplate> projectedLines = new HashMap<>();
+        Vector3f beamObserver = new Vector3f();
+        int lastProjectionTick;
         final SkyFade fade = new SkyFade();
         SkyFollow follow;
         float lastAppearance = -1;
@@ -160,12 +168,14 @@ public class ConstellationManager implements Listener, CommandExecutor {
 
         final Set<String> drawn = new HashSet<>();
         final Set<String> completed = new HashSet<>();
+        long profileMedalEarnedAt;
     }
 
     private final Map<UUID, PlayerProgress> progress = new HashMap<>();
 
-    public ConstellationManager(JavaPlugin plugin, AsyncTextWriter writer) {
+    public ConstellationManager(JavaPlugin plugin, AsyncTextWriter writer, ProfileManager profiles) {
         this.plugin = plugin;
+        this.profiles = profiles;
 
         this.constellationsDir =
                 new File(plugin.getDataFolder(), "constellations");
@@ -452,6 +462,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 PlayerProgress pp = new PlayerProgress();
 
                 if (sec != null) {
+                    pp.profileMedalEarnedAt = Math.max(0, sec.getLong("profile-medal-earned-at", 0));
                     pp.drawn.addAll(sec.getStringList("edges"));
                     pp.completed.addAll(
                             sec.getStringList("completed")
@@ -472,6 +483,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
         } else {
             playerData.set(path + ".edges", new ArrayList<>(pp.drawn));
             playerData.set(path + ".completed", new ArrayList<>(pp.completed));
+            if (pp.profileMedalEarnedAt > 0) playerData.set(path + ".profile-medal-earned-at", pp.profileMedalEarnedAt);
         }
         progressStorage.markDirty();
     }
@@ -500,7 +512,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 Vector3f b = starOffsets.get(c.id + ":" + edge.b);
                 if (a == null || b == null) continue;
                 Matrix4f matrix = beamTransform(a, b);
-                if (matrix != null) lineTemplates.put(c.id + ":" + edge.key(), new BeamTemplate(matrix));
+                if (matrix != null) lineTemplates.put(c.id + ":" + edge.key(), new BeamTemplate(matrix, a, b));
             }
         }
         updateRotations();
@@ -515,10 +527,15 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private PlayerView viewFor(Player player) {
         return views.computeIfAbsent(player.getUniqueId(), id -> {
             PlayerView view = new PlayerView();
-            view.anchor = SkyGeometry.anchor(player.getEyeLocation());
+            view.anchor = motionReference(player);
             view.follow = new SkyFollow(point(view.anchor), Bukkit.getCurrentTick());
             return view;
         });
+    }
+
+    private static Location motionReference(Player player) {
+        // ignorePose=true: Shift/плавание меняют камеру, но не высоту небесной сферы.
+        return SkyGeometry.anchor(player.getLocation().add(0, player.getEyeHeight(true), 0));
     }
 
     private static Vector3d point(Location location) {
@@ -561,7 +578,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
             if (view.selectedKey != null && !hasSpyglass(player)) clearSelection(player, view, true);
             boolean visible = shouldRender(player);
             if (!visible) clearSelection(player, view, false);
-            Location eye = player.getEyeLocation();
+            Location eye = motionReference(player);
             Vector3d eyePoint = point(eye);
             if (view.relocate || view.follow.isJump(eyePoint)) {
                 // Большой скачок/телепорт не растягиваем через весь мир:
@@ -577,7 +594,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
                     updateLines(player);
                 }
             } else if (view.follow.follow(eyePoint, tick, followInterpolationTicks,
-                    Math.min(2.0, renderDistance() * 0.025))) {
+                    Math.min(6.0, renderDistance() * 0.08), player.isOnGround() || player.isFlying() || player.isGliding())) {
                 Vector3d target = view.follow.target();
                 view.anchor = new Location(player.getWorld(), target.x, target.y, target.z, 0f, 0f);
                 for (ItemDisplay display : view.stars.values()) if (display.isValid()) display.teleport(view.anchor);
@@ -590,6 +607,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 iterator.remove();
                 continue;
             }
+            updateBeamProjection(player, view, tick, Math.max(0.0001f, appearance));
             boolean fading = Float.compare(appearance, view.lastAppearance) != 0;
             if (rotated || fading) applyAppearance(view, appearance, fading);
             view.lastAppearance = appearance;
@@ -611,7 +629,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
         if (fading) {
             for (var entry : view.lines.entrySet()) {
-                BeamTemplate template = lineTemplates.get(entry.getKey());
+                BeamTemplate template = view.projectedLines.getOrDefault(entry.getKey(), lineTemplates.get(entry.getKey()));
                 if (template != null && entry.getValue().isValid()) fadeBeam(entry.getValue(), template, visibility);
             }
             if (view.preview != null && view.preview.isValid() && view.previewTemplate != null) {
@@ -619,6 +637,34 @@ public class ConstellationManager implements Listener, CommandExecutor {
             }
         }
         view.lastBrightness = brightness;
+    }
+
+    private BeamTemplate project(BeamTemplate base, Vector3f observer) {
+        // a/b всегда исходные центры: при возвращении observer к нулю
+        // нельзя оставлять проекцию от предыдущего кадра превью.
+        Matrix4f matrix = SkyGeometry.beamTransform(base.a, base.b, lineThickness() / 8f, starScale() * 2f, observer);
+        return matrix == null ? base : new BeamTemplate(matrix, base.a, base.b);
+    }
+
+    private void updateBeamProjection(Player player, PlayerView view, int tick, float visibility) {
+        if (Integer.toUnsignedLong(tick - view.lastProjectionTick) < 4) return;
+        view.lastProjectionTick = tick;
+        Location eye = player.getEyeLocation();
+        Vector3d anchor = view.follow.sample(tick);
+        Vector3f observer = new Vector3f((float) (eye.getX() - anchor.x), (float) (eye.getY() - anchor.y), (float) (eye.getZ() - anchor.z));
+        if (observer.distanceSquared(view.beamObserver) < 0.0001f) return;
+        view.beamObserver = observer;
+        for (var entry : view.lines.entrySet()) {
+            BeamTemplate base = lineTemplates.get(entry.getKey());
+            if (base == null || !entry.getValue().isValid()) continue;
+            BeamTemplate projected = project(base, observer);
+            view.projectedLines.put(entry.getKey(), projected);
+            fadeBeam(entry.getValue(), projected, visibility);
+        }
+        if (view.preview != null && view.preview.isValid() && view.previewTemplate != null) {
+            view.previewTemplate = project(view.previewTemplate, observer);
+            fadeBeam(view.preview, view.previewTemplate, visibility);
+        }
     }
 
     private void fadeBeam(ItemDisplay display, BeamTemplate template, float visibility) {
@@ -740,7 +786,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 Vector3f b = starOffsets.get(prefix + ids[1]);
                 if (a != null && b != null) {
                     Matrix4f matrix = beamTransform(a, b);
-                    if (matrix != null) result = new BeamTemplate(matrix);
+                    if (matrix != null) result = new BeamTemplate(matrix, a, b);
                 }
             }
         }
@@ -758,6 +804,8 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 if (existing != null && existing.isValid()) continue;
                 BeamTemplate template = lineTemplate(key);
                 if (template == null) continue;
+                template = project(template, view.beamObserver);
+                view.projectedLines.put(key, template);
                 ItemDisplay line = spawnLine(player, view, template, false);
                 if (line != null) view.lines.put(key, line);
             }
@@ -767,6 +815,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
             var entry = iterator.next();
             if (pp == null || !pp.drawn.contains(entry.getKey()) || lineTemplates.get(entry.getKey()) == null) {
                 entry.getValue().remove();
+                view.projectedLines.remove(entry.getKey());
                 iterator.remove();
             }
         }
@@ -799,7 +848,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
             removePreview(player, view);
             return;
         }
-        view.previewTemplate = new BeamTemplate(matrix);
+        view.previewTemplate = project(new BeamTemplate(matrix, source, starOffsets.get(hover)), view.beamObserver);
         if (view.preview == null || !view.preview.isValid()) {
             view.preview = spawnLine(player, view, view.previewTemplate, true);
         } else {
@@ -851,6 +900,9 @@ public class ConstellationManager implements Listener, CommandExecutor {
         if (view.preview != null) view.preview.remove();
         view.stars.clear();
         view.lines.clear();
+        view.projectedLines.clear();
+        view.beamObserver = new Vector3f();
+        view.lastProjectionTick = 0;
         view.preview = null;
         view.previewTemplate = null;
         view.previewTargetKey = null;
@@ -997,10 +1049,19 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
 
         pp.completed.add(c.id);
+        // Маркер создаётся только при НОВОМ завершении 9.3+, не из старого списка completed.
+        // Сохраняется вместе с прогрессом: выдачу медали можно восстановить после сбоя.
+        if (pp.profileMedalEarnedAt == 0) pp.profileMedalEarnedAt = System.currentTimeMillis();
         saveProgress(p.getUniqueId());
         // Редкое завершение сохраняем ДО выдачи награды, как и раньше.
         progressStorage.flushBlocking();
+        profiles.constellationCompleted(p);
         grantReward(p, c);
+    }
+
+    long profileMedalEarnedAt(UUID player) {
+        PlayerProgress data = progress.get(player);
+        return data == null ? 0 : data.profileMedalEarnedAt;
     }
 
     private void grantReward(Player p, Constellation c) {

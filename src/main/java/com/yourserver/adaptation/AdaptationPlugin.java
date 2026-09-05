@@ -50,6 +50,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private CopperBlockListener copperBlockListener;
     private CaviarListener caviarListener;
     private ConstellationManager constellationManager;
+    private ProfileManager profileManager;
 
     private final Particle.DustOptions meleeDust =
             new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -110,8 +111,16 @@ public void onEnable() {
             this
     );
 
+    profileManager = new ProfileManager(this, dataWriter);
+    getServer().getPluginManager().registerEvents(profileManager, this);
+    if (getCommand("profile") != null) {
+        getCommand("profile").setExecutor(profileManager);
+        getCommand("profile").setTabCompleter(profileManager);
+    }
+
     constellationManager =
-            new ConstellationManager(this, dataWriter);
+            new ConstellationManager(this, dataWriter, profileManager);
+    profileManager.constellationMilestone(constellationManager::profileMedalEarnedAt);
 
     getServer().getPluginManager().registerEvents(
             constellationManager,
@@ -179,6 +188,9 @@ public void onEnable() {
 
         if (constellationManager != null) {
             constellationManager.disable();
+        }
+        if (profileManager != null) {
+            profileManager.disable();
         }
         if (dataWriter != null) {
             dataWriter.close();

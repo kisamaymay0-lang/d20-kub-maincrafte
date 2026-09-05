@@ -94,6 +94,13 @@ def validate() -> dict[str, bytes]:
                     texture = f"assets/f8resurs/textures/{ref.split(':', 1)[1]}.png"
                     assert texture in files, f"Missing texture: {texture}"
                     assert files[texture].startswith(b"\x89PNG\r\n\x1a\n"), f"Not a PNG: {texture}"
+    # GUI medals must ship together with their item definitions (native PNGs can be replaced).
+    for metal in ("copper", "silver", "gold"):
+        name = f"medal_{metal}"
+        assert f"assets/f8resurs/items/{name}.json" in files
+        assert f"assets/f8resurs/models/item/{name}.json" in files
+        assert f"assets/f8resurs/textures/item/{name}.png" in files
+
     # Both beams must be flat and unshaded: no rod base, side faces or AO.
     for beam in ("star_beam", "star_beam_preview"):
         model = json.loads(files[f"assets/f8resurs/models/item/{beam}.json"])
