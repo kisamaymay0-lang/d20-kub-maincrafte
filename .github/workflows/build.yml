@@ -35,6 +35,28 @@ jobs:
         cat mvn-build.log
         exit 0
 
+    - name: Report unit tests
+      if: steps.maven.outputs.exit_code == '0'
+      shell: bash
+      run: |
+        python3 - <<'PYTEST'
+        import os
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+        reports = list(Path('target/surefire-reports').glob('TEST-*.xml'))
+        assert reports, 'Maven succeeded but no unit test reports were produced'
+        counts = dict.fromkeys(('tests', 'failures', 'errors', 'skipped'), 0)
+        for report in reports:
+            suite = ET.parse(report).getroot()
+            for key in counts:
+                counts[key] += int(suite.get(key, 0))
+        summary = ', '.join(f'{key}={value}' for key, value in counts.items())
+        print(f'::notice title=Unit tests::{summary}')
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+            output.write('### Unit tests (no Minecraft server)\n' + summary + '\n')
+        assert counts['tests'] > 0 and counts['failures'] == counts['errors'] == 0
+        PYTEST
+
     - name: Emit Maven errors as annotations
       if: always() && steps.maven.outputs.exit_code != '' && steps.maven.outputs.exit_code != '0'
       shell: bash
@@ -53,8 +75,8 @@ jobs:
       if: steps.maven.outputs.exit_code == '0'
       uses: actions/upload-artifact@v4
       with:
-        name: f8-plugin-9.0
+        name: f8-plugin-9.1
         path: |
           target/*.jar
           f8resurs-resourcepack.zip
-          docs/UPDATE-9.md
+          docs/UPDATE-9.1.md

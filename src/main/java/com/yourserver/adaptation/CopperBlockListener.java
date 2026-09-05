@@ -7,7 +7,6 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Note;
 import org.bukkit.Particle;
-import org.bukkit.Registry;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.World;
@@ -16,6 +15,7 @@ import org.bukkit.block.data.type.NoteBlock;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -278,6 +278,17 @@ public class CopperBlockListener implements Listener {
             return;
         }
 
+        if (event.getPlayer().isSneaking()) {
+            // Shift + ПКМ — размещение/использование предмета, а не меню.
+            // Но useWithoutItem самого NOTE_BLOCK не допускаем даже с пустой
+            // рукой, иначе ваниль переключит маркер note=24 на note=0.
+            event.setUseInteractedBlock(Event.Result.DENY);
+            if (event.useItemInHand() != Event.Result.DENY) {
+                event.setUseItemInHand(Event.Result.ALLOW);
+            }
+            return;
+        }
+
         event.setCancelled(true);
 
         // Запрещаем ванильную настройку обеими руками, иначе второй
@@ -462,14 +473,8 @@ public class CopperBlockListener implements Listener {
         ItemStack timerItem = getSlot(items, TIMER_SLOT);
 
         // В слоте таймера пластинка — режим проигрывателя.
-        if (timerItem != null
-                && timerItem.getType().isRecord()) {
-
-            startOrResumeDisc(
-                    block,
-                    key,
-                    timerItem.getType()
-            );
+        if (DiscTracks.songKey(timerItem) != null) {
+            startOrResumeDisc(block, key, timerItem);
 
             return;
         }
@@ -617,15 +622,19 @@ public class CopperBlockListener implements Listener {
     private void startOrResumeDisc(
             Block block,
             String key,
-            Material disc
+            ItemStack disc
     ) {
         if (!hasPower(block)) {
+            return;
+        }
+        DiscTracks.Track track = DiscTracks.resolve(disc);
+        if (track == null) {
             return;
         }
         DiscSession session = discSessions.get(key);
 
         if (session != null) {
-            if (session.disc == disc) {
+            if (session.track.equals(track)) {
                 // Та же пластинка — возобновляем после паузы.
                 // Точный "перемотать на то же место" API Bukkit не умеет,
                 // поэтому запускаем трек с начала и сбрасываем счётчик,
@@ -643,18 +652,7 @@ public class CopperBlockListener implements Listener {
             stopDiscSession(session);
         }
 
-        long totalTicks = discDurationTicks(disc);
-
-        if (totalTicks <= 0) {
-            return;
-        }
-
-        DiscSession fresh = new DiscSession(
-                block.getLocation().clone(),
-                key,
-                disc,
-                totalTicks
-        );
+        DiscSession fresh = new DiscSession(block.getLocation().clone(), key, track);
 
         fresh.playing = true;
         discSessions.put(key, fresh);
@@ -701,12 +699,13 @@ public class CopperBlockListener implements Listener {
 
         ItemStack timerItem = getSlot(items, TIMER_SLOT);
 
-        if (timerItem == null
-                || !timerItem.getType().isRecord()
-                || timerItem.getType() != session.disc) {
-
-            // Пластинку забрали или заменили — песня заканчивается.
+        NamespacedKey currentSong = DiscTracks.songKey(timerItem);
+        if (!session.track.key().equals(currentSong)) {
+            // Учитываем замену песни даже у предмета с тем же Material.
             stopDiscSession(session);
+            if (currentSong != null && hasPower(block)) {
+                startOrResumeDisc(block, session.key, timerItem);
+            }
             return;
         }
 
@@ -741,7 +740,7 @@ public class CopperBlockListener implements Listener {
             );
         }
 
-        if (session.elapsedTicks >= session.totalTicks) {
+        if (session.elapsedTicks >= session.track.durationTicks()) {
             // Пластинка доиграла, а сигнал всё ещё есть —
             // начинаем с начала.
             session.elapsedTicks = 0;
@@ -758,8 +757,8 @@ public class CopperBlockListener implements Listener {
 
         DiscSession session = discSessions.get(key);
 
-        if (timerItem == null
-                || !timerItem.getType().isRecord()) {
+        NamespacedKey songKey = DiscTracks.songKey(timerItem);
+        if (songKey == null) {
 
             if (session != null) {
                 // Пластинку убрали — песня заканчивается.
@@ -768,16 +767,14 @@ public class CopperBlockListener implements Listener {
             return;
         }
 
-        Material disc = timerItem.getType();
-
-        if (session != null && session.disc != disc) {
+        if (session != null && !session.track.key().equals(songKey)) {
             stopDiscSession(session);
             session = null;
         }
 
         // Пластинку положили в уже запитанный блок — запускаем сразу.
         if (session == null && hasPower(block)) {
-            startOrResumeDisc(block, key, disc);
+            startOrResumeDisc(block, key, timerItem);
         }
     }
 
@@ -800,7 +797,7 @@ public class CopperBlockListener implements Listener {
     }
 
     private void playDiscSound(DiscSession session) {
-        Sound sound = discSound(session.disc);
+        Sound sound = session.track.sound();
         World world = session.loc.getWorld();
 
         if (sound == null || world == null) {
@@ -823,7 +820,7 @@ public class CopperBlockListener implements Listener {
     }
 
     private void stopDiscSound(DiscSession session) {
-        Sound sound = discSound(session.disc);
+        Sound sound = session.track.sound();
         World world = session.loc.getWorld();
 
         if (sound == null || world == null) {
@@ -832,52 +829,6 @@ public class CopperBlockListener implements Listener {
 
         for (Player p : world.getPlayers()) {
             p.stopSound(sound, SoundCategory.RECORDS);
-        }
-    }
-
-    private static Sound discSound(Material disc) {
-        // ВАЖНО: у ПРЕДМЕТА ключ с подчёркиванием (minecraft:music_disc_13),
-        // а у ЗВУКА — с точкой (minecraft:music_disc.13). Поэтому ключ нужно
-        // преобразовать, иначе реестр вернёт null и пластинка будет молчать.
-        String matKey = disc.getKey().getKey();
-
-        if (!matKey.startsWith("music_disc_")) {
-            return null;
-        }
-
-        String soundKey =
-                "music_disc."
-                        + matKey.substring("music_disc_".length());
-
-        return Registry.SOUNDS.get(
-                NamespacedKey.minecraft(soundKey)
-        );
-    }
-
-    // Длительности пластинок в тиках (20 тиков = 1 секунда).
-    // Указаны приблизительно — для корректного зацикливания.
-    private static long discDurationTicks(Material disc) {
-        switch (disc) {
-            case MUSIC_DISC_13: return 178L * 20;
-            case MUSIC_DISC_CAT: return 185L * 20;
-            case MUSIC_DISC_BLOCKS: return 345L * 20;
-            case MUSIC_DISC_CHIRP: return 185L * 20;
-            case MUSIC_DISC_FAR: return 174L * 20;
-            case MUSIC_DISC_MALL: return 197L * 20;
-            case MUSIC_DISC_MELLOHI: return 96L * 20;
-            case MUSIC_DISC_STAL: return 150L * 20;
-            case MUSIC_DISC_STRAD: return 188L * 20;
-            case MUSIC_DISC_WARD: return 251L * 20;
-            case MUSIC_DISC_11: return 71L * 20;
-            case MUSIC_DISC_WAIT: return 238L * 20;
-            case MUSIC_DISC_OTHERSIDE: return 195L * 20;
-            case MUSIC_DISC_5: return 178L * 20;
-            case MUSIC_DISC_PIGSTEP: return 148L * 20;
-            case MUSIC_DISC_RELIC: return 218L * 20;
-            case MUSIC_DISC_CREATOR: return 177L * 20;
-            case MUSIC_DISC_CREATOR_MUSIC_BOX: return 74L * 20;
-            case MUSIC_DISC_PRECIPICE: return 287L * 20;
-            default: return 0L;
         }
     }
 
@@ -1178,8 +1129,7 @@ public class CopperBlockListener implements Listener {
 
         final Location loc;
         final String key;
-        final Material disc;
-        final long totalTicks;
+        final DiscTracks.Track track;
 
         boolean playing;
         long elapsedTicks;
@@ -1189,13 +1139,11 @@ public class CopperBlockListener implements Listener {
         DiscSession(
                 Location loc,
                 String key,
-                Material disc,
-                long totalTicks
+                DiscTracks.Track track
         ) {
             this.loc = loc;
             this.key = key;
-            this.disc = disc;
-            this.totalTicks = totalTicks;
+            this.track = track;
         }
     }
 

@@ -6,7 +6,7 @@
 
     <groupId>com.yourserver</groupId>
     <artifactId>adaptation</artifactId>
-    <version>9.0</version>
+    <version>9.1</version>
     <packaging>jar</packaging>
 
     <properties>

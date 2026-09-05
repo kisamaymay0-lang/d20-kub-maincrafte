@@ -19,6 +19,17 @@ class SkyGeometryTest {
         assertEquals(expected.z, actual.z, EPSILON);
     }
 
+    private static Matrix4f starMatrix(Vector3f direction, float distance, float scale) {
+        return starMatrix(direction, distance, scale, 0f);
+    }
+
+    private static Matrix4f starMatrix(Vector3f direction, float distance, float scale, float spin) {
+        var transform = SkyGeometry.starTransform(direction, distance, scale, spin);
+        return new Matrix4f().translation(transform.getTranslation())
+                .rotate(transform.getLeftRotation()).scale(transform.getScale())
+                .rotate(transform.getRightRotation());
+    }
+
     @ParameterizedTest
     @CsvSource({"0,0,0,-1", "90,1,0,0", "180,0,0,1", "270,-1,0,0"})
     void starAzimuthUsesWorldDirections(double azimuth, float x, float y, float z) {
@@ -46,7 +57,7 @@ class SkyGeometryTest {
     @CsvSource({"30,60", "180,0", "270,45", "0,90"})
     void rotatingTheSpriteDoesNotMoveItsCentre(double azimuth, double elevation) {
         Vector3f direction = new Constellation.StarDef("star", azimuth, elevation).direction();
-        Matrix4f transform = SkyGeometry.starTransform(direction, 80f, 2f);
+        Matrix4f transform = starMatrix(direction, 80f, 2f);
         assertVector(new Vector3f(direction).mul(80), transform.transformPosition(new Vector3f()));
         assertVector(new Vector3f(direction).negate(),
                 transform.transformDirection(new Vector3f(0, 0, 1)).normalize());
@@ -55,7 +66,7 @@ class SkyGeometryTest {
     @Test
     void walkingMovesTheWholeSkyButPreservesTheAimDirection() {
         Vector3f direction = new Constellation.StarDef("star", 123, 45).direction();
-        Vector3f offset = SkyGeometry.starTransform(direction, 80, 2)
+        Vector3f offset = starMatrix(direction, 80, 2)
                 .transformPosition(new Vector3f());
         for (Vector3f eye : new Vector3f[]{
                 new Vector3f(0, 64, 0), new Vector3f(100, 100, -300), new Vector3f(-40, 20, 70)
@@ -69,7 +80,7 @@ class SkyGeometryTest {
     @Test
     void hitTestingUsesTheRenderedPositionNotACameraRelativeOffset() {
         Vector3f direction = new Constellation.StarDef("star", 60, 55).direction();
-        Vector3f offset = SkyGeometry.starTransform(direction, 80, 2)
+        Vector3f offset = starMatrix(direction, 80, 2)
                 .transformPosition(new Vector3f());
         Vector3f aim = SkyGeometry.directionToStar(new Vector3f(), offset);
         assertTrue(aim.dot(direction) >= Math.cos(Math.toRadians(2)));
@@ -78,18 +89,65 @@ class SkyGeometryTest {
     }
 
     @Test
-    void lineEndsExactlyAtBothStarsInsteadOfStartingAtTheMidpoint() {
-        Vector3f a = new Vector3f(10, 50, -30);
-        Vector3f b = new Vector3f(-20, 60, 40);
-        Matrix4f line = SkyGeometry.lineTransform(a, b, 0.4f);
-        assertVector(a, line.transformPosition(new Vector3f(0.5f, 0f, 0.5f)));
-        assertVector(b, line.transformPosition(new Vector3f(0.5f, 1f, 0.5f)));
+    void starSpinLeavesItsCentreNormalAndHitDirectionUnchanged() {
+        Vector3f direction = new Constellation.StarDef("star", 125, 55).direction();
+        Vector3f centre = new Vector3f(direction).mul(80);
+        Vector3f initialRight = starMatrix(direction, 80, 2, 0)
+                .transformDirection(new Vector3f(1, 0, 0));
+        for (int degrees : new int[]{0, 30, 90, 180, 270, 359, 360, -90}) {
+            Matrix4f matrix = starMatrix(direction, 80, 2, (float) Math.toRadians(degrees));
+            assertVector(centre, matrix.transformPosition(new Vector3f()));
+            assertVector(new Vector3f(direction).negate(),
+                    matrix.transformDirection(new Vector3f(0, 0, 1)).normalize());
+            assertVector(direction, matrix.transformPosition(new Vector3f()).normalize());
+        }
+        Vector3f quarterTurnRight = starMatrix(direction, 80, 2, (float) (Math.PI / 2))
+                .transformDirection(new Vector3f(1, 0, 0));
+        assertEquals(0f, initialRight.dot(quarterTurnRight), EPSILON, "Картинка действительно вращается");
     }
 
     @Test
-    void coincidentStarsDoNotCreateANanTransform() {
-        assertThrows(IllegalArgumentException.class,
-                () -> SkyGeometry.lineTransform(new Vector3f(), new Vector3f(), 0.4f));
+    void beamEndpointsKeepTheStarsApparentDirectionsWhileMovingBehindThem() {
+        Vector3f a = new Constellation.StarDef("a", 10, 40).direction().mul(80);
+        Vector3f b = new Constellation.StarDef("b", 80, 60).direction().mul(80);
+        Matrix4f beam = SkyGeometry.beamTransform(a, b, 0.05f, 4f);
+        assertNotNull(beam);
+        Vector3f start = beam.transformPosition(new Vector3f(0f, -0.5f, 0f));
+        Vector3f end = beam.transformPosition(new Vector3f(0f, 0.5f, 0f));
+        assertTrue(start.length() > a.length());
+        assertTrue(end.length() > b.length());
+        assertVector(new Vector3f(a).normalize(), start.normalize());
+        assertVector(new Vector3f(b).normalize(), end.normalize());
+    }
+
+    @Test
+    void beamHasTheSameWidthEverywhereAndItsEntireSurfaceIsBehindTheStars() {
+        // Далёкие друг от друга точки: обычная хорда здесь пересекла бы сферу.
+        Vector3f a = new Constellation.StarDef("a", 0, 10).direction().mul(80);
+        Vector3f b = new Constellation.StarDef("b", 150, 10).direction().mul(80);
+        Matrix4f beam = SkyGeometry.beamTransform(a, b, 0.05f, 4f);
+        assertNotNull(beam);
+        float width = -1;
+        for (float y : new float[]{-0.5f, -0.25f, 0f, 0.25f, 0.5f}) {
+            Vector3f left = beam.transformPosition(new Vector3f(-0.5f, y, 0));
+            Vector3f right = beam.transformPosition(new Vector3f(0.5f, y, 0));
+            float currentWidth = left.distance(right);
+            if (width < 0) {
+                width = currentWidth;
+            }
+            assertEquals(width, currentWidth, EPSILON);
+            for (float x : new float[]{-0.5f, 0f, 0.5f}) {
+                assertTrue(beam.transformPosition(new Vector3f(x, y, 0)).length() >= 83.99f);
+            }
+        }
+    }
+
+    @Test
+    void invalidOrAntipodalBeamsDoNotProduceNanOrAnEntityAtThePlayersEyes() {
+        assertNull(SkyGeometry.beamTransform(new Vector3f(), new Vector3f(), 0.05f, 4));
+        assertNull(SkyGeometry.beamTransform(new Vector3f(0, 80, 0), new Vector3f(0, 80, 0), 0.05f, 4));
+        assertNull(SkyGeometry.beamTransform(new Vector3f(80, 0, 0), new Vector3f(-80, 0, 0), 0.05f, 4));
+        assertNull(SkyGeometry.beamTransform(new Vector3f(Float.NaN, 1, 2), new Vector3f(0, 80, 0), 0.05f, 4));
     }
 
     @ParameterizedTest

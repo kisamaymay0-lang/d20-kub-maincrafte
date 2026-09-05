@@ -12,7 +12,6 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
@@ -32,6 +31,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 import org.joml.Vector3f;
+import org.joml.Matrix4f;
 
 import java.io.File;
 import java.io.IOException;
@@ -58,8 +58,9 @@ import java.util.UUID;
  *    Поворот камеры никогда не поворачивает смещение звезды.
  *  - Сущности скрыты от всех, кроме владельца (setVisibleByDefault(false) +
  *    showEntity) — игроки не видят звёзды друг друга.
- *  - Линии между звёздами — тонкие BlockDisplay (END_ROD), повёрнутые вдоль
- *    отрезка между звёздами.
+ *  - Линии — плоские незатенённые ItemDisplay-полосы за сферой звёзд.
+ *    У превью та же геометрия, но пунктирная текстура; наведение не зависит
+ *    от принадлежности звёзд к созвездиям.
  *
  * Админ создаёт созвездия файлами в папке plugins/<плагин>/constellations/*.yml
  * или командами (/stars add — по направлению взгляда, /stars edge, /stars pin).
@@ -67,6 +68,7 @@ import java.util.UUID;
 public class ConstellationManager implements Listener, CommandExecutor {
 
     private static final String DEFAULT_STAR_MODEL = "f8resurs:star";
+    private static final long STAR_ANIMATION_TICKS = 2L;
 
     private final JavaPlugin plugin;
     private final File constellationsDir;
@@ -77,14 +79,17 @@ public class ConstellationManager implements Listener, CommandExecutor {
             new LinkedHashMap<>();
 
     private BukkitTask renderTask;
+    private BukkitTask animationTask;
+    private double starSpinRadians;
     private boolean renderErrorReported;
 
     // Пер-игровое состояние отрисовки
     private static class PlayerView {
 
         final Map<String, ItemDisplay> stars = new LinkedHashMap<>();
-        final Map<String, BlockDisplay> lines = new LinkedHashMap<>();
-        BlockDisplay preview = null;
+        final Map<String, ItemDisplay> lines = new LinkedHashMap<>();
+        ItemDisplay preview = null;
+        String previewTargetKey = null;
         String selectedKey = null;
 
         // Следует за координатами глаз, но всегда имеет yaw=pitch=0.
@@ -136,6 +141,12 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 "constellations.update-interval-ticks", 10L
         ), 1L, 200L);
         renderTask = Bukkit.getScheduler().runTaskTimer(plugin, this::renderTick, 1L, interval);
+        if (animationTask != null) {
+            animationTask.cancel();
+        }
+        animationTask = Bukkit.getScheduler().runTaskTimer(
+                plugin, this::animateStars, STAR_ANIMATION_TICKS, STAR_ANIMATION_TICKS
+        );
     }
 
     private double positiveSetting(String key, double fallback) {
@@ -157,6 +168,11 @@ public class ConstellationManager implements Listener, CommandExecutor {
 
     private double clickToleranceDeg() {
         return Math.min(45.0, positiveSetting("click-tolerance-degrees", 2.0));
+    }
+
+    private double starRotationSpeed() {
+        double speed = plugin.getConfig().getDouble("constellations.star-rotation-degrees-per-second", 4.0);
+        return Double.isFinite(speed) ? Math.clamp(speed, -90.0, 90.0) : 4.0;
     }
 
     // ===== ЗАГРУЗКА =====
@@ -422,6 +438,45 @@ public class ConstellationManager implements Listener, CommandExecutor {
         }
     }
 
+    private void animateStars() {
+        double speed = starRotationSpeed();
+        starSpinRadians = Math.IEEEremainder(
+                starSpinRadians + Math.toRadians(speed) * STAR_ANIMATION_TICKS / 20.0,
+                Math.PI * 2.0
+        );
+        float radius = (float) renderDistance();
+        float scale = starScale();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            PlayerView view = views.get(player.getUniqueId());
+            if (view == null) {
+                continue;
+            }
+            if (!shouldRender(player)) {
+                hideAll(player);
+                continue;
+            }
+            if (speed == 0.0) {
+                continue;
+            }
+            for (var entry : view.stars.entrySet()) {
+                ItemDisplay display = entry.getValue();
+                Constellation constellation = constellationOf(entry.getKey());
+                Constellation.StarDef star = constellation == null
+                        ? null : constellation.stars.get(starIdOf(entry.getKey()));
+                if (!display.isValid() || star == null) {
+                    continue;
+                }
+                // Клиент интерполирует поворот между редкими обновлениями.
+                // Translation и положение сущности при анимации не меняются.
+                display.setInterpolationDuration((int) STAR_ANIMATION_TICKS);
+                display.setInterpolationDelay(0);
+                display.setTransformation(SkyGeometry.starTransform(
+                        star.direction(), radius, scale, (float) starSpinRadians
+                ));
+            }
+        }
+    }
+
     private boolean shouldRender(Player p) {
         if (p.getWorld().getEnvironment()
                 != World.Environment.NORMAL) {
@@ -511,11 +566,13 @@ public class ConstellationManager implements Listener, CommandExecutor {
                                 // звезду за камерой. Поворачиваем только модель.
                                 e.setBillboard(Display.Billboard.FIXED);
                                 e.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
-                                e.setTransformationMatrix(SkyGeometry.starTransform(
-                                        s.direction(), (float) renderDistance(), starScale()
+                                e.setTransformation(SkyGeometry.starTransform(
+                                        s.direction(), (float) renderDistance(), starScale(), (float) starSpinRadians
                                 ));
                                 e.setTeleportDuration(0);
                                 e.setInterpolationDuration(0);
+                                e.setShadowRadius(0f);
+                                e.setShadowStrength(0f);
                                 e.setBrightness(
                                         new Display.Brightness(15, 15)
                                 );
@@ -557,7 +614,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 d.teleport(anchor);
             }
         }
-        for (BlockDisplay d : v.lines.values()) {
+        for (ItemDisplay d : v.lines.values()) {
             if (d.isValid()) {
                 d.teleport(anchor);
             }
@@ -624,50 +681,46 @@ public class ConstellationManager implements Listener, CommandExecutor {
         };
     }
 
-    private void applyLineTransform(
-            BlockDisplay d,
-            Vector3f a,
-            Vector3f b
-    ) {
-        if (a.distanceSquared(b) < 1e-8f) {
-            return;
-        }
-        d.setTransformationMatrix(SkyGeometry.lineTransform(a, b, lineThickness()));
+    private Matrix4f beamTransform(Vector3f a, Vector3f b) {
+        // В старой настройке line-thickness хранился масштаб END_ROD,
+        // стержень которого имеет ширину 2/16. Сохраняем привычную толщину,
+        // убирая основание, боковые грани и тени самого END_ROD.
+        return SkyGeometry.beamTransform(a, b, lineThickness() / 8f, starScale() * 2f);
     }
 
-    private BlockDisplay spawnLine(
-            Player p,
-            Location spawnAt,
-            Vector3f a,
-            Vector3f b
-    ) {
-        if (a.distanceSquared(b) < 1e-8f) {
+    private ItemStack beamItem(boolean preview) {
+        ItemStack item = new ItemStack(Material.PAPER);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.setItemModel(new NamespacedKey("f8resurs", preview ? "star_beam_preview" : "star_beam"));
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    private ItemDisplay spawnLine(Player p, Location spawnAt, Matrix4f transform, boolean preview) {
+        if (transform == null) {
             return null;
         }
         try {
-            BlockDisplay d = p.getWorld().spawn(
-                    SkyGeometry.anchor(spawnAt),
-                    BlockDisplay.class,
-                    e -> {
+            ItemDisplay display = p.getWorld().spawn(
+                    SkyGeometry.anchor(spawnAt), ItemDisplay.class, e -> {
+                        e.setItemStack(beamItem(preview));
+                        e.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
                         e.setBillboard(Display.Billboard.FIXED);
                         e.setTeleportDuration(0);
                         e.setInterpolationDuration(0);
-                        e.setBlock(
-                                Material.END_ROD.createBlockData()
-                        );
-                        e.setBrightness(
-                                new Display.Brightness(15, 15)
-                        );
+                        e.setShadowRadius(0f);
+                        e.setShadowStrength(0f);
+                        e.setBrightness(new Display.Brightness(15, 15));
                         e.setViewRange(160f);
                         e.setPersistent(false);
                         e.setVisibleByDefault(false);
-                        applyLineTransform(e, a, b);
+                        e.setTransformationMatrix(transform);
                     }
             );
-
-            p.showEntity(plugin, d);
-
-            return d;
+            p.showEntity(plugin, display);
+            return display;
         } catch (Exception ex) {
             reportRenderError(ex);
             return null;
@@ -706,7 +759,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
                     continue;
                 }
 
-                BlockDisplay line = v.lines.get(drawnKey);
+                ItemDisplay line = v.lines.get(drawnKey);
 
                 if (line == null || !line.isValid()) {
                     line = spawnLine(
@@ -714,8 +767,8 @@ public class ConstellationManager implements Listener, CommandExecutor {
                             v.anchor != null
                                     ? v.anchor
                                     : p.getEyeLocation(),
-                            ends[0],
-                            ends[1]
+                            beamTransform(ends[0], ends[1]),
+                            false
                     );
 
                     if (line == null) {
@@ -723,17 +776,18 @@ public class ConstellationManager implements Listener, CommandExecutor {
                     }
 
                     v.lines.put(drawnKey, line);
-                } else {
-                    applyLineTransform(line, ends[0], ends[1]);
                 }
+                // Геометрия завершённой линии постоянна до /stars reload;
+                // при ходьбе переносится только общая точка привязки.
+
             }
         }
 
-        Iterator<Map.Entry<String, BlockDisplay>> it =
+        Iterator<Map.Entry<String, ItemDisplay>> it =
                 v.lines.entrySet().iterator();
 
         while (it.hasNext()) {
-            Map.Entry<String, BlockDisplay> en = it.next();
+            Map.Entry<String, ItemDisplay> en = it.next();
 
             boolean keep = pp != null
                     && pp.drawn.contains(en.getKey());
@@ -751,50 +805,51 @@ public class ConstellationManager implements Listener, CommandExecutor {
 
     private void updatePreview(Player p) {
         PlayerView v = views.get(p.getUniqueId());
-
         if (v == null) {
             return;
         }
-
         if (v.selectedKey == null) {
             removePreview(p, v);
             return;
         }
-
-        Constellation sc = constellationOf(v.selectedKey);
-        String sid = starIdOf(v.selectedKey);
-
-        if (sc == null || !sc.pinned
-                || sid == null
-                || !sc.stars.containsKey(sid)) {
-
+        Constellation source = constellationOf(v.selectedKey);
+        String sourceId = starIdOf(v.selectedKey);
+        if (source == null || !source.pinned || sourceId == null || !source.stars.containsKey(sourceId)) {
             v.selectedKey = null;
             removePreview(p, v);
             return;
         }
 
-        String hover = hoverStar(p, sc, sid);
-
-        if (hover == null) {
+        // Не ограничиваем наведение исходным созвездием или списком рёбер.
+        // Иначе наличие/отсутствие превью заранее выдаёт ответ игроку.
+        String hoverKey = findAimedStar(p, v.selectedKey);
+        if (hoverKey == null) {
             removePreview(p, v);
             return;
         }
-
-        Vector3f a = scaled(sc.stars.get(sid).direction());
-        Vector3f b = scaled(sc.stars.get(hover).direction());
-
-        if (v.preview == null || !v.preview.isValid()) {
-            v.preview = spawnLine(
-                    p,
-                    v.anchor != null
-                            ? v.anchor
-                            : p.getEyeLocation(),
-                    a,
-                    b
-            );
-        } else {
-            applyLineTransform(v.preview, a, b);
+        Constellation target = constellationOf(hoverKey);
+        String targetId = starIdOf(hoverKey);
+        if (target == null || targetId == null || !target.stars.containsKey(targetId)) {
+            removePreview(p, v);
+            return;
         }
+        if (hoverKey.equals(v.previewTargetKey) && v.preview != null && v.preview.isValid()) {
+            return;
+        }
+        Matrix4f transform = beamTransform(
+                scaled(source.stars.get(sourceId).direction()),
+                scaled(target.stars.get(targetId).direction())
+        );
+        if (transform == null) {
+            removePreview(p, v);
+            return;
+        }
+        if (v.preview == null || !v.preview.isValid()) {
+            v.preview = spawnLine(p, v.anchor != null ? v.anchor : p.getEyeLocation(), transform, true);
+        } else {
+            v.preview.setTransformationMatrix(transform);
+        }
+        v.previewTargetKey = hoverKey;
     }
 
     private void removePreview(Player p, PlayerView v) {
@@ -804,6 +859,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
             }
             v.preview = null;
         }
+        v.previewTargetKey = null;
     }
 
     private void hideAll(Player p) {
@@ -819,7 +875,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
             }
         }
 
-        for (BlockDisplay d : v.lines.values()) {
+        for (ItemDisplay d : v.lines.values()) {
             if (d.isValid()) {
                 d.remove();
             }
@@ -857,29 +913,25 @@ public class ConstellationManager implements Listener, CommandExecutor {
         // Прицеливание использует ту же точку привязки, что и картинка.
         updateAnchor(p);
         ensureStars(p);
-        String[] hit = hitTest(p);
+        String hitKey = findAimedStar(p, null);
 
         PlayerView v = views.computeIfAbsent(
                 p.getUniqueId(),
                 k -> new PlayerView()
         );
 
-        if (hit == null) {
-            if (v.selectedKey != null) {
-                v.selectedKey = null;
-                removePreview(p, v);
-                action(p, "§7Выбор сброшен.");
-            } else {
-                action(p, "§7Вы никуда не попали.");
-            }
+        if (hitKey == null) {
+            // Обычная подзорная труба (например, в шахте) не должна спамить
+            // actionbar и затирать компас/HUD других плагинов. Даже сброс
+            // незавершённого выбора при промахе происходит совершенно тихо.
+            v.selectedKey = null;
+            removePreview(p, v);
             return;
         }
 
-        String hitKey = hit[0];
-
         if (v.selectedKey == null) {
             v.selectedKey = hitKey;
-            action(p, "§eЗвезда выбрана. Выберите вторую звезду.");
+            action(p, "§eЗвезда выбрана.");
             playSound(p, Sound.UI_BUTTON_CLICK);
             return;
         }
@@ -964,82 +1016,13 @@ public class ConstellationManager implements Listener, CommandExecutor {
         return SkyGeometry.directionToStar(eyeFromAnchor, scaled(star.direction()));
     }
 
-    private String[] hitTest(Player p) {
+    private String findAimedStar(Player p, String excludedKey) {
         Vector look = p.getEyeLocation().getDirection();
-
-        double tolerance = Math.cos(
-                Math.toRadians(clickToleranceDeg())
+        return StarTargeting.closest(
+                constellations.values(),
+                new Vector3f((float) look.getX(), (float) look.getY(), (float) look.getZ()),
+                clickToleranceDeg(), excludedKey, star -> directionToStar(p, star)
         );
-
-        double best = -1.0;
-        String bestKey = null;
-
-        for (Constellation c : constellations.values()) {
-            if (!c.pinned) {
-                continue;
-            }
-
-            for (Constellation.StarDef s : c.stars.values()) {
-                Vector3f d = directionToStar(p, s);
-
-                double dot =
-                        look.getX() * d.x
-                        + look.getY() * d.y
-                        + look.getZ() * d.z;
-
-                if (dot > best) {
-                    best = dot;
-                    bestKey = c.id + ":" + s.id;
-                }
-            }
-        }
-
-        if (bestKey == null || best < tolerance) {
-            return null;
-        }
-
-        return new String[]{bestKey};
-    }
-
-    private String hoverStar(
-            Player p,
-            Constellation c,
-            String excludeStarId
-    ) {
-        Vector look = p.getEyeLocation().getDirection();
-
-        double tolerance = Math.cos(
-                Math.toRadians(clickToleranceDeg())
-        );
-
-        double best = -1.0;
-        String bestId = null;
-
-        for (Map.Entry<String, Constellation.StarDef> e :
-                c.stars.entrySet()) {
-
-            if (e.getKey().equals(excludeStarId)) {
-                continue;
-            }
-
-            Vector3f d = directionToStar(p, e.getValue());
-
-            double dot =
-                    look.getX() * d.x
-                    + look.getY() * d.y
-                    + look.getZ() * d.z;
-
-            if (dot > best) {
-                best = dot;
-                bestId = e.getKey();
-            }
-        }
-
-        if (bestId == null || best < tolerance) {
-            return null;
-        }
-
-        return bestId;
     }
 
     private void checkCompletion(
@@ -1129,6 +1112,9 @@ public class ConstellationManager implements Listener, CommandExecutor {
     public void disable() {
         if (renderTask != null) {
             renderTask.cancel();
+        }
+        if (animationTask != null) {
+            animationTask.cancel();
         }
 
         for (Player p : Bukkit.getOnlinePlayers()) {

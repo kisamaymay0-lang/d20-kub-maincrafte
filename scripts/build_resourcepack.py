@@ -2,12 +2,59 @@
 """Validate and reproducibly build the resource pack; --check checks the existing ZIP."""
 import argparse
 import json
+import struct
+import zlib
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 PACK = ROOT / "resourcepack"
 ARCHIVE = ROOT / "f8resurs-resourcepack.zip"
+
+
+def rgba_rows(data: bytes) -> list[bytes]:
+    """Decode the small, non-interlaced RGBA beam textures using only the stdlib."""
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    offset, compressed, header = 8, bytearray(), None
+    while offset < len(data):
+        length = struct.unpack_from(">I", data, offset)[0]
+        kind = data[offset + 4:offset + 8]
+        payload = data[offset + 8:offset + 8 + length]
+        if kind == b"IHDR":
+            header = struct.unpack(">IIBBBBB", payload)
+        elif kind == b"IDAT":
+            compressed.extend(payload)
+        offset += length + 12
+    assert header is not None
+    width, height, bits, colour, compression, filtering, interlace = header
+    assert (bits, colour, compression, filtering, interlace) == (8, 6, 0, 0, 0)
+    stride = width * 4
+    raw = zlib.decompress(compressed)
+    assert len(raw) == height * (stride + 1)
+    previous, rows = bytes(stride), []
+    for y in range(height):
+        start = y * (stride + 1)
+        method, row = raw[start], bytearray(raw[start + 1:start + stride + 1])
+        assert method in range(5)
+        for x in range(stride):
+            left = row[x - 4] if x >= 4 else 0
+            above = previous[x]
+            upper_left = previous[x - 4] if x >= 4 else 0
+            if method == 0:
+                predictor = 0
+            elif method == 1:
+                predictor = left
+            elif method == 2:
+                predictor = above
+            elif method == 3:
+                predictor = (left + above) // 2
+            else:
+                estimate = left + above - upper_left
+                predictor = min((left, above, upper_left), key=lambda value: abs(estimate - value))
+            row[x] = (row[x] + predictor) & 255
+        previous = bytes(row)
+        rows.append(previous)
+    return rows
 
 
 def validate() -> dict[str, bytes]:
@@ -47,6 +94,28 @@ def validate() -> dict[str, bytes]:
                     texture = f"assets/f8resurs/textures/{ref.split(':', 1)[1]}.png"
                     assert texture in files, f"Missing texture: {texture}"
                     assert files[texture].startswith(b"\x89PNG\r\n\x1a\n"), f"Not a PNG: {texture}"
+    # Both beams must be flat and unshaded: no rod base, side faces or AO.
+    for beam in ("star_beam", "star_beam_preview"):
+        model = json.loads(files[f"assets/f8resurs/models/item/{beam}.json"])
+        assert model["ambientocclusion"] is False and model["gui_light"] == "front"
+        assert len(model["elements"]) == 1
+        plane = model["elements"][0]
+        assert plane["from"] == [0, 0, 8] and plane["to"] == [16, 16, 8]
+        assert plane["shade"] is False and plane["light_emission"] == 15
+        assert set(plane["faces"]) == {"north", "south"}
+        rows = rgba_rows(files[f"assets/f8resurs/textures/item/{beam}.png"])
+        opacity = []
+        for row in rows:
+            alpha = set(row[3::4])
+            assert alpha in ({0}, {255}), "Beam width/opacity must be uniform within each row"
+            opacity.append(next(iter(alpha)))
+        if beam == "star_beam":
+            assert all(alpha == 255 for alpha in opacity), "Completed beam must be solid"
+        else:
+            assert 0 in opacity and 255 in opacity, "Preview needs transparent gaps"
+            dash_starts = sum(alpha == 255 and (i == 0 or opacity[i - 1] == 0)
+                              for i, alpha in enumerate(opacity))
+            assert dash_starts >= 3, "Preview must contain several separate dashes"
     return files
 
 

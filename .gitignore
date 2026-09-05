@@ -1,3 +1,5 @@
 /target/
 /artifacts/
 *.log
+__pycache__/
+*.py[cod]
