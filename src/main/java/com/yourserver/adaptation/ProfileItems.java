@@ -12,7 +12,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
 
-import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -24,13 +23,22 @@ import java.util.UUID;
 /** Обычные Minecraft-слоты, серые панели и тёплое золото — как в меню F8. */
 final class ProfileItems {
     private final DateTimeFormatter date;
+    private MedalSettings medals;
+    private long styleRevision;
     private final Map<UUID, com.destroystokyo.paper.profile.PlayerProfile> skins = new LinkedHashMap<>(32, 0.75f, true) {
         @Override protected boolean removeEldestEntry(Map.Entry<UUID, com.destroystokyo.paper.profile.PlayerProfile> eldest) {
             return size() > 256;
         }
     };
 
-    ProfileItems(ZoneId zone) { date = DateTimeFormatter.ofPattern("dd.MM.uuuu").withZone(zone); }
+    ProfileItems(ZoneId zone) { this(zone, MedalSettings.defaults()); }
+    ProfileItems(ZoneId zone, MedalSettings settings) {
+        date = DateTimeFormatter.ofPattern("dd.MM.uuuu").withZone(zone);
+        medals = settings;
+    }
+    void settings(MedalSettings settings) { medals = settings; styleRevision++; }
+    long styleRevision() { return styleRevision; }
+    List<Component> tooltip(ProfileMedal medal) { return MedalPresentation.tooltip(medal, medals, date); }
 
     static Component text(String value, TextColor color) {
         return Component.text(value, color).decoration(TextDecoration.ITALIC, false);
@@ -80,22 +88,15 @@ final class ProfileItems {
         return item;
     }
 
-    private static TextColor medalColor(ProfileMedal.Metal metal) {
-        return switch (metal) {
-            case COPPER -> TextColor.color(0xD89465);
-            case SILVER -> TextColor.color(0xD8E2EA);
-            case GOLD -> NamedTextColor.GOLD;
-        };
-    }
-
-    private static ItemStack medalBase(ProfileMedal.Metal metal, String title, List<Component> lore) {
+    private ItemStack medalBase(ProfileMedal.Metal metal, String title, List<Component> lore) {
         Material material = switch (metal) {
             case COPPER -> Material.COPPER_NUGGET;
             case SILVER -> Material.IRON_NUGGET;
             case GOLD -> Material.GOLD_NUGGET;
         };
-        ItemStack item = item(material, title, medalColor(metal), lore);
+        ItemStack item = item(material, title, NamedTextColor.WHITE, lore);
         ItemMeta meta = item.getItemMeta();
+        meta.displayName(medals.title(title, metal));
         meta.setItemModel(new NamespacedKey("f8resurs", metal.model));
         item.setItemMeta(meta);
         return item;
@@ -108,19 +109,7 @@ final class ProfileItems {
     }
 
     ItemStack medal(ProfileMedal medal, List<String> hints) {
-        List<Component> lore = new ArrayList<>();
-        for (int i = 0; i < medal.reasons().size(); i++) {
-            if (i > 0) lore.add(Component.empty());
-            for (String line : ProfileText.wrap(medal.reasons().get(i), 38)) lore.add(text(line, NamedTextColor.WHITE));
-        }
-        if (!hints.isEmpty()) {
-            lore.add(Component.empty());
-            for (String hint : hints) lore.add(text(hint, NamedTextColor.DARK_GRAY));
-        }
-        lore.add(Component.empty());
-        // Дата всегда самая нижняя строка, включая экран выбора медалей.
-        lore.add(text("Получена: " + date.format(Instant.ofEpochMilli(medal.awardedAt())), NamedTextColor.GRAY));
-        return medalBase(medal.metal(), medal.title(), lore);
+        return medalBase(medal.metal(), medal.title(), MedalPresentation.lore(medal, medals, date, hints));
     }
 
     ItemStack destination(ProfileMedal previous) {

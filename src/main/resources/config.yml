@@ -77,6 +77,8 @@ constellations:
   # Старый параметр reanchor-distance больше не используется.
 
 # Публичные профили и частная карточка при Shift + взгляде на игрока.
+# В 9.4 настройки медалей и сообщений находятся отдельно: medals/config.yml.
+# Файлы выданных медалей: medals/players/<UUID>.yml; /profile medal reload применяет правки.
 profiles:
   # Дальность карточки (2..16 блоков); стены/невидимость/vanish учитываются.
   quick-card-distance: 8.0

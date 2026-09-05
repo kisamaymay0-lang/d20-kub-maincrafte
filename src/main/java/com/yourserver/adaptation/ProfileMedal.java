@@ -32,11 +32,11 @@ record ProfileMedal(UUID id, Metal metal, String title, List<String> reasons, lo
         Objects.requireNonNull(id);
         Objects.requireNonNull(metal);
         title = ProfileText.clean(title);
-        if (title.isEmpty() || ProfileText.length(title) > 48) throw new IllegalArgumentException("Название: 1–48 символов");
+        if (title.isEmpty() || ProfileText.length(title) > 48) throw new IllegalArgumentException("Название: от 1 до 48 символов");
         reasons = reasons.stream().map(ProfileText::clean).toList();
         if (reasons.isEmpty() || reasons.size() > 8
                 || reasons.stream().anyMatch(reason -> reason.isEmpty() || ProfileText.length(reason) > 120)) {
-            throw new IllegalArgumentException("Нужно 1–8 заслуг, каждая до 120 символов");
+            throw new IllegalArgumentException("Нужно от 1 до 8 заслуг, каждая до 120 символов");
         }
         if (awardedAt < 0) throw new IllegalArgumentException("Некорректная дата медали");
         source = Objects.requireNonNullElse(source, "");

@@ -65,7 +65,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>, /d20 cheat <1-20> или /d20 enchant <ID>");
+            sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>, /d20 cheat <1…20> или /d20 enchant <ID>");
             return true;
         }
 
@@ -89,7 +89,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 if (activeCheaters.containsKey(uuid)) {
                     activeCheaters.remove(uuid);
                     cheatCooldowns.remove(uuid);
-                    player.sendMessage(ChatColor.RED + "Чит-режим отключен. Роллы снова случайны.");
+                    player.sendMessage(ChatColor.RED + "Режим фиксированного броска отключен. Роллы снова случайны.");
                 } else {
                     player.sendMessage(ChatColor.RED + "Укажите число! Пример: /d20 cheat 20");
                 }
@@ -104,7 +104,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
                 activeCheaters.put(uuid, targetRoll);
                 cheatCooldowns.put(uuid, System.currentTimeMillis());
-                player.sendMessage(ChatColor.GREEN + "Чит-режим активирован! Следующий удар гарантированно выдаст: §e§l[" + targetRoll + "]");
+                player.sendMessage(ChatColor.GREEN + "Режим фиксированного броска активирован! Следующий удар гарантированно выдаст: §e§l[" + targetRoll + "]");
             } catch (NumberFormatException e) {
                 player.sendMessage(ChatColor.RED + "Некорректное число! Пример: /d20 cheat 7");
             }

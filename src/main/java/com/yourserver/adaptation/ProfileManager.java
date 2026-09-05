@@ -31,6 +31,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.time.ZoneId;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -70,6 +72,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     private final JavaPlugin plugin;
     private final ProfileStorage storage;
+    private final Path medalConfig;
+    private MedalSettings medalSettings;
     private final ProfileItems items;
     private final ProfileCards cards;
     private final BukkitTask maintenance;
@@ -82,15 +86,21 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     public ProfileManager(JavaPlugin plugin, AsyncTextWriter writer) {
         this.plugin = plugin;
-        storage = new ProfileStorage(plugin.getDataFolder().toPath().resolve("profiles"), writer, plugin.getLogger());
+        medalConfig = plugin.getDataFolder().toPath().resolve("medals/config.yml");
+        if (!Files.exists(medalConfig)) plugin.saveResource("medals/config.yml", false);
+        medalSettings = MedalSettings.defaults();
+        try { medalSettings = MedalSettings.load(medalConfig); }
+        catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка настройки медалей; временно используются стандартные значения", ex); }
+        storage = new ProfileStorage(plugin.getDataFolder().toPath().resolve("profiles"),
+                plugin.getDataFolder().toPath().resolve("medals/players"), writer, plugin.getLogger(), medal -> medalSettings.migrate(medal));
         ZoneId zone = ZoneId.systemDefault();
         String configuredZone = plugin.getConfig().getString("profiles.date-time-zone", "system");
         if (configuredZone != null && !configuredZone.equalsIgnoreCase("system")) {
             try { zone = ZoneId.of(configuredZone); }
             catch (RuntimeException ex) { plugin.getLogger().warning("Некорректный profiles.date-time-zone, используется часовой пояс сервера"); }
         }
-        items = new ProfileItems(zone);
-        cards = new ProfileCards(plugin, this::profile);
+        items = new ProfileItems(zone, medalSettings);
+        cards = new ProfileCards(plugin, this::profile, items);
         maintenance = Bukkit.getScheduler().runTaskTimer(plugin, this::maintenance, 20L, 20L);
         for (Player player : Bukkit.getOnlinePlayers()) join(player);
     }
@@ -104,19 +114,48 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         Player online = Bukkit.getPlayer(owner);
         if (online != null && data.rename(online.getName())) storage.changed(owner);
         long earnedAt = constellationMilestone.applyAsLong(owner);
-        if (ProfileAwards.firstConstellation(data, earnedAt)) {
-            storage.changed(owner);
-            storage.flushBlocking(owner);
-            if (online != null) online.sendMessage("§6Получена медная медаль! §7Откройте /profile → Настроить медали.");
+        if (earnedAt > 0 && !data.hasReward(ProfileMedal.FIRST_CONSTELLATION)) {
+            storage.prepareMedalChange(owner);
+            if (ProfileAwards.firstConstellation(data, earnedAt, medalSettings)) {
+                storage.changed(owner);
+                if (!storage.flushBlocking(owner)) throw new IllegalStateException("Медали не сохранены; примените /profile medal reload");
+            }
         }
+        if (online != null) announcePending(online, data);
         return data;
+    }
+
+    private void announcePending(Player player, ProfileData data) {
+        if (!data.hasPendingNotifications()) return;
+        List<ProfileMedal> pending = data.medals().values().stream().filter(data::needsNotification).toList();
+        if (pending.isEmpty()) return;
+        var oldHistory = data.notificationHistory();
+        for (ProfileMedal medal : pending) data.markNotified(medal);
+        storage.changed(data.owner);
+        // Сначала фиксируется факт доставки: перезагрузка/чтение профиля не повторяют объявления.
+        if (!storage.flushBlocking(data.owner)) {
+            data.restoreHistory(data.rewardHistory(), oldHistory);
+            return;
+        }
+        for (ProfileMedal medal : pending) {
+            String rarity = medalSettings.style(medal.metal()).rarity();
+            Component broadcast = medalSettings.message("public", data.name(), rarity, medal.title(), 1, "");
+            Component personal = medalSettings.message("personal", data.name(), rarity, medal.title(), 1, "");
+            MedalDelivery.send(broadcast, personal, Bukkit::broadcast, player::sendMessage,
+                    () -> player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f));
+        }
+    }
+
+    private void medalMessage(CommandSender sender, String key, String name, String title, int count, String error) {
+        Component message = medalSettings.message(key, name, "", title, count, error == null ? "Ошибка файла" : error);
+        if (!PlainTextComponentSerializer.plainText().serialize(message).isBlank()) sender.sendMessage(message);
     }
 
     /** Вызывается только после НОВОГО завершения; старые completed без маркера ничего не выдают. */
     void constellationCompleted(Player player) {
         try { profile(player); refresh(player.getUniqueId()); }
         catch (RuntimeException ex) {
-            player.sendMessage("§cМедаль пока не удалось записать. Право на неё сохранено; обратитесь к администратору.");
+            medalMessage(player, "pending-error", player.getName(), "", 0, ex.getMessage());
             // Журнал в playerdata.yml позволяет восстановить выдачу после исправления файла/диска.
         }
     }
@@ -151,7 +190,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         Inventory inventory = menu.inventory;
         inventory.clear();
         var filler = ProfileItems.filler();
-        for (int i = 0; i < 27; i++) inventory.setItem(i, filler);
+        for (int i = 0; i < 27; i++) if (ProfileText.medalSlot(i) >= 0) inventory.setItem(i, filler);
         menu.medalsBySlot.clear();
         populateDetails(menu, data);
         if (menu.screen == Screen.COLLECTION) {
@@ -202,7 +241,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             if (!menu.owner.equals(owner)) continue;
             Player viewer = Bukkit.getPlayer(menu.viewer);
             if (viewer == null || viewer.getOpenInventory().getTopInventory() != menu.inventory) continue;
-            populate(menu, profile(owner, owner.toString()));
+            ProfileData data = profile(owner, owner.toString());
+            if (menu.screen == Screen.PLACE && !data.medals().containsKey(menu.chosen)) {
+                open(viewer, owner, Screen.COLLECTION, menu.page, null);
+            } else populate(menu, data);
         }
     }
 
@@ -237,7 +279,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 player.closeInventory();
                 editing.put(player.getUniqueId(), new Editing());
                 player.sendMessage("§6Новое описание напишите в чат §7(до 160 символов, 2 минуты). Сообщение не публикуется в общем чате.");
-                player.sendMessage("§7«отмена» — отменить, «-» — вернуть «Нет описания.».");
+                player.sendMessage("§7«отмена» — отменить, «очистить» — вернуть «Нет описания.».");
             } else if (own && slot == 17) {
                 clickSound(player); open(player, data.owner, Screen.COLLECTION, 0, null);
             }
@@ -324,13 +366,13 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         if (clean.isEmpty() || ProfileText.length(clean) > ProfileText.DESCRIPTION_LIMIT) {
             session.processing.set(false);
-            player.sendMessage("§cНужно 1–160 символов. Попробуйте ещё раз или напишите «отмена».");
+            player.sendMessage("§cНужно от 1 до 160 символов. Попробуйте ещё раз или напишите «отмена».");
             return;
         }
         editing.remove(id, session);
         try {
             ProfileData data = profile(player);
-            if (data.describe(id, clean.equals("-") ? "" : clean)) storage.changed(id);
+            if (data.describe(id, (clean.equals("-") || clean.equals("—") || clean.equalsIgnoreCase("очистить")) ? "" : clean)) storage.changed(id);
             refreshDetails(id); open(player, id, Screen.PROFILE, 0, null);
             player.sendMessage("§aОписание профиля сохранено.");
         } catch (RuntimeException ex) { player.sendMessage("§cОписание не сохранено: профиль недоступен."); }
@@ -377,35 +419,97 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             editing.remove(player.getUniqueId()); player.sendMessage("§7Редактирование описания отменено."); return true;
         }
         if (args.length > 0 && args[0].equalsIgnoreCase("medal")) {
-            if (!admin(sender)) { sender.sendMessage("§cНет прав создавать медали."); return true; }
-            if (args.length < 5 || !args[1].equalsIgnoreCase("give")) { help(sender); return true; }
-            try {
-                OfflinePlayer target = Bukkit.getPlayerExact(args[2]);
-                if (target == null) target = Bukkit.getOfflinePlayerIfCached(args[2]);
-                UUID id;
-                String name;
-                if (target != null) { id = target.getUniqueId(); name = target.getName(); }
-                else {
-                    try { id = UUID.fromString(args[2]); }
-                    catch (IllegalArgumentException ex) { throw new IllegalArgumentException("Игрок не найден в кэше. Укажите онлайн-игрока или UUID."); }
-                    name = id.toString();
-                }
-                ProfileMedal.Metal metal = ProfileMedal.Metal.parse(args[3]);
-                String[] fields = String.join(" ", Arrays.copyOfRange(args, 4, args.length)).split("\\|", -1);
-                if (fields.length < 2) throw new IllegalArgumentException("После названия нужна | и хотя бы одна заслуга");
-                ProfileMedal medal = new ProfileMedal(UUID.randomUUID(), metal, fields[0],
-                        Arrays.asList(fields).subList(1, fields.length), System.currentTimeMillis(), "");
-                ProfileData data = profile(id, name);
-                data.award(medal); storage.changed(id); storage.flushBlocking(id); refresh(id);
-                sender.sendMessage("§aМедаль «" + medal.title() + "» добавлена в коллекцию " + data.name() + ".");
-                Player online = Bukkit.getPlayer(id);
-                if (online != null) online.sendMessage("§6Вам выдана медаль «" + medal.title() + "». §7/profile → Настроить медали.");
-            } catch (IllegalArgumentException ex) { sender.sendMessage("§c" + ex.getMessage()); help(sender); }
-            catch (RuntimeException ex) { sender.sendMessage("§cПрофиль недоступен; проверьте журнал сервера."); }
+            if (!admin(sender)) { medalMessage(sender, "no-permission", "", "", 0, ""); return true; }
+            try { medalCommand(sender, args); }
+            catch (Exception ex) {
+                medalMessage(sender, "error", "", "", 0, ex.getMessage());
+                plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применена команда медалей", ex);
+            }
             return true;
         }
         help(sender);
         return true;
+    }
+
+    private record Target(UUID id, String name) { }
+
+    private Target medalTarget(String argument) {
+        OfflinePlayer player = Bukkit.getPlayerExact(argument);
+        if (player == null) player = Bukkit.getOfflinePlayerIfCached(argument);
+        if (player != null) return new Target(player.getUniqueId(), player.getName());
+        try {
+            UUID id = UUID.fromString(argument);
+            return new Target(id, id.toString());
+        } catch (IllegalArgumentException ex) { throw new IllegalArgumentException("Игрок не найден в кэше. Укажите игрока в сети или UUID."); }
+    }
+
+    private void medalCommand(CommandSender sender, String[] args) throws Exception {
+        if (args.length == 2 && args[1].equalsIgnoreCase("reload")) {
+            MedalSettings next = MedalSettings.load(medalConfig);
+            ProfileStorage.ReloadPlan plan = storage.readReloadPlan(); // Проверить всё до изменения активного состояния.
+            storage.applyReloadPlan(plan);
+            medalSettings = next;
+            items.settings(next);
+            cards.refresh();
+            for (Player player : Bukkit.getOnlinePlayers()) profile(player);
+            for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
+            medalMessage(sender, "reloaded", "", "", 0, "");
+            return;
+        }
+        if (args.length < 3) { help(sender); return; }
+        Target target = medalTarget(args[2]);
+        ProfileData data = profile(target.id(), target.name());
+        if (args[1].equalsIgnoreCase("list")) {
+            medalMessage(sender, "list", data.name(), "", data.medals().size(), "");
+            int index = 1;
+            for (ProfileMedal medal : data.medals().values()) {
+                sender.sendMessage(ProfileItems.text(index++ + ". ", NamedTextColor.GRAY)
+                        .append(medalSettings.title(medal.title(), medal.metal()))
+                        .append(ProfileItems.text("  " + medal.id(), NamedTextColor.DARK_GRAY)));
+            }
+            sender.sendMessage(ProfileItems.text(storage.medalPath(data.owner).toString(), NamedTextColor.DARK_GRAY));
+            return;
+        }
+        if (args[1].equalsIgnoreCase("give") && args.length >= 5) {
+            ProfileMedal.Metal metal = ProfileMedal.Metal.parse(args[3]);
+            String[] fields = String.join(" ", Arrays.copyOfRange(args, 4, args.length)).split("\\|", -1);
+            if (fields.length < 2) throw new IllegalArgumentException("После названия нужна | и хотя бы одна заслуга");
+            ProfileMedal medal = new ProfileMedal(UUID.randomUUID(), metal, fields[0], Arrays.asList(fields).subList(1, fields.length), System.currentTimeMillis(), "");
+            storage.prepareMedalChange(data.owner);
+            data.award(medal); storage.changed(data.owner);
+            if (!storage.flushBlocking(data.owner)) throw new IllegalStateException("Медали не записаны; проверьте файл и примените reload");
+            Player online = Bukkit.getPlayer(data.owner);
+            if (online != null) announcePending(online, data);
+            refresh(data.owner);
+            // Если администратор выдал себе медаль, не добавляем второе личное сообщение.
+            if (!(sender instanceof Player player) || !player.getUniqueId().equals(data.owner)) {
+                medalMessage(sender, "given", data.name(), medal.title(), 1, "");
+            }
+            return;
+        }
+        if (args[1].equalsIgnoreCase("take") && args.length == 4) {
+            storage.prepareMedalChange(data.owner);
+            List<ProfileMedal> owned = new ArrayList<>(data.medals().values());
+            List<UUID> remove = new ArrayList<>();
+            if (args[3].equalsIgnoreCase("all")) remove.addAll(data.medals().keySet());
+            else {
+                try {
+                    int number = Integer.parseInt(args[3]);
+                    if (number >= 1 && number <= owned.size()) remove.add(owned.get(number - 1).id());
+                } catch (NumberFormatException ignored) {
+                    UUID id = UUID.fromString(args[3]);
+                    if (data.medals().containsKey(id)) remove.add(id);
+                }
+            }
+            if (remove.isEmpty()) { medalMessage(sender, "not-found", data.name(), "", 0, ""); return; }
+            remove.forEach(data::revoke);
+            storage.changed(data.owner);
+            if (!storage.flushBlocking(data.owner)) throw new IllegalStateException("Изъятие не записано; проверьте файл и примените reload");
+            refresh(data.owner);
+            medalMessage(sender, "taken", data.name(), "", remove.size(), "");
+            return;
+        }
+        help(sender);
     }
 
     private static void help(CommandSender sender) {
@@ -413,7 +517,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         sender.sendMessage("§7/profile cancel — отменить ввод описания.");
         if (admin(sender)) {
             sender.sendMessage("§6/profile medal give <игрок или UUID> <copper|silver|gold> <название> | <заслуга 1> | <заслуга 2>");
-            sender.sendMessage("§7Офлайн-игрок должен быть в кэше сервера; иначе укажите UUID. Имя ищется только в локальном кэше сервера.");
+            sender.sendMessage("§7/profile medal list <игрок> — список и UUID медалей");
+            sender.sendMessage("§7/profile medal take <игрок> <номер|UUID|all> — забрать медаль");
+            sender.sendMessage("§7/profile medal reload — применить файлы и сообщения без перезапуска");
+            sender.sendMessage("§7Имя ищется только в локальном кэше сервера; если игрок не найден, укажите UUID.");
         }
     }
 
@@ -422,11 +529,12 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         List<String> options = List.of();
         if (args.length == 1) options = admin(sender) ? List.of("cancel", "medal") : List.of("cancel");
         else if (admin(sender) && args[0].equalsIgnoreCase("medal")) {
-            if (args.length == 2) options = List.of("give");
-            else if (args.length == 3) options = Bukkit.getOnlinePlayers().stream()
+            if (args.length == 2) options = List.of("give", "take", "list", "reload");
+            else if (args.length == 3 && !args[1].equalsIgnoreCase("reload")) options = Bukkit.getOnlinePlayers().stream()
                     .filter(player -> !(sender instanceof Player viewer) || viewer.canSee(player))
                     .map(Player::getName).toList();
-            else if (args.length == 4) options = List.of("copper", "silver", "gold");
+            else if (args.length == 4 && args[1].equalsIgnoreCase("give")) options = List.of("copper", "silver", "gold");
+            else if (args.length == 4 && args[1].equalsIgnoreCase("take")) options = List.of("all");
         }
         String prefix = args.length == 0 ? "" : args[args.length - 1].toLowerCase(java.util.Locale.ROOT);
         return options.stream().filter(option -> option.toLowerCase(java.util.Locale.ROOT).startsWith(prefix)).toList();

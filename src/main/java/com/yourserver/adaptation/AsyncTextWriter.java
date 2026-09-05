@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,6 +25,8 @@ final class AsyncTextWriter implements AutoCloseable {
 
     private static final class Pending {
         String text;
+        boolean checked;
+        String expected;
         final CompletableFuture<Void> done = new CompletableFuture<>();
         Pending(String text) { this.text = text; }
     }
@@ -47,11 +50,24 @@ final class AsyncTextWriter implements AutoCloseable {
     }
 
     synchronized CompletableFuture<Void> submit(Path path, String text) {
+        return submit(path, text, false, null);
+    }
+
+    synchronized CompletableFuture<Void> submitIfUnchanged(Path path, String text, String expected) {
+        return submit(path, text, true, expected);
+    }
+
+    private synchronized CompletableFuture<Void> submit(Path path, String text, boolean checked, String expected) {
         if (closed) {
             return CompletableFuture.failedFuture(new IllegalStateException("Writer is closed"));
         }
         Path key = path.toAbsolutePath().normalize();
-        Pending job = pending.computeIfAbsent(key, ignored -> new Pending(text));
+        Pending job = pending.computeIfAbsent(key, ignored -> {
+            Pending created = new Pending(text);
+            created.checked = checked;
+            created.expected = expected;
+            return created;
+        });
         job.text = text; // Не копим очередь устаревших снимков одного файла.
         if (!draining) {
             draining = true;
@@ -75,6 +91,13 @@ final class AsyncTextWriter implements AutoCloseable {
                 pending.remove(path);
             }
             try {
+                if (job.checked) {
+                    String actual = Files.exists(path) ? Files.readString(path, StandardCharsets.UTF_8) : null;
+                    if (!Objects.equals(actual, job.expected)) {
+                        throw new IOException("Файл изменён снаружи и не перезаписан: " + path.getFileName()
+                                + ". Примените правку через /profile medal reload.");
+                    }
+                }
                 sink.write(path, job.text);
                 job.done.complete(null);
             } catch (Exception ex) {

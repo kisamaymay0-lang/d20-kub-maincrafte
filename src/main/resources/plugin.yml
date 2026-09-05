@@ -1,5 +1,5 @@
 name: f8-plugin
-version: '9.3'
+version: '9.4'
 main: com.yourserver.adaptation.AdaptationPlugin
 api-version: '1.21.11'
 
@@ -11,7 +11,7 @@ commands:
   d20:
     description: Выдать книгу с чаром Бросок I
     permission: f8.admin
-    usage: /d20 give <игрок>, /d20 cheat <1-20> или /d20 enchant <ID>
+    usage: /d20 give <игрок>, /d20 cheat <1…20> или /d20 enchant <ID>
 
   f8:
     description: Меню дополнительных возможностей F8
@@ -25,7 +25,7 @@ commands:
 
 permissions:
   profiles.admin:
-    description: Создавать медали игрокам через /profile medal give
+    description: Выдавать, забирать и перезагружать медали
     default: op
 
   f8.admin:
