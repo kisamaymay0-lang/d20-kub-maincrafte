@@ -28,6 +28,13 @@ final class MedalPresentation {
         return List.copyOf(lines);
     }
 
+    static List<Component> publicLore(ProfileMedal medal, MedalSettings settings, DateTimeFormatter date) {
+        // Свежий публичный предмет: ни текст заслуг, ни их количество сюда не попадают.
+        return List.of(ProfileItems.text(settings.style(medal.metal()).label(), NamedTextColor.GRAY),
+                ProfileItems.text("…", NamedTextColor.GRAY),
+                ProfileItems.text("Получена: " + date.format(Instant.ofEpochMilli(medal.awardedAt())), NamedTextColor.GRAY));
+    }
+
     static List<Component> tooltip(ProfileMedal medal, MedalSettings settings, DateTimeFormatter date) {
         List<Component> lines = new ArrayList<>();
         lines.add(settings.title(medal.title(), medal.metal()));

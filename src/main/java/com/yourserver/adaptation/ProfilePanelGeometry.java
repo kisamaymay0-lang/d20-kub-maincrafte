@@ -47,9 +47,7 @@ final class ProfilePanelGeometry {
                     footerBottom() + 25.5 * pixel(), Math.max((like ? left : rightWidth) * pixel(), width * 0.19), 8 * pixel());
         }
         Rect voiceButton() {
-            double scale = height * 0.265;
-            return new Rect(0, height * 0.455 - 0.3625 * scale,
-                    Math.min(width * 0.85, 140 * 0.025 * scale), 6 * 0.025 * scale);
+            return new Rect(0, height * 0.20, width * 0.80, height * 0.32);
         }
         Action action(Hit hit, int likes, int dislikes) { return action(hit, likes, dislikes, false); }
         Action action(Hit hit, int likes, int dislikes, boolean voice) {

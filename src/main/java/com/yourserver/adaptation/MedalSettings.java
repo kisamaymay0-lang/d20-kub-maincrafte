@@ -1,6 +1,7 @@
 package com.yourserver.adaptation;
 
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -88,10 +89,16 @@ final class MedalSettings {
     }
 
     Component message(String key, String player, String rarity, String title, int count, String error) {
-        String template = messages.getOrDefault(key, "");
+        return message(key, player, rarity, title, count, error, null);
+    }
+
+    Component message(String key, String player, String rarity, String title, int count, String error, HoverEvent<?> hover) {
+        String template = messages.getOrDefault(key, "").replace("[{rarity}]", "<award>");
+        Component rarityText = Component.text(rarity).hoverEvent(hover);
+        Component award = Component.text("[" + rarity + "]").hoverEvent(hover);
         for (String placeholder : List.of("player", "rarity", "title", "count", "error")) template = template.replace("{" + placeholder + "}", "<" + placeholder + ">");
         return MiniMessage.miniMessage().deserialize(template,
-                Placeholder.unparsed("player", player), Placeholder.unparsed("rarity", rarity),
+                Placeholder.unparsed("player", player), Placeholder.component("rarity", rarityText), Placeholder.component("award", award),
                 Placeholder.unparsed("title", title), Placeholder.unparsed("count", Integer.toString(count)), Placeholder.unparsed("error", error));
     }
 

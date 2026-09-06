@@ -42,7 +42,7 @@ final class ProfileData {
     String description() { return description; }
     ProfileVoiceNote voice() { return voice; }
     UUID skinOwner() { return skinOwner; }
-    String displayedDescription() { return voice != null ? "Голосовое описание · 30 сек." : description.isBlank() ? ProfileText.NO_DESCRIPTION : description; }
+    String displayedDescription() { return voice != null ? "Голосовое описание · 10 сек." : description.isBlank() ? ProfileText.NO_DESCRIPTION : description; }
     boolean voice(UUID actor, ProfileVoiceNote note) {
         if (!owner.equals(actor) || (note != null && !owner.equals(note.speaker()))) return false;
         voice = note; description = ""; revision++; return true;

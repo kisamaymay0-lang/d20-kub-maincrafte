@@ -113,6 +113,10 @@ final class ProfileItems {
         return medalBase(medal.metal(), medal.title(), MedalPresentation.lore(medal, medals, date, hints));
     }
 
+    ItemStack publicMedal(ProfileMedal medal) {
+        return medalBase(medal.metal(), medal.title(), MedalPresentation.publicLore(medal, medals, date));
+    }
+
     ItemStack destination(ProfileMedal previous) {
         return item(Material.WHITE_STAINED_GLASS_PANE, "Поставить медаль", NamedTextColor.WHITE,
                 previous == null ? List.of(text("Свободное место", NamedTextColor.GRAY))

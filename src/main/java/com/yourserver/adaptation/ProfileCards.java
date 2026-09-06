@@ -44,7 +44,9 @@ final class ProfileCards {
         Vector3d attachedFeet;
         ProfilePanelGeometry.Frame rendered;
         ProfilePanelGeometry.Rect tooltipRect;
-        TextDisplay background, body, footer, tooltip;
+        TextDisplay background, body, footer, tooltip, voiceTime, voiceHint;
+        ProfileVoiceNote voiceNote;
+        VoicePlaybackView voiceView;
         TextDisplay medal;
         final Set<Display> awaitingShow = new HashSet<>();
         int likes, dislikes;
@@ -66,6 +68,7 @@ final class ProfileCards {
     private final JavaPlugin plugin;
     private final Function<ProfileSubjects.Subject, ProfileData> profiles;
     private final ProfileSubjects subjects;
+    private final ProfileVoice voice;
     private final ProfileItems items;
     private final Set<UUID> sneaking = new HashSet<>();
     private final Map<UUID, Card> cards = new HashMap<>();
@@ -74,8 +77,8 @@ final class ProfileCards {
     private int frames;
     private boolean errorReported;
 
-    ProfileCards(JavaPlugin plugin, Function<ProfileSubjects.Subject, ProfileData> profiles, ProfileItems items, ProfileSubjects subjects) {
-        this.plugin = plugin; this.profiles = profiles; this.items = items; this.subjects = subjects;
+    ProfileCards(JavaPlugin plugin, Function<ProfileSubjects.Subject, ProfileData> profiles, ProfileItems items, ProfileSubjects subjects, ProfileVoice voice) {
+        this.plugin = plugin; this.profiles = profiles; this.items = items; this.subjects = subjects; this.voice = voice;
         double configured = plugin.getConfig().getDouble("profiles.quick-card-distance", 8);
         range = Double.isFinite(configured) ? Math.clamp(configured, 2, 16) : 8;
         for (Player player : Bukkit.getOnlinePlayers()) if (player.isSneaking()) sneaking.add(player.getUniqueId());
@@ -229,6 +232,14 @@ final class ProfileCards {
                         card.revision = -1; card.rendered = null;
                     }
                     if (data.revision() != card.revision || card.style != items.styleRevision()) contents(viewer, card, data);
+                    if (card.hasVoice && card.voiceTime != null) {
+                        VoicePlaybackView current = voice.view(viewer.getUniqueId(), card.voiceNote);
+                        if (!current.equals(card.voiceView)) {
+                            card.voiceView = current;
+                            card.voiceTime.text(ProfileItems.text(current.caption(), NamedTextColor.WHITE));
+                            card.voiceHint.text(ProfileItems.text(current.hint(), NamedTextColor.GRAY));
+                        }
+                    }
                     if (!card.frame.approximately(card.rendered)) layout(viewer, card);
                     if (card.showTip && card.latest != null && (card.tooltip == null || !card.tooltip.isValid())) {
                         List<Component> lines = items.tooltip(card.latest);
@@ -248,6 +259,7 @@ final class ProfileCards {
                 if (alpha != card.lastOpacity) {
                     card.lastOpacity = alpha;
                     opacity(card.body, alpha); opacity(card.footer, alpha); opacity(card.medal, alpha);
+                    opacity(card.voiceTime, alpha); opacity(card.voiceHint, alpha);
                     if (card.background != null && card.background.isValid()) card.background.setBackgroundColor(Color.fromARGB((int) (alpha * 190), 18, 20, 24));
                 }
                 double tipAlpha = card.tipFade.advance(visible && card.showTip && card.latest != null, 2, 4);
@@ -276,8 +288,23 @@ final class ProfileCards {
         List<Component> body = new ArrayList<>();
         body.add(ProfileItems.text(data.name(), NamedTextColor.WHITE).decorate(TextDecoration.BOLD));
         card.hasVoice = data.voice() != null;
-        if (card.hasVoice) body.add(ProfileItems.text("▶ Прослушать 30 сек.", NamedTextColor.WHITE).decorate(TextDecoration.UNDERLINED));
-        else for (String line : description) body.add(ProfileItems.text(line, NamedTextColor.GRAY));
+        card.voiceNote = data.voice();
+        if (card.hasVoice) {
+            if (card.voiceTime == null || !card.voiceTime.isValid() || card.voiceHint == null || !card.voiceHint.isValid()) {
+                if (card.voiceTime != null) card.voiceTime.remove();
+                if (card.voiceHint != null) card.voiceHint.remove();
+                card.voiceTime = text(viewer, card, ProfileItems.text(VoicePlaybackView.IDLE.caption(), NamedTextColor.WHITE));
+                card.voiceHint = text(viewer, card, ProfileItems.text(VoicePlaybackView.HINT, NamedTextColor.GRAY));
+                card.voiceHint.setLineWidth(240);
+                opacity(card.voiceTime, card.fade.value()); opacity(card.voiceHint, card.fade.value());
+            }
+            card.voiceView = null;
+        } else {
+            if (card.voiceTime != null) card.voiceTime.remove();
+            if (card.voiceHint != null) card.voiceHint.remove();
+            card.voiceTime = null; card.voiceHint = null; card.voiceView = null;
+            for (String line : description) body.add(ProfileItems.text(line, NamedTextColor.GRAY));
+        }
         card.bodyLines = body.size();
         card.body.text(join(body));
         ProfileMedal latest = data.latestMedal();
@@ -315,6 +342,14 @@ final class ProfileCards {
         double bodyScale = Math.min(h * 0.265, h * 0.63 / Math.max(0.25, card.bodyLines * 0.25));
         pose(viewer, card.body, frame, -bodyScale * 0.025, h / 2 - h * 0.045 - card.bodyLines * 0.25 * bodyScale,
                 0.015, new Vector3f((float) bodyScale));
+        if (card.hasVoice) {
+            double timeScale = h * 0.48;
+            double hintScale = h * 0.16;
+            pose(viewer, card.voiceTime, frame, -timeScale * 0.025, h * 0.225 - timeScale * 0.1375,
+                    0.015, new Vector3f((float) timeScale));
+            pose(viewer, card.voiceHint, frame, -hintScale * 0.025, h * 0.12 - hintScale * 0.1375,
+                    0.015, new Vector3f((float) hintScale));
+        }
         double footerScale = frame.footerScale();
         pose(viewer, card.footer, frame, -footerScale * 0.025, frame.footerBottom(), 0.015, new Vector3f((float) footerScale));
         poseIcon(viewer, card);
@@ -378,6 +413,9 @@ final class ProfileCards {
         if (card.footer != null) card.footer.remove();
         if (card.medal != null) card.medal.remove();
         if (card.tooltip != null) card.tooltip.remove();
+        if (card.voiceTime != null) card.voiceTime.remove();
+        if (card.voiceHint != null) card.voiceHint.remove();
+        card.voiceTime = null; card.voiceHint = null; card.voiceView = null;
         card.background = null; card.body = null; card.footer = null; card.medal = null; card.tooltip = null;
         card.latest = null; card.tooltipRect = null;
         card.awaitingShow.clear();

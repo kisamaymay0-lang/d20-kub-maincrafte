@@ -107,7 +107,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         voice = new ProfileVoice(plugin, this::saveVoice);
         items = new ProfileItems(zone, medalSettings);
         subjects = new ProfileSubjects(plugin, this::profile);
-        cards = new ProfileCards(plugin, subject -> profile(subject.profile(), subject.name()), items, subjects);
+        cards = new ProfileCards(plugin, subject -> profile(subject.profile(), subject.name()), items, subjects, voice);
         maintenance = Bukkit.getScheduler().runTaskTimer(plugin, this::maintenance, 20L, 20L);
         for (Player player : Bukkit.getOnlinePlayers()) join(player);
     }
@@ -154,7 +154,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         for (ProfileMedal medal : pending) {
             String rarity = medalSettings.style(medal.metal()).rarity();
-            Component broadcast = medalSettings.message("public", data.name(), rarity, medal.title(), 1, "");
+            Component broadcast = medalSettings.message("public", data.name(), rarity, medal.title(), 1, "", items.publicMedal(medal).asHoverEvent());
             Component personal = medalSettings.message("personal", data.name(), rarity, medal.title(), 1, "");
             MedalDelivery.send(broadcast, personal, Bukkit::broadcast, player::sendMessage,
                     () -> player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f));
@@ -519,11 +519,6 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0 && sender instanceof Player player) { open(player, player.getUniqueId(), Screen.PROFILE, 0, null); return true; }
-        if (args.length == 1 && args[0].equalsIgnoreCase("cancel") && sender instanceof Player player) {
-            if (voice.active(player.getUniqueId())) voice.cancel(player.getUniqueId(), true);
-            else { editing.remove(player.getUniqueId()); player.sendMessage("§7Редактирование описания отменено."); }
-            return true;
-        }
         if (args.length == 2 && args[0].equalsIgnoreCase("voice") && args[1].equalsIgnoreCase("reload")) {
             if (!admin(sender)) { sender.sendMessage("§cНет прав."); return true; }
             try { voice.reloadMessages(); sender.sendMessage("§aСообщения голосовых профилей перезагружены."); }
@@ -638,7 +633,6 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     private static void help(CommandSender sender) {
         sender.sendMessage("§6/profile §7— свой профиль; чужой — ЛКМ по «Открыть профиль» в карточке.");
-        sender.sendMessage("§7/profile cancel — отменить ввод описания.");
         if (admin(sender)) {
             sender.sendMessage("§7/profile voice reload — перечитать сообщения записи");
             sender.sendMessage("§7/profile clone — тестовый клон; /profile clone remove — убрать");
@@ -653,7 +647,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         List<String> options = List.of();
-        if (args.length == 1) options = admin(sender) ? List.of("cancel", "medal", "clone", "voice") : List.of("cancel");
+        if (args.length == 1) options = admin(sender) ? List.of("medal", "clone", "voice") : List.of();
         else if (admin(sender) && args.length == 2 && args[0].equalsIgnoreCase("voice")) options = List.of("reload");
         else if (admin(sender) && args.length == 2 && args[0].equalsIgnoreCase("clone")) options = List.of("remove");
         else if (admin(sender) && args[0].equalsIgnoreCase("medal")) {

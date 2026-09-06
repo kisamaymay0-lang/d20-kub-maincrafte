@@ -23,7 +23,7 @@ final class ProfileVoiceBuffer {
     synchronized void add(long nowNanos, long sequence, UUID activation, boolean stereo, byte[] opus) {
         if (closed || failure != null) return;
         long elapsed = nowNanos - started;
-        if (elapsed < 0 || elapsed >= 30_000_000_000L) return;
+        if (elapsed < 0 || elapsed >= ProfileVoiceClip.DURATION_MS * 1_000_000L) return;
         if (opus == null || opus.length == 0 || opus.length > ProfileVoiceClip.MAX_FRAME_BYTES) { failure = "bad-audio"; return; }
         int tick = (int) (elapsed / 20_000_000L);
         if (initialized) {
@@ -34,7 +34,7 @@ final class ProfileVoiceBuffer {
         } else {
             this.activation = activation; this.stereo = stereo; initialized = true;
         }
-        if (tick >= ProfileVoiceClip.MAX_FRAMES) return;
+        if (tick >= ProfileVoiceClip.RECORDING_FRAMES) return;
         frames.add(new ProfileVoiceClip.Frame(tick, opus, nextBurst));
         lastSequence = sequence; lastTick = tick; nextBurst = false;
     }

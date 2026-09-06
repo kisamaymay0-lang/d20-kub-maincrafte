@@ -8,7 +8,9 @@ import java.util.zip.CRC32;
 
 /** Ограниченный контейнер расшифрованных Opus кадров, не привязанный к ключу текущего подключения. */
 record ProfileVoiceClip(UUID speaker, boolean stereo, List<Frame> frames) {
-    static final int DURATION_MS = 30_000;
+    static final int DURATION_MS = 10_000;
+    static final int RECORDING_FRAMES = DURATION_MS / 20;
+    // Старые 30-секундные файлы остаются читаемыми; проигрываются первые 10 секунд.
     static final int MAX_FRAMES = 1500;
     static final int MAX_FRAME_BYTES = 2048;
     static final int MAX_FILE_BYTES = 3_200_000;

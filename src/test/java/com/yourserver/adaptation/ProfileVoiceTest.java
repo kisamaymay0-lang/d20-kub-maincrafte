@@ -28,17 +28,17 @@ class ProfileVoiceTest {
     }
 
     @Test
-    void recordingStopsAtThirtySecondsAndDoesNotAcceptDuplicatePackets() {
+    void recordingStopsAtTenSecondsAndDoesNotAcceptDuplicatePackets() {
         UUID activation = UUID.randomUUID();
         long start = 100_000_000L;
         ProfileVoiceBuffer buffer = new ProfileVoiceBuffer(owner, start);
         buffer.add(start, 10, activation, false, new byte[]{1});
         buffer.add(start + 500_000_000L, 10, activation, false, new byte[]{2});
-        buffer.add(start + 29_980_000_000L, 11, activation, false, new byte[]{3});
-        buffer.add(start + 30_000_000_000L, 12, activation, false, new byte[]{4});
+        buffer.add(start + 9_980_000_000L, 11, activation, false, new byte[]{3});
+        buffer.add(start + 10_000_000_000L, 12, activation, false, new byte[]{4});
         ProfileVoiceClip clip = buffer.finish();
         assertEquals(2, clip.frames().size());
-        assertEquals(1499, clip.frames().getLast().tick());
+        assertEquals(499, clip.frames().getLast().tick());
         assertArrayEquals(new byte[]{3}, clip.frames().getLast().opus());
     }
 
@@ -69,7 +69,7 @@ class ProfileVoiceTest {
         assertEquals("", data.description());
         ProfileData restored = ProfileCodec.decode(owner, ProfileCodec.encodeProfile(data));
         assertEquals(note, restored.voice());
-        assertTrue(restored.displayedDescription().contains("30"));
+        assertTrue(restored.displayedDescription().contains("10"));
         assertTrue(restored.describe(owner, "Новый текст"));
         assertNull(restored.voice());
     }
@@ -112,6 +112,25 @@ class ProfileVoiceTest {
         assertEquals(2, clip.frames().size());
         assertEquals(50, clip.frames().getLast().tick());
         assertTrue(clip.frames().getLast().startOfBurst());
+    }
+
+    @Test
+    void playbackCaptionAdvancesInSecondsAndIsCappedAtTen() {
+        long start = 500_000_000L;
+        assertEquals("▶ 0:10", VoicePlaybackView.IDLE.caption());
+        for (int second = 0; second <= 10; second++) {
+            assertEquals("▶ " + second + ":10", VoicePlaybackView.playing(start, start + second * 1_000_000_000L).caption());
+        }
+        assertEquals("▶ 10:10", VoicePlaybackView.playing(start, start + 20_000_000_000L).caption());
+        assertEquals("Нажатие — воспроизведение/стоп", VoicePlaybackView.IDLE.hint());
+    }
+
+    @Test
+    void olderThirtySecondFilesRemainReadableWithoutExtendingNewRecordings() throws Exception {
+        ProfileVoiceClip old = new ProfileVoiceClip(owner, false, List.of(new ProfileVoiceClip.Frame(1499, new byte[]{1})));
+        assertEquals(1499, ProfileVoiceClip.decode(owner, old.encode()).frames().getFirst().tick());
+        assertEquals(500, ProfileVoiceClip.RECORDING_FRAMES);
+        assertEquals(10_000, ProfileVoiceClip.DURATION_MS);
     }
 
 }

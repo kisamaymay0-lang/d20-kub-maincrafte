@@ -119,6 +119,11 @@ class ProfilePanelGeometryTest {
         assertEquals(ProfilePanelGeometry.Action.PLAY_VOICE, frame.action(hit, 0, 0, true));
         assertEquals(ProfilePanelGeometry.Action.NONE, frame.action(hit, 0, 0, false));
         assertFalse(frame.openProfile().contains(voice.x(), voice.y()));
+        assertTrue(voice.width() >= frame.width() * 0.79);
+        assertTrue(voice.height() >= frame.height() * 0.30);
+        assertTrue(voice.contains(0, frame.height() * 0.225));
+        assertTrue(voice.contains(0, frame.height() * 0.12));
+        assertFalse(voice.contains(0, frame.height() * 0.43));
     }
 
 }

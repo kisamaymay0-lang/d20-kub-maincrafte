@@ -87,4 +87,30 @@ class MedalPresentationTest {
         Component message = MedalSettings.defaults().message("public", "<red>Steve", "Медную медаль", "", 1, "");
         assertTrue(plain(message).startsWith("<red>Steve"));
     }
+    @Test
+    void publicMedalTooltipDoesNotDiscloseMeritsOrTheirCount() {
+        ProfileMedal medal = new ProfileMedal(UUID.randomUUID(), ProfileMedal.Metal.COPPER, "Астрономия!",
+                List.of("Секретная заслуга один", "Секретная заслуга два"), 1000, "secret_source");
+        var date = DateTimeFormatter.ofPattern("dd.MM.uuuu").withZone(ZoneId.of("UTC"));
+        var lore = MedalPresentation.publicLore(medal, MedalSettings.defaults(), date).stream().map(MedalPresentationTest::plain).toList();
+        assertEquals("Медная медаль", lore.get(0));
+        assertEquals("…", lore.get(1));
+        assertEquals(3, lore.size());
+        assertFalse(String.join(" ", lore).contains("Секретная"));
+        assertFalse(String.join(" ", lore).contains("secret_source"));
+    }
+
+    @Test
+    void rarityIncludingBracketsHasTheSuppliedPublicHover() {
+        var hover = net.kyori.adventure.text.event.HoverEvent.showText(Component.text("Публичная подсказка"));
+        Component message = MedalSettings.defaults().message("public", "Steve", "Медную медаль", "Астрономия!", 1, "", hover);
+        assertEquals("Steve получил [Медную медаль]!", plain(message));
+        assertTrue(hasMedalHover(message, hover));
+    }
+
+    private static boolean hasMedalHover(Component text, net.kyori.adventure.text.event.HoverEvent<?> hover) {
+        if (hover.equals(text.hoverEvent()) && plain(text).equals("[Медную медаль]")) return true;
+        return text.children().stream().anyMatch(child -> hasMedalHover(child, hover));
+    }
+
 }
