@@ -20,6 +20,7 @@ import su.plo.voice.api.server.player.VoiceServerPlayer;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -116,9 +117,15 @@ public final class PlasmoProfileVoice implements ProfileVoiceBridge, AddonInitia
         Playback session = new Playback(sender, source, stopped);
         playback.put(listener, session);
         sender.onStop(() -> {
-            playback.remove(listener, session);
-            source.remove();
-            finished.accept(!failed.get() && !stopped.get());
+            Runnable cleanup = () -> {
+                playback.remove(listener, session);
+                source.remove();
+                finished.accept(!failed.get() && !stopped.get());
+            };
+            // Дать клиентскому аудиобуферу доиграть последний кадр, не обрезать последнее слово.
+            if (failed.get() || stopped.get()) cleanup.run();
+            else try { voice.getBackgroundExecutor().schedule(cleanup, 1, TimeUnit.SECONDS); }
+            catch (RuntimeException ex) { cleanup.run(); }
         });
         sender.start();
     }

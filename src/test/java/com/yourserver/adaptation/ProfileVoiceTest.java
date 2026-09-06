@@ -101,4 +101,17 @@ class ProfileVoiceTest {
         assertThrows(IllegalArgumentException.class, () -> new ProfileVoiceClip.Frame(0, new byte[2049]));
         assertThrows(IOException.class, () -> ProfileVoiceClip.decode(owner, new byte[ProfileVoiceClip.MAX_FILE_BYTES + 1]));
     }
+    @Test
+    void pushToTalkBurstsCanRestartTheirSequenceAndKeepPauses() {
+        UUID activation = UUID.randomUUID();
+        ProfileVoiceBuffer buffer = new ProfileVoiceBuffer(owner, 0);
+        buffer.add(0, 15, activation, false, new byte[]{1});
+        buffer.endBurst(activation);
+        buffer.add(1_000_000_000L, 0, activation, false, new byte[]{2});
+        var clip = buffer.finish();
+        assertEquals(2, clip.frames().size());
+        assertEquals(50, clip.frames().getLast().tick());
+        assertTrue(clip.frames().getLast().startOfBurst());
+    }
+
 }

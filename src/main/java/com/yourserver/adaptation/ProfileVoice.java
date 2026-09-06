@@ -62,6 +62,12 @@ final class ProfileVoice {
         timer = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 2L, 2L);
     }
 
+    void reloadMessages() throws Exception {
+        YamlConfiguration next = new YamlConfiguration();
+        next.load(plugin.getDataFolder().toPath().resolve("voice/config.yml").toFile());
+        messages = next;
+    }
+
     Component prompt() { return message("prompt"); }
     private Component message(String key) {
         String fallback = "Не удалось выполнить действие с голосовым описанием.";

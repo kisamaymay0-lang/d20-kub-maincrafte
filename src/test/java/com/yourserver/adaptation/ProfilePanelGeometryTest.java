@@ -111,4 +111,14 @@ class ProfilePanelGeometryTest {
         }
     }
 
+    @Test
+    void voiceDescriptionHasItsOwnClickAreaWithoutChangingOtherControls() {
+        var frame = ProfilePanelGeometry.beside(eye, feet, 0.6, 1.8);
+        var voice = frame.voiceButton();
+        var hit = new ProfilePanelGeometry.Hit(voice.x(), voice.y(), 4, new Vector3d());
+        assertEquals(ProfilePanelGeometry.Action.PLAY_VOICE, frame.action(hit, 0, 0, true));
+        assertEquals(ProfilePanelGeometry.Action.NONE, frame.action(hit, 0, 0, false));
+        assertFalse(frame.openProfile().contains(voice.x(), voice.y()));
+    }
+
 }

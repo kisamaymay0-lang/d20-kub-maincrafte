@@ -524,6 +524,12 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             else { editing.remove(player.getUniqueId()); player.sendMessage("§7Редактирование описания отменено."); }
             return true;
         }
+        if (args.length == 2 && args[0].equalsIgnoreCase("voice") && args[1].equalsIgnoreCase("reload")) {
+            if (!admin(sender)) { sender.sendMessage("§cНет прав."); return true; }
+            try { voice.reloadMessages(); sender.sendMessage("§aСообщения голосовых профилей перезагружены."); }
+            catch (Exception ex) { sender.sendMessage("§cНе удалось прочитать voice/config.yml."); }
+            return true;
+        }
         if (args.length > 0 && args[0].equalsIgnoreCase("clone")) {
             if (!(sender instanceof Player player) || !admin(sender)) { sender.sendMessage("§cКоманда доступна администратору в игре."); return true; }
             try {
@@ -634,6 +640,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         sender.sendMessage("§6/profile §7— свой профиль; чужой — ЛКМ по «Открыть профиль» в карточке.");
         sender.sendMessage("§7/profile cancel — отменить ввод описания.");
         if (admin(sender)) {
+            sender.sendMessage("§7/profile voice reload — перечитать сообщения записи");
             sender.sendMessage("§7/profile clone — тестовый клон; /profile clone remove — убрать");
             sender.sendMessage("§6/profile medal give <игрок или UUID> <copper|silver|gold> <название> | <заслуга 1> | <заслуга 2>");
             sender.sendMessage("§7/profile medal list <игрок> — список и UUID медалей");
@@ -646,7 +653,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         List<String> options = List.of();
-        if (args.length == 1) options = admin(sender) ? List.of("cancel", "medal", "clone") : List.of("cancel");
+        if (args.length == 1) options = admin(sender) ? List.of("cancel", "medal", "clone", "voice") : List.of("cancel");
+        else if (admin(sender) && args.length == 2 && args[0].equalsIgnoreCase("voice")) options = List.of("reload");
         else if (admin(sender) && args.length == 2 && args[0].equalsIgnoreCase("clone")) options = List.of("remove");
         else if (admin(sender) && args[0].equalsIgnoreCase("medal")) {
             if (args.length == 2) options = List.of("give", "take", "list", "reload");
