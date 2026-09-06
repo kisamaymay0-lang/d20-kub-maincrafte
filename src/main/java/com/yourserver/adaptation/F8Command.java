@@ -32,6 +32,7 @@ public class F8Command implements CommandExecutor, Listener {
     private final FlaskListener flaskListener;
     private final RollbackListener rollbackListener;
     private final CopperBlockListener copperBlockListener;
+    private final CaviarListener caviarListener;
 
     private final NamespacedKey menuKey;
 
@@ -40,13 +41,15 @@ public class F8Command implements CommandExecutor, Listener {
             DiceRollListener diceRollListener,
             FlaskListener flaskListener,
             RollbackListener rollbackListener,
-            CopperBlockListener copperBlockListener
+            CopperBlockListener copperBlockListener,
+            CaviarListener caviarListener
     ) {
         this.plugin = plugin;
         this.diceRollListener = diceRollListener;
         this.flaskListener = flaskListener;
         this.rollbackListener = rollbackListener;
         this.copperBlockListener = copperBlockListener;
+        this.caviarListener = caviarListener;
         this.menuKey = new NamespacedKey(plugin, "f8_menu");
     }
 
@@ -205,41 +208,32 @@ public class F8Command implements CommandExecutor, Listener {
         player.openInventory(inventory);
     }
 
+    static final List<String> ITEM_CATALOG = List.of("water_flask", "poison_flask", "red_caviar", "black_caviar",
+            "empty_cod", "empty_salmon", "caviar_sandwich_red", "caviar_sandwich_black");
+
+    private ItemStack catalogItem(String id) {
+        return switch (id) {
+            case "water_flask" -> flaskListener.createWaterFlask();
+            case "poison_flask" -> flaskListener.createPoisonFlask();
+            case "red_caviar" -> caviarListener.createRedCaviar();
+            case "black_caviar" -> caviarListener.createBlackCaviar();
+            case "empty_cod" -> caviarListener.createDepletedFish(Material.COD);
+            case "empty_salmon" -> caviarListener.createDepletedFish(Material.SALMON);
+            case "caviar_sandwich_red" -> caviarListener.createCaviarSandwich("red");
+            case "caviar_sandwich_black" -> caviarListener.createCaviarSandwich("black");
+            default -> throw new IllegalArgumentException("Неизвестный предмет каталога");
+        };
+    }
+
     private void openItemMenu(Player player) {
-        Inventory inventory = Bukkit.createInventory(
-                null,
-                27,
-                ITEM_TITLE
-        );
-
+        Inventory inventory = Bukkit.createInventory(null, 36, ITEM_TITLE);
         fill(inventory);
-
-        inventory.setItem(
-                11,
-                createTaggedItem(
-                        flaskListener.createWaterFlask(),
-                        "water_flask"
-                )
-        );
-
-        inventory.setItem(
-                15,
-                createTaggedItem(
-                        flaskListener.createPoisonFlask(),
-                        "poison_flask"
-                )
-        );
-
-        inventory.setItem(
-                22,
-                createMenuItem(
-                        Material.ARROW,
-                        "§7Назад",
-                        Collections.emptyList(),
-                        "back"
-                )
-        );
-
+        int[] slots = {10, 12, 14, 16, 19, 21, 23, 25};
+        for (int i = 0; i < ITEM_CATALOG.size(); i++) {
+            String id = ITEM_CATALOG.get(i);
+            inventory.setItem(slots[i], createTaggedItem(catalogItem(id), id));
+        }
+        inventory.setItem(31, createMenuItem(Material.ARROW, "§7Назад", Collections.emptyList(), "back"));
         player.openInventory(inventory);
     }
 
@@ -402,6 +396,18 @@ public class F8Command implements CommandExecutor, Listener {
         String id = getId(clicked);
 
         if (id == null) {
+            return;
+        }
+
+        if (!player.hasPermission("f8.admin")) return;
+        if (title.equals(ITEM_TITLE) && ITEM_CATALOG.contains(id)) {
+            Inventory source = event.getView().getTopInventory();
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (player.isOnline() && player.hasPermission("f8.admin") && player.getOpenInventory().getTopInventory() == source) {
+                    giveItem(player, catalogItem(id)); // Настоящий предмет с игровыми PDC/едой, без метки кнопки меню.
+                    player.closeInventory();
+                }
+            });
             return;
         }
 

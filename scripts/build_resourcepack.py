@@ -94,6 +94,16 @@ def validate() -> dict[str, bytes]:
                     texture = f"assets/f8resurs/textures/{ref.split(':', 1)[1]}.png"
                     assert texture in files, f"Missing texture: {texture}"
                     assert files[texture].startswith(b"\x89PNG\r\n\x1a\n"), f"Not a PNG: {texture}"
+    # Custom profile glyphs are images, and must stay available for transparent UI fades.
+    for name, contents in files.items():
+        if name.startswith("assets/f8resurs/font/") and name.endswith(".json"):
+            for provider in json.loads(contents)["providers"]:
+                if provider["type"] != "bitmap":
+                    continue
+                namespace, texture = provider["file"].split(":", 1)
+                assert f"assets/{namespace}/textures/{texture}" in files, f"Missing font texture: {texture}"
+                assert provider["ascent"] <= provider["height"]
+
     # GUI medals must ship together with their item definitions (native PNGs can be replaced).
     for metal in ("copper", "silver", "gold"):
         name = f"medal_{metal}"

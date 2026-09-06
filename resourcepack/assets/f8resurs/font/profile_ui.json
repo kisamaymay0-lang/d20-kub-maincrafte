@@ -1,0 +1,49 @@
+{
+  "providers": [
+    {
+      "type": "bitmap",
+      "file": "f8resurs:gui/profile_like.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue101"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:gui/profile_dislike.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue102"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/medal_copper.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue103"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/medal_silver.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue104"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/medal_gold.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue105"
+      ]
+    }
+  ]
+}

@@ -9,7 +9,6 @@ import org.bukkit.Color;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.entity.Display;
-import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.event.inventory.InventoryType;
@@ -39,10 +38,14 @@ final class ProfileCards {
     private static final class Card {
         UUID target;
         ProfilePanelGeometry.Frame frame;
+        ProfilePanelGeometry.Frame attachedFrame;
+        Vector3d attachedFeet;
         ProfilePanelGeometry.Frame rendered;
         ProfilePanelGeometry.Rect tooltipRect;
         TextDisplay background, body, footer, tooltip;
-        ItemDisplay medal;
+        TextDisplay medal;
+        final Set<Display> awaitingShow = new HashSet<>();
+        int likes, dislikes;
         ProfileMedal latest;
         final SkyFade fade = new SkyFade();
         final SkyFade tipFade = new SkyFade();
@@ -111,8 +114,14 @@ final class ProfileCards {
                 FluidCollisionMode.NEVER, true) == null;
     }
 
-    private ProfilePanelGeometry.Frame frame(Player viewer, Player target) {
-        return ProfilePanelGeometry.beside(point(viewer.getEyeLocation()), point(target.getLocation()), target.getWidth(), target.getHeight());
+    private ProfilePanelGeometry.Frame frame(Card card, Player viewer, Player target) {
+        Vector3d feet = point(target.getLocation());
+        if (card.attachedFrame == null) {
+            card.attachedFeet = new Vector3d(feet);
+            card.attachedFrame = ProfilePanelGeometry.beside(point(viewer.getEyeLocation()), feet, target.getWidth(), target.getHeight());
+        }
+        // Ориентация и сторона фиксируются до закрытия. Следуют только координаты владельца.
+        return card.attachedFrame.translated(feet.sub(card.attachedFeet));
     }
 
     private void scan(Player viewer, int tick) {
@@ -127,7 +136,7 @@ final class ProfileCards {
         boolean retained = false;
         Player current = card == null ? null : Bukkit.getPlayer(card.target);
         if (card != null && validTarget(viewer, current)) {
-            card.frame = frame(viewer, current);
+            card.frame = frame(card, viewer, current);
             ProfilePanelGeometry.Hit hit = card.frame.intersect(point(eye), point(eye.getDirection()), range + 4);
             // Небольшая невидимая перемычка закрывает зазор между телом и карточкой.
             ProfilePanelGeometry.Rect panel = card.frame.focusBounds();
@@ -151,7 +160,7 @@ final class ProfileCards {
                     card.target = target.getUniqueId();
                     cards.put(id, card);
                 }
-                card.frame = frame(viewer, target);
+                card.frame = frame(card, viewer, target);
                 card.lastFocused = tick;
                 card.visible = true;
                 card.showTip = false;
@@ -161,6 +170,22 @@ final class ProfileCards {
                 card.showTip = false;
             }
         }
+    }
+
+    record Click(UUID owner, ProfilePanelGeometry.Action action) { }
+
+    boolean hasCard(UUID player) { return cards.containsKey(player); }
+
+    Click click(Player viewer) {
+        Card card = cards.get(viewer.getUniqueId());
+        if (card == null || !card.visible || card.fade.value() < 0.05 || !ready(viewer)) return null;
+        Player target = Bukkit.getPlayer(card.target);
+        if (!validTarget(viewer, target)) return null;
+        Location eye = viewer.getEyeLocation();
+        var hit = card.frame.intersect(point(eye), point(eye.getDirection()), range + 4);
+        if (hit == null || !card.frame.bounds().contains(hit.x(), hit.y())
+                || !clearRay(viewer, eye, hit.point()) || !clearRay(viewer, eye, point(target.getEyeLocation()))) return null;
+        return new Click(card.target, card.frame.action(hit, card.likes, card.dislikes));
     }
 
     private void tick() {
@@ -188,14 +213,14 @@ final class ProfileCards {
             boolean visible = card.visible && ready(viewer) && validTarget(viewer, target);
             try {
                 if (visible) {
-                    card.frame = frame(viewer, target); // Только координаты, не поворот прицела.
+                    card.frame = frame(card, viewer, target); // Только координаты, не поворот прицела.
                     ProfileData data = profiles.apply(target);
                     boolean recreated = card.background == null || !card.background.isValid() || card.body == null || !card.body.isValid() || card.footer == null || !card.footer.isValid();
                     if (recreated) {
                         remove(card);
-                        card.background = text(viewer, card.frame, Component.text(" "));
-                        card.body = text(viewer, card.frame, Component.empty());
-                        card.footer = text(viewer, card.frame, Component.empty());
+                        card.background = text(viewer, card, Component.text(" "));
+                        card.body = text(viewer, card, Component.empty());
+                        card.footer = text(viewer, card, Component.empty());
                         card.fade.reset(); card.tipFade.reset(); card.lastOpacity = -1; card.lastTipOpacity = -1;
                         card.revision = -1; card.rendered = null;
                     }
@@ -203,7 +228,7 @@ final class ProfileCards {
                     if (!card.frame.approximately(card.rendered)) layout(viewer, card);
                     if (card.showTip && card.latest != null && (card.tooltip == null || !card.tooltip.isValid())) {
                         List<Component> lines = items.tooltip(card.latest);
-                        card.tooltip = text(viewer, card.frame, join(lines));
+                        card.tooltip = text(viewer, card, join(lines));
                         card.tooltip.setLineWidth(152);
                         card.tipLines = lines.stream().mapToInt(line -> Math.max(1, (ProfileText.length(PlainTextComponentSerializer.plainText().serialize(line)) + 19) / 20)).sum();
                         card.tooltipScale = Math.min(card.frame.height() * 0.23, card.frame.height() / (card.tipLines * 0.25 + 0.03));
@@ -218,9 +243,8 @@ final class ProfileCards {
                 if (!visible && card.fade.hidden()) { remove(card); iterator.remove(); continue; }
                 if (alpha != card.lastOpacity) {
                     card.lastOpacity = alpha;
-                    opacity(card.body, alpha); opacity(card.footer, alpha);
+                    opacity(card.body, alpha); opacity(card.footer, alpha); opacity(card.medal, alpha);
                     if (card.background != null && card.background.isValid()) card.background.setBackgroundColor(Color.fromARGB((int) (alpha * 190), 18, 20, 24));
-                    if (card.medal != null && card.medal.isValid()) poseIcon(viewer, card, Math.max(0.001, alpha));
                 }
                 double tipAlpha = card.tipFade.advance(visible && card.showTip && card.latest != null, 2, 4);
                 if (card.tooltip != null && card.tooltip.isValid() && tipAlpha != card.lastTipOpacity) {
@@ -229,6 +253,16 @@ final class ProfileCards {
                     card.tooltip.setBackgroundColor(Color.fromARGB((int) (tipAlpha * 220), 18, 20, 24));
                     if (card.tipFade.hidden()) { card.tooltip.remove(); card.tooltip = null; card.tooltipRect = null; }
                 }
+                // Пакет появления отправляется только после окончательных координат и масштаба.
+                for (Display display : card.awaitingShow) {
+                    if (display.isValid()) {
+                        display.setTeleportDuration(2);
+                        display.setInterpolationDuration(0);
+                        viewer.showEntity(plugin, display);
+                        display.setInterpolationDuration(2);
+                    }
+                }
+                card.awaitingShow.clear();
             } catch (RuntimeException ex) { remove(card); iterator.remove(); report(ex); }
         }
     }
@@ -241,10 +275,11 @@ final class ProfileCards {
         card.bodyLines = body.size();
         card.body.text(join(body));
         ProfileMedal latest = data.latestMedal();
-        Component footer = ProfileItems.text("Лайки ", NamedTextColor.GRAY).append(ProfileItems.text(Integer.toString(data.likes()), NamedTextColor.GREEN))
-                .append(ProfileItems.text("  ·  Дизлайки ", NamedTextColor.GRAY)).append(ProfileItems.text(Integer.toString(data.dislikes()), NamedTextColor.RED))
-                .append(Component.text("\n\n\n"))
-                .append(ProfileItems.text(latest == null ? "Последняя медаль: нет" : "Последняя медаль:", NamedTextColor.GRAY));
+        card.likes = data.likes(); card.dislikes = data.dislikes();
+        Component footer = ProfileIcons.votes(data.likes(), data.dislikes())
+                .append(Component.text("\n\n"))
+                .append(ProfileItems.text(latest == null ? "Последняя медаль: нет" : "Последняя медаль:", NamedTextColor.GRAY))
+                .append(Component.text("\n\n")).append(ProfileIcons.openProfile());
         card.footer.text(footer);
         if (!java.util.Objects.equals(card.latest, latest) || card.style != items.styleRevision()
                 || (latest != null && (card.medal == null || !card.medal.isValid()))) {
@@ -256,14 +291,9 @@ final class ProfileCards {
                 card.medal = null;
             } else {
                 if (card.medal == null || !card.medal.isValid()) {
-                    card.medal = viewer.getWorld().spawn(location(viewer, card.frame.point(0, 0, 0.025)), ItemDisplay.class, display -> {
-                        configure(display);
-                        display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.GUI);
-                        display.setItemStack(items.medal(latest, List.of()));
-                        display.setTransformation(new Transformation(new Vector3f(), card.frame.rotation(), new Vector3f(0.001f), new Quaternionf()));
-                    });
-                    viewer.showEntity(plugin, card.medal);
-                } else card.medal.setItemStack(items.medal(latest, List.of()));
+                    card.medal = text(viewer, card, ProfileIcons.medal(latest.metal()));
+                } else card.medal.text(ProfileIcons.medal(latest.metal()));
+                opacity(card.medal, card.fade.value());
             }
         }
         card.revision = data.revision(); card.style = items.styleRevision();
@@ -279,9 +309,9 @@ final class ProfileCards {
         double bodyScale = Math.min(h * 0.265, h * 0.63 / Math.max(0.25, card.bodyLines * 0.25));
         pose(viewer, card.body, frame, -bodyScale * 0.025, h / 2 - h * 0.045 - card.bodyLines * 0.25 * bodyScale,
                 0.015, new Vector3f((float) bodyScale));
-        double footerScale = h * 0.20;
-        pose(viewer, card.footer, frame, -footerScale * 0.025, -h / 2 + h * 0.075, 0.015, new Vector3f((float) footerScale));
-        poseIcon(viewer, card, Math.max(0.001, card.fade.value()));
+        double footerScale = frame.footerScale();
+        pose(viewer, card.footer, frame, -footerScale * 0.025, frame.footerBottom(), 0.015, new Vector3f((float) footerScale));
+        poseIcon(viewer, card);
         if (card.tooltip != null && card.tooltip.isValid() && card.tooltipRect != null) {
             var rect = card.tooltipRect;
             pose(viewer, card.tooltip, frame, rect.x() - card.tooltipScale * 0.025,
@@ -290,10 +320,13 @@ final class ProfileCards {
         card.rendered = frame;
     }
 
-    private void poseIcon(Player viewer, Card card, double visibility) {
+    private void poseIcon(Player viewer, Card card) {
         if (card.medal == null || !card.medal.isValid()) return;
         var rect = card.frame.medal();
-        pose(viewer, card.medal, card.frame, rect.x(), rect.y(), 0.025, new Vector3f((float) (card.frame.iconSize() * visibility)));
+        // Глиф 8×8 px: размер фиксирован; проявление выполняется только через opacity.
+        double scale = card.frame.iconSize() / 0.2;
+        pose(viewer, card.medal, card.frame, rect.x() - 0.0125 * scale, rect.y() - 0.15 * scale,
+                0.025, new Vector3f((float) scale));
     }
 
     private void pose(Player viewer, Display display, ProfilePanelGeometry.Frame frame, double x, double y, double depth, Vector3f scale) {
@@ -304,8 +337,8 @@ final class ProfileCards {
         display.setTransformation(new Transformation(new Vector3f(), frame.rotation(), scale, new Quaternionf()));
     }
 
-    private TextDisplay text(Player viewer, ProfilePanelGeometry.Frame frame, Component value) {
-        TextDisplay display = viewer.getWorld().spawn(location(viewer, frame.center()), TextDisplay.class, entity -> {
+    private TextDisplay text(Player viewer, Card card, Component value) {
+        TextDisplay display = viewer.getWorld().spawn(location(viewer, card.frame.center()), TextDisplay.class, entity -> {
             configure(entity);
             entity.setDefaultBackground(false); entity.setBackgroundColor(CLEAR);
             entity.setTextOpacity((byte) 4); // Значения 0..3 некоторые версии клиента трактуют как непрозрачные.
@@ -313,7 +346,7 @@ final class ProfileCards {
             entity.setLineWidth(160); entity.setAlignment(TextDisplay.TextAlignment.CENTER);
             entity.text(value);
         });
-        viewer.showEntity(plugin, display);
+        card.awaitingShow.add(display);
         return display;
     }
 
@@ -321,7 +354,7 @@ final class ProfileCards {
         display.setVisibleByDefault(false); display.setPersistent(false);
         display.setBillboard(Display.Billboard.FIXED);
         display.setShadowRadius(0); display.setShadowStrength(0); display.setBrightness(LIGHT);
-        display.setTeleportDuration(2); display.setInterpolationDuration(2);
+        display.setTeleportDuration(0); display.setInterpolationDuration(2);
     }
 
     private static Location location(Player viewer, Vector3d point) { return new Location(viewer.getWorld(), point.x, point.y, point.z, 0, 0); }
@@ -341,6 +374,7 @@ final class ProfileCards {
         if (card.tooltip != null) card.tooltip.remove();
         card.background = null; card.body = null; card.footer = null; card.medal = null; card.tooltip = null;
         card.latest = null; card.tooltipRect = null;
+        card.awaitingShow.clear();
     }
     private void report(RuntimeException ex) {
         if (!errorReported) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не удалось показать карточку профиля", ex); errorReported = true; }

@@ -1,6 +1,7 @@
 package com.yourserver.adaptation;
 
 import io.papermc.paper.event.player.AsyncChatEvent;
+import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
@@ -15,6 +16,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -68,7 +71,6 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         final AtomicBoolean processing = new AtomicBoolean();
     }
 
-    private record OpenStamp(UUID target, int tick) { }
 
     private final JavaPlugin plugin;
     private final ProfileStorage storage;
@@ -78,7 +80,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private final ProfileCards cards;
     private final BukkitTask maintenance;
     private final Map<UUID, Menu> menus = new HashMap<>();
-    private final Map<UUID, OpenStamp> opened = new HashMap<>();
+    private final Map<UUID, Integer> cardClicks = new HashMap<>();
+    private final Map<UUID, Integer> rightClicks = new HashMap<>();
     private final Set<UUID> queued = new HashSet<>();
     private final ConcurrentHashMap<UUID, Editing> editing = new ConcurrentHashMap<>();
     private ToLongFunction<UUID> constellationMilestone = ignored -> 0L;
@@ -321,22 +324,61 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         if (event.getInventory().getHolder() instanceof Menu menu) menus.remove(event.getPlayer().getUniqueId(), menu);
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void interact(PlayerInteractEntityEvent event) { inspect(event); }
+    // ПКМ больше не открывает чужой профиль. Отмечаем его только для фильтрации
+    // сопутствующей анимации руки, которую Paper иногда преобразует в LEFT_CLICK_AIR.
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void interact(PlayerInteractEntityEvent event) { rememberRightClick(event.getPlayer()); }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void interactAt(PlayerInteractAtEntityEvent event) { inspect(event); }
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void interactAt(PlayerInteractAtEntityEvent event) { rememberRightClick(event.getPlayer()); }
 
-    private void inspect(PlayerInteractEntityEvent event) {
-        Player viewer = event.getPlayer();
-        if (!viewer.isSneaking() || !(event.getRightClicked() instanceof Player target) || !ProfileCards.canInspect(viewer, target)) return;
-        event.setCancelled(true);
+    private void rememberRightClick(Player player) {
+        if (cards.hasCard(player.getUniqueId())) rightClicks.put(player.getUniqueId(), Bukkit.getCurrentTick());
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void clickCard(PlayerInteractEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) return;
+        if (event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK) {
+            rememberRightClick(event.getPlayer()); return;
+        }
+        if (event.getAction() != Action.LEFT_CLICK_AIR && event.getAction() != Action.LEFT_CLICK_BLOCK) return;
+        Integer right = rightClicks.get(event.getPlayer().getUniqueId());
+        if (right != null && Integer.toUnsignedLong(Bukkit.getCurrentTick() - right) <= 1) return;
+        if (useCard(event.getPlayer())) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void cardAttack(PrePlayerAttackEntityEvent event) {
+        // Перехват ДО урона: ЛКМ по карточке не бьёт игрока и не запускает его боевые чары.
+        if (useCard(event.getPlayer())) event.setCancelled(true);
+    }
+
+    private boolean useCard(Player player) {
+        if (stopping) return false;
+        ProfileCards.Click hit = cards.click(player);
+        if (hit == null) return false;
         int tick = Bukkit.getCurrentTick();
-        OpenStamp previous = opened.get(viewer.getUniqueId());
-        if (previous != null && previous.target.equals(target.getUniqueId()) && Integer.toUnsignedLong(tick - previous.tick) < 4) return;
-        opened.put(viewer.getUniqueId(), new OpenStamp(target.getUniqueId(), tick));
-        open(viewer, target.getUniqueId(), Screen.PROFILE, 0, null);
+        Integer previous = cardClicks.get(player.getUniqueId());
+        if (previous != null && Integer.toUnsignedLong(tick - previous) < 4) return true;
+        cardClicks.put(player.getUniqueId(), tick);
+        if (hit.action() == ProfilePanelGeometry.Action.NONE) return true;
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (stopping || !player.isOnline()) return;
+            Player target = Bukkit.getPlayer(hit.owner());
+            if (target == null || !ProfileCards.canInspect(player, target)) return;
+            if (hit.action() == ProfilePanelGeometry.Action.OPEN) {
+                clickSound(player);
+                open(player, hit.owner(), Screen.PROFILE, 0, null);
+            } else {
+                try {
+                    ProfileData data = profile(target);
+                    ProfileData.Vote vote = hit.action() == ProfilePanelGeometry.Action.LIKE ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE;
+                    if (data.vote(player.getUniqueId(), vote)) { storage.changed(data.owner); refreshDetails(data.owner); clickSound(player); }
+                } catch (RuntimeException ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не удалось обработать нажатие карточки", ex); }
+            }
+        });
+        return true;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -405,7 +447,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
     @EventHandler public void quit(PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId();
-        editing.remove(id); menus.remove(id); opened.remove(id); queued.remove(id);
+        editing.remove(id); menus.remove(id); cardClicks.remove(id); rightClicks.remove(id); queued.remove(id);
         cards.quit(id); storage.unpin(id);
     }
 
@@ -513,7 +555,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     private static void help(CommandSender sender) {
-        sender.sendMessage("§6/profile §7— свой профиль; Shift + ПКМ по игроку — чужой.");
+        sender.sendMessage("§6/profile §7— свой профиль; чужой — ЛКМ по «Открыть профиль» в карточке.");
         sender.sendMessage("§7/profile cancel — отменить ввод описания.");
         if (admin(sender)) {
             sender.sendMessage("§6/profile medal give <игрок или UUID> <copper|silver|gold> <название> | <заслуга 1> | <заслуга 2>");
@@ -552,6 +594,6 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             Player player = Bukkit.getPlayer(menu.viewer);
             if (player != null && player.getOpenInventory().getTopInventory() == menu.inventory) player.closeInventory();
         }
-        menus.clear(); queued.clear(); opened.clear(); storage.shutdown();
+        menus.clear(); queued.clear(); cardClicks.clear(); rightClicks.clear(); storage.shutdown();
     }
 }

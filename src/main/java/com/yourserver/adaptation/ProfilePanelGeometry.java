@@ -7,6 +7,7 @@ import org.joml.Vector3f;
 
 /** Общая геометрия картинки и наведения. Направление курсора никогда не двигает саму панель. */
 final class ProfilePanelGeometry {
+    enum Action { NONE, LIKE, DISLIKE, OPEN }
     record Rect(double x, double y, double width, double height) {
         boolean contains(double px, double py) {
             return Math.abs(px - x) <= width / 2 + 0.025 && Math.abs(py - y) <= height / 2 + 0.025;
@@ -31,7 +32,30 @@ final class ProfilePanelGeometry {
             return new Rect((left + rightEdge) / 2, (bottom + top) / 2, Math.max(0, rightEdge - left), top - bottom);
         }
         double iconSize() { return height * 0.17; }
-        Rect medal() { return new Rect(width / 2 - iconSize() / 2 - height * 0.055, -height / 2 + height * 0.12, iconSize(), iconSize()); }
+        double footerScale() { return height * 0.18; }
+        double footerBottom() { return -height / 2 + height * 0.055; }
+        private double pixel() { return footerScale() * 0.025; }
+        Rect medal() { return new Rect(width / 2 - iconSize() / 2 - height * 0.055,
+                footerBottom() + 25.5 * pixel(), iconSize(), iconSize()); }
+        Rect openProfile() { return new Rect(0, footerBottom() + 5.5 * pixel(), 100 * pixel(), 10 * pixel()); }
+        Rect vote(boolean like, int likes, int dislikes) {
+            // Цифра: 6 px, пробел: 4 px, значок: 8 px + 1 px advance; разделитель: 18 px.
+            double left = Integer.toString(likes).length() * 6 + 13;
+            double rightWidth = Integer.toString(dislikes).length() * 6 + 13;
+            double total = left + 18 + rightWidth;
+            return new Rect((like ? -total / 2 + left / 2 : total / 2 - rightWidth / 2) * pixel(),
+                    footerBottom() + 45.5 * pixel(), (like ? left : rightWidth) * pixel(), 10 * pixel());
+        }
+        Action action(Hit hit, int likes, int dislikes) {
+            if (hit == null) return Action.NONE;
+            if (openProfile().contains(hit.x(), hit.y())) return Action.OPEN;
+            if (vote(true, likes, dislikes).contains(hit.x(), hit.y())) return Action.LIKE;
+            if (vote(false, likes, dislikes).contains(hit.x(), hit.y())) return Action.DISLIKE;
+            return Action.NONE;
+        }
+        Frame translated(Vector3d offset) {
+            return new Frame(new Vector3d(center).add(offset), new Vector3d(right), new Vector3d(normal), width, height);
+        }
         Rect tooltip(double width, double height) { return new Rect(this.width / 2 + 0.06 + width / 2, 0, width, height); }
         Hit intersect(Vector3d eye, Vector3d direction, double maxDistance) {
             if (!eye.isFinite() || !direction.isFinite() || direction.lengthSquared() < 1e-12) return null;

@@ -139,7 +139,8 @@ public void onEnable() {
                     diceRollListener,
                     flaskListener,
                     rollbackListener,
-                    copperBlockListener
+                    copperBlockListener,
+                    caviarListener
             );
 
     getServer().getPluginManager().registerEvents(

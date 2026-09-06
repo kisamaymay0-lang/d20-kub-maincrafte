@@ -66,4 +66,32 @@ class ProfilePanelGeometryTest {
         assertEquals(icon.x(), hit.x(), 1e-6);
         assertEquals(icon.y(), hit.y(), 1e-6);
     }
+    @Test
+    void attachedPanelMovesWithItsOwnerWithoutOrbitingOrChangingOrientation() {
+        var initial = ProfilePanelGeometry.beside(eye, feet, 0.6, 1.8);
+        Vector3d movement = new Vector3d(3, 0.5, 2);
+        var moved = initial.translated(movement);
+        assertEquals(initial.normal(), moved.normal());
+        assertEquals(initial.right(), moved.right());
+        assertEquals(new Vector3d(initial.center()).add(movement), moved.center());
+        assertEquals(initial.height(), moved.height());
+        // Позиция нового наблюдателя намеренно не участвует в переносе закреплённой панели.
+        var recomputed = ProfilePanelGeometry.beside(new Vector3d(4, 65, 0), new Vector3d(feet).add(movement), 0.6, 1.8);
+        assertNotEquals(recomputed.normal(), moved.normal());
+    }
+
+    @Test
+    void openAndVoteRegionsMatchTheirRowsAndDoNotOverlap() {
+        var panel = ProfilePanelGeometry.beside(eye, feet, 0.6, 1.8);
+        var open = panel.openProfile();
+        var like = panel.vote(true, 6, 0);
+        var dislike = panel.vote(false, 6, 0);
+        assertEquals(ProfilePanelGeometry.Action.OPEN, panel.action(new ProfilePanelGeometry.Hit(open.x(), open.y(), 4, new Vector3d()), 6, 0));
+        assertEquals(ProfilePanelGeometry.Action.LIKE, panel.action(new ProfilePanelGeometry.Hit(like.x(), like.y(), 4, new Vector3d()), 6, 0));
+        assertEquals(ProfilePanelGeometry.Action.DISLIKE, panel.action(new ProfilePanelGeometry.Hit(dislike.x(), dislike.y(), 4, new Vector3d()), 6, 0));
+        assertEquals(ProfilePanelGeometry.Action.NONE, panel.action(new ProfilePanelGeometry.Hit(0, panel.height() / 3, 4, new Vector3d()), 6, 0));
+        assertFalse(like.contains(dislike.x(), dislike.y()));
+        assertFalse(open.contains(panel.medal().x(), panel.medal().y()));
+    }
+
 }
