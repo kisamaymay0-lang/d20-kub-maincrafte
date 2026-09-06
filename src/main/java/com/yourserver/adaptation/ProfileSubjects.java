@@ -116,7 +116,7 @@ final class ProfileSubjects implements Listener {
         at.setYaw(owner.getLocation().getYaw() + 180); at.setPitch(0);
         Mannequin entity = owner.getWorld().spawn(at, Mannequin.class, mannequin -> {
             mannequin.setProfile(ResolvableProfile.resolvableProfile(owner.getPlayerProfile()));
-            mannequin.setSkinParts(owner.getSkinParts());
+            mannequin.setSkinParts(owner.getClientOption(com.destroystokyo.paper.ClientOption.SKIN_PARTS));
             mannequin.setDescription(null);
             mannequin.setImmovable(true); mannequin.setGravity(false);
             mannequin.setInvulnerable(true); mannequin.setSilent(true); mannequin.setCollidable(false);
