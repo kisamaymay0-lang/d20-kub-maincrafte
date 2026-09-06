@@ -108,7 +108,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         for (Player player : Bukkit.getOnlinePlayers()) join(player);
     }
 
-    void constellationMilestone(ToLongFunction<UUID> lookup) { constellationMilestone = lookup; }
+    void constellationMilestone(ToLongFunction<UUID> lookup) {
+        constellationMilestone = lookup;
+        // Зафиксировать старый результат до первого нового игрового события после обновления.
+        for (Player player : Bukkit.getOnlinePlayers()) join(player);
+    }
 
     private ProfileData profile(Player player) { return profile(player.getUniqueId(), player.getName()); }
 
@@ -117,11 +121,14 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         Player online = Bukkit.getPlayer(owner);
         if (online != null && data.rename(online.getName())) storage.changed(owner);
         long earnedAt = constellationMilestone.applyAsLong(owner);
-        if (earnedAt > 0 && !data.hasReward(ProfileMedal.FIRST_CONSTELLATION)) {
+        if (earnedAt > data.astronomyProgress()) {
             storage.prepareMedalChange(owner);
-            if (ProfileAwards.firstConstellation(data, earnedAt, medalSettings)) {
-                storage.changed(owner);
-                if (!storage.flushBlocking(owner)) throw new IllegalStateException("Медали не сохранены; примените /profile medal reload");
+            long previous = data.astronomyProgress();
+            boolean legacyHistory = previous == 0 && data.hasReward(ProfileMedal.FIRST_CONSTELLATION);
+            boolean awarded = ProfileAwards.firstConstellation(data, earnedAt, medalSettings);
+            if (data.astronomyProgress() != previous) storage.changed(owner);
+            if ((awarded || legacyHistory) && !storage.flushBlocking(owner)) {
+                throw new IllegalStateException("Медали не сохранены; примените /profile medal reload");
             }
         }
         if (online != null) announcePending(online, data);

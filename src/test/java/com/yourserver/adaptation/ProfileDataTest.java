@@ -131,4 +131,33 @@ class ProfileDataTest {
         assertTrue(data.describe(owner, "🚀".repeat(160)));
         assertEquals(160, ProfileText.length(data.description()));
     }
+    @Test
+    void removedAstronomyCanBeEarnedAgainOnlyForANewCompletion() {
+        ProfileData data = new ProfileData(owner, "Player");
+        assertTrue(ProfileAwards.firstConstellation(data, 1000));
+        UUID first = data.latestMedal().id();
+        data.markNotified(data.latestMedal());
+        data.revoke(first);
+        assertFalse(ProfileAwards.firstConstellation(data, 1000));
+        assertTrue(data.medals().isEmpty());
+        assertTrue(ProfileAwards.firstConstellation(data, 2000));
+        assertNotEquals(first, data.latestMedal().id());
+        assertEquals(2000, data.latestMedal().awardedAt());
+        assertTrue(data.needsNotification(data.latestMedal()));
+        assertFalse(ProfileAwards.firstConstellation(data, 3000));
+        assertEquals(1, data.medals().size());
+        data.revoke(data.latestMedal().id());
+        assertFalse(ProfileAwards.firstConstellation(data, 3000));
+        assertTrue(ProfileAwards.firstConstellation(data, 4000));
+    }
+
+    @Test
+    void legacyPermanentHistoryBecomesAProgressCheckpointInsteadOfALifetimeBan() {
+        ProfileData data = new ProfileData(owner, "Player");
+        data.restoreHistory(java.util.Set.of(ProfileMedal.FIRST_CONSTELLATION), java.util.Map.of());
+        assertFalse(ProfileAwards.firstConstellation(data, 1000));
+        assertEquals(1000, data.astronomyProgress());
+        assertTrue(ProfileAwards.firstConstellation(data, 2000));
+    }
+
 }

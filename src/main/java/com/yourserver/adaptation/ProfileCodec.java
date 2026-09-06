@@ -46,6 +46,7 @@ final class ProfileCodec {
         YamlConfiguration yaml = identity(data, version);
         yaml.set("description", data.description());
         data.votes().forEach((voter, vote) -> yaml.set("votes." + voter, vote.name()));
+        yaml.set("medal-history.astronomy-progress", data.astronomyProgress());
         yaml.set("medal-history.claimed", new ArrayList<>(data.rewardHistory()));
         data.notificationHistory().forEach((id, when) -> yaml.set("medal-history.announced." + id, when));
         List<String> slots = new ArrayList<>();
@@ -92,6 +93,7 @@ final class ProfileCodec {
         ConfigurationSection history = yaml.getConfigurationSection("medal-history.announced");
         if (history != null) for (String id : history.getKeys(false)) announced.put(UUID.fromString(id), history.getLong(id));
         data.restoreHistory(yaml.getStringList("medal-history.claimed"), announced);
+        data.astronomyProgress(yaml.getLong("medal-history.astronomy-progress", 0));
         if (version == 1) data.replaceMedals(readMedals(yaml));
         if (!yaml.isList("display")) throw new IllegalArgumentException("Неверные слоты профиля");
         List<?> display = yaml.getList("display", List.of());

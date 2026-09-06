@@ -15,7 +15,6 @@ final class MedalPresentation {
     static List<Component> lore(ProfileMedal medal, MedalSettings settings, DateTimeFormatter date, List<String> hints) {
         List<Component> lines = new ArrayList<>();
         lines.add(ProfileItems.text(settings.style(medal.metal()).label(), NamedTextColor.GRAY));
-        lines.add(Component.empty());
         for (int i = 0; i < medal.reasons().size(); i++) {
             if (i > 0) lines.add(Component.empty());
             appendReason(lines, medal.reasons().get(i), 36);
@@ -33,7 +32,6 @@ final class MedalPresentation {
         List<Component> lines = new ArrayList<>();
         lines.add(settings.title(medal.title(), medal.metal()));
         lines.add(ProfileItems.text(settings.style(medal.metal()).label(), NamedTextColor.GRAY));
-        lines.add(Component.empty());
         int shown = Math.min(3, medal.reasons().size());
         for (int i = 0; i < shown; i++) {
             String reason = medal.reasons().get(i);

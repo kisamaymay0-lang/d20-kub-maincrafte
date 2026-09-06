@@ -231,7 +231,7 @@ final class ProfileCards {
                         card.tooltip = text(viewer, card, join(lines));
                         card.tooltip.setLineWidth(152);
                         card.tipLines = lines.stream().mapToInt(line -> Math.max(1, (ProfileText.length(PlainTextComponentSerializer.plainText().serialize(line)) + 19) / 20)).sum();
-                        card.tooltipScale = Math.min(card.frame.height() * 0.23, card.frame.height() / (card.tipLines * 0.25 + 0.03));
+                        card.tooltipScale = Math.min(card.frame.height() * 0.28, card.frame.height() * 1.12 / (card.tipLines * 0.25 + 0.03));
                         double tipWidth = 154 * 0.025 * card.tooltipScale;
                         double tipHeight = (card.tipLines * 10 + 1) * 0.025 * card.tooltipScale;
                         card.tooltipRect = card.frame.tooltip(tipWidth, tipHeight);
@@ -277,9 +277,9 @@ final class ProfileCards {
         ProfileMedal latest = data.latestMedal();
         card.likes = data.likes(); card.dislikes = data.dislikes();
         Component footer = ProfileIcons.votes(data.likes(), data.dislikes())
-                .append(Component.text("\n\n"))
+                .append(Component.newline())
                 .append(ProfileItems.text(latest == null ? "Последняя медаль: нет" : "Последняя медаль:", NamedTextColor.GRAY))
-                .append(Component.text("\n\n")).append(ProfileIcons.openProfile());
+                .append(Component.newline()).append(ProfileIcons.openProfile());
         card.footer.text(footer);
         if (!java.util.Objects.equals(card.latest, latest) || card.style != items.styleRevision()
                 || (latest != null && (card.medal == null || !card.medal.isValid()))) {

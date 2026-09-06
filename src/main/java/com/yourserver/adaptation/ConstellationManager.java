@@ -1051,7 +1051,8 @@ public class ConstellationManager implements Listener, CommandExecutor {
         pp.completed.add(c.id);
         // Маркер создаётся только при НОВОМ завершении 9.3+, не из старого списка completed.
         // Сохраняется вместе с прогрессом: выдачу медали можно восстановить после сбоя.
-        if (pp.profileMedalEarnedAt == 0) pp.profileMedalEarnedAt = System.currentTimeMillis();
+        // Каждый новый результат — отдельное право повторно заработать изъятую медаль.
+        pp.profileMedalEarnedAt = Math.max(System.currentTimeMillis(), pp.profileMedalEarnedAt + 1);
         saveProgress(p.getUniqueId());
         // Редкое завершение сохраняем ДО выдачи награды, как и раньше.
         progressStorage.flushBlocking();

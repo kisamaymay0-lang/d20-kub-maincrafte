@@ -28,6 +28,7 @@ final class ProfileData {
     private int dislikes;
     private long revision;
     private long medalRevision;
+    private long astronomyProgress;
 
     ProfileData(UUID owner, String name) {
         this.owner = Objects.requireNonNull(owner);
@@ -41,6 +42,13 @@ final class ProfileData {
     int dislikes() { return dislikes; }
     long revision() { return revision; }
     long medalRevision() { return medalRevision; }
+    long astronomyProgress() { return astronomyProgress; }
+    void astronomyProgress(long value) {
+        if (astronomyProgress != value) { astronomyProgress = Math.max(0, value); revision++; }
+    }
+    boolean ownsReward(String source) {
+        return medals.values().stream().anyMatch(medal -> medal.source().equals(source));
+    }
     Set<String> rewardHistory() { return Set.copyOf(rewards); }
     Map<UUID, Long> notificationHistory() { return Map.copyOf(notified); }
     Vote voteBy(UUID voter) { return votes.get(voter); }
@@ -83,7 +91,10 @@ final class ProfileData {
 
     boolean award(ProfileMedal medal) {
         if (medals.containsKey(medal.id())) return false;
-        if (!medal.source().isEmpty() && !rewards.add(medal.source())) return false;
+        if (!medal.source().isEmpty()) {
+            if (ownsReward(medal.source())) return false;
+            rewards.add(medal.source());
+        }
         medals.put(medal.id(), medal);
         if (!notified.containsKey(medal.id())) unannounced.add(medal.id());
         medalRevision++;

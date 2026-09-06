@@ -31,12 +31,12 @@ final class ProfilePanelGeometry {
             double top = Math.max(icon.y() + icon.height() / 2, tip.y() + tip.height() / 2);
             return new Rect((left + rightEdge) / 2, (bottom + top) / 2, Math.max(0, rightEdge - left), top - bottom);
         }
-        double iconSize() { return height * 0.17; }
-        double footerScale() { return height * 0.18; }
-        double footerBottom() { return -height / 2 + height * 0.055; }
+        double iconSize() { return height * 0.20; }
+        double footerScale() { return height * 0.36; }
+        double footerBottom() { return -height / 2 + height * 0.045; }
         private double pixel() { return footerScale() * 0.025; }
         Rect medal() { return new Rect(width / 2 - iconSize() / 2 - height * 0.055,
-                footerBottom() + 25.5 * pixel(), iconSize(), iconSize()); }
+                footerBottom() + 15.5 * pixel(), iconSize(), iconSize()); }
         Rect openProfile() { return new Rect(0, footerBottom() + 5.5 * pixel(), 100 * pixel(), 10 * pixel()); }
         Rect vote(boolean like, int likes, int dislikes) {
             // Цифра: 6 px, пробел: 4 px, значок: 8 px + 1 px advance; разделитель: 18 px.
@@ -44,7 +44,7 @@ final class ProfilePanelGeometry {
             double rightWidth = Integer.toString(dislikes).length() * 6 + 13;
             double total = left + 18 + rightWidth;
             return new Rect((like ? -total / 2 + left / 2 : total / 2 - rightWidth / 2) * pixel(),
-                    footerBottom() + 45.5 * pixel(), (like ? left : rightWidth) * pixel(), 10 * pixel());
+                    footerBottom() + 25.5 * pixel(), Math.max((like ? left : rightWidth) * pixel(), width * 0.19), 8 * pixel());
         }
         Action action(Hit hit, int likes, int dislikes) {
             if (hit == null) return Action.NONE;
@@ -79,7 +79,7 @@ final class ProfilePanelGeometry {
 
     static Frame beside(Vector3d viewerEye, Vector3d feet, double playerWidth, double playerHeight) {
         double height = Math.clamp(playerHeight * 0.9, 0.45, 3.6);
-        double width = Math.clamp(height * 1.2, 0.9, 2.4);
+        double width = Math.clamp(height * 1.48, 0.9, 3.0);
         Vector3d normal = new Vector3d(viewerEye.x - feet.x, 0, viewerEye.z - feet.z);
         if (normal.lengthSquared() < 1e-8) normal.set(0, 0, -1); else normal.normalize();
         Vector3d right = new Vector3d(0, 1, 0).cross(normal).normalize();

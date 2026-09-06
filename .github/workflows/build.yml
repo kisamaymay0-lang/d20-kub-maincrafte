@@ -75,7 +75,7 @@ jobs:
       if: steps.maven.outputs.exit_code == '0'
       uses: actions/upload-artifact@v4
       with:
-        name: f8-plugin-9.5
+        name: f8-plugin-9.6
         path: |
           target/*.jar
           f8resurs-resourcepack.zip

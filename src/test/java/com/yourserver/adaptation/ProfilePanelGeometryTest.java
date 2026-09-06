@@ -94,4 +94,21 @@ class ProfilePanelGeometryTest {
         assertFalse(open.contains(panel.medal().x(), panel.medal().y()));
     }
 
+    @Test
+    void controlsAreLargerWithoutOverlappingOrExtendingOutsideThePanel() {
+        var panel = ProfilePanelGeometry.beside(eye, feet, 0.6, 1.8);
+        assertEquals(panel.height() * 0.36, panel.footerScale(), 1e-9);
+        var like = panel.vote(true, 6, 0);
+        var dislike = panel.vote(false, 6, 0);
+        assertTrue(like.width() > 0.4);
+        assertTrue(panel.openProfile().width() > 1.4);
+        assertTrue(panel.medal().width() > 0.3);
+        assertFalse(like.contains(dislike.x(), dislike.y()));
+        assertFalse(panel.openProfile().contains(panel.medal().x(), panel.medal().y()));
+        for (var rect : java.util.List.of(like, dislike, panel.openProfile(), panel.medal())) {
+            assertTrue(Math.abs(rect.x()) + rect.width() / 2 <= panel.width() / 2);
+            assertTrue(Math.abs(rect.y()) + rect.height() / 2 <= panel.height() / 2);
+        }
+    }
+
 }

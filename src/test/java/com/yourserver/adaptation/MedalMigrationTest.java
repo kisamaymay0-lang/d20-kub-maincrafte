@@ -58,7 +58,7 @@ class MedalMigrationTest {
     }
 
     @Test
-    void revokingAnAutomaticMedalDoesNotRecreateItAfterRestart() {
+    void revokedAutomaticMedalCanBeReearnedForANewCompletionAfterRestart() {
         UUID owner = UUID.randomUUID();
         try (AsyncTextWriter writer = new AsyncTextWriter(logger())) {
             ProfileStorage storage = storage(writer);
@@ -74,7 +74,9 @@ class MedalMigrationTest {
             ProfileData restored = storage(writer).get(owner, "Player");
             assertTrue(restored.medals().isEmpty());
             assertTrue(restored.hasReward(ProfileMedal.FIRST_CONSTELLATION));
-            assertFalse(ProfileAwards.firstConstellation(restored, 2000));
+            assertFalse(ProfileAwards.firstConstellation(restored, 1000));
+            assertTrue(ProfileAwards.firstConstellation(restored, 2000));
+            assertEquals(1, restored.medals().size());
         }
     }
 

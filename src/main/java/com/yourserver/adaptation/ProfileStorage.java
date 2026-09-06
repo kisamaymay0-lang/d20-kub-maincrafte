@@ -29,6 +29,7 @@ final class ProfileStorage {
         long savedMedalRevision;
         boolean medalConflict;
         Set<String> safeRewards;
+        long safeAstronomyProgress;
         Map<UUID, Long> safeNotices;
         List<ProfileMedal> safeMedals;
         UUID[] safeLayout;
@@ -84,6 +85,7 @@ final class ProfileStorage {
             }
             state.savedMedalRevision = data.medalRevision();
             state.safeRewards = data.rewardHistory();
+            state.safeAstronomyProgress = data.astronomyProgress();
             state.safeNotices = data.notificationHistory();
             state.safeMedals = List.copyOf(data.medals().values());
             state.safeLayout = data.layout();
@@ -120,6 +122,7 @@ final class ProfileStorage {
             if (!java.util.Objects.equals(disk.text(), state.medalText)) adopt(state, disk);
             state.safeLayout = state.data.layout();
             state.safeRewards = state.data.rewardHistory();
+            state.safeAstronomyProgress = state.data.astronomyProgress();
             state.safeNotices = state.data.notificationHistory();
             state.safeMedals = List.copyOf(state.data.medals().values());
         } catch (Exception ex) { throw new IllegalStateException("Проверьте файл медалей и выполните /profile medal reload", ex); }
@@ -151,11 +154,15 @@ final class ProfileStorage {
     }
 
     private void adopt(Cached state, MedalSnapshot next) {
-        if (state.medalConflict) state.data.restoreHistory(state.safeRewards, state.safeNotices);
+        if (state.medalConflict) {
+            state.data.restoreHistory(state.safeRewards, state.safeNotices);
+            state.data.astronomyProgress(state.safeAstronomyProgress);
+        }
         state.data.replaceMedals(next.medals());
         state.medalText = next.text();
         state.savedMedalRevision = state.data.medalRevision();
         state.safeRewards = state.data.rewardHistory();
+        state.safeAstronomyProgress = state.data.astronomyProgress();
         state.safeNotices = state.data.notificationHistory();
         state.safeMedals = List.copyOf(state.data.medals().values());
         state.safeLayout = state.data.layout();
@@ -172,12 +179,14 @@ final class ProfileStorage {
             state.medalText = snapshot;
             state.savedMedalRevision = state.data.medalRevision();
             state.safeRewards = state.data.rewardHistory();
+            state.safeAstronomyProgress = state.data.astronomyProgress();
             state.safeMedals = List.copyOf(state.data.medals().values());
             state.safeLayout = state.data.layout();
             return true;
         } catch (Exception ex) {
             if (ex instanceof InterruptedException) Thread.currentThread().interrupt();
             state.data.restoreHistory(state.safeRewards, state.safeNotices);
+            state.data.astronomyProgress(state.safeAstronomyProgress);
             state.data.replaceMedals(state.safeMedals);
             state.data.restoreLayout(state.safeLayout);
             state.medalConflict = true; // Не повторять старую запись поверх правки администратора.
@@ -216,6 +225,7 @@ final class ProfileStorage {
         try {
             data.write.get(10, TimeUnit.SECONDS);
             data.safeRewards = data.data.rewardHistory(); data.safeNotices = data.data.notificationHistory();
+            data.safeAstronomyProgress = data.data.astronomyProgress();
             data.safeLayout = data.data.layout();
             return true;
         } catch (Exception ex) {

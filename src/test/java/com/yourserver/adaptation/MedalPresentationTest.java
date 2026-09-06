@@ -51,6 +51,11 @@ class MedalPresentationTest {
         var date = DateTimeFormatter.ofPattern("dd.MM.uuuu").withZone(ZoneId.of("UTC"));
         List<Component> lore = MedalPresentation.lore(medal, MedalSettings.defaults(), date, List.of("Разместить"));
         assertEquals("Медная медаль", plain(lore.getFirst()));
+        assertEquals("— Собрано созвездие", plain(lore.get(1)));
+        List<Component> popup = MedalPresentation.tooltip(medal, MedalSettings.defaults(), date);
+        assertEquals("Астрономия!", plain(popup.get(0)));
+        assertEquals("Медная медаль", plain(popup.get(1)));
+        assertTrue(plain(popup.get(2)).startsWith("— "));
         assertEquals(NamedTextColor.GRAY, lore.getFirst().color());
         List<String> lines = lore.stream().map(MedalPresentationTest::plain).toList();
         assertTrue(lines.contains("— Собрано созвездие"));
