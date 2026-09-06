@@ -581,7 +581,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
         if (elapsed >= rotationIntervalTicks) {
             starSpinRadians = Math.IEEEremainder(starSpinRadians + Math.toRadians(rotationSpeed) * elapsed / 20.0,
                     Math.PI * 2.0);
-            orbitRadians = Math.IEEEremainder(orbitRadians + Math.toRadians(orbitSpeed) * elapsed / 20.0, Math.PI * 2);
+            orbitRadians = SkyOrbit.advance(orbitRadians, orbitSpeed, elapsed);
             lastRotationTick = tick;
             if (rotated) updateRotations(); // Один расчёт на звезду для ВСЕХ игроков.
         }

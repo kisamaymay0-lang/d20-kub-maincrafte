@@ -88,16 +88,38 @@ class MedalPresentationTest {
         assertTrue(plain(message).startsWith("<red>Steve"));
     }
     @Test
-    void publicMedalTooltipDoesNotDiscloseMeritsOrTheirCount() {
+    void publicMedalTooltipPreservesTheLayoutButMasksEachMerit() {
         ProfileMedal medal = new ProfileMedal(UUID.randomUUID(), ProfileMedal.Metal.COPPER, "Астрономия!",
                 List.of("Секретная заслуга один", "Секретная заслуга два"), 1000, "secret_source");
         var date = DateTimeFormatter.ofPattern("dd.MM.uuuu").withZone(ZoneId.of("UTC"));
         var lore = MedalPresentation.publicLore(medal, MedalSettings.defaults(), date).stream().map(MedalPresentationTest::plain).toList();
         assertEquals("Медная медаль", lore.get(0));
-        assertEquals("…", lore.get(1));
-        assertEquals(3, lore.size());
+        assertEquals("— …", lore.get(1));
+        assertEquals("", lore.get(2));
+        assertEquals("— …", lore.get(3));
+        assertEquals("", lore.get(4));
+        assertEquals(6, lore.size());
+        assertEquals(2, lore.stream().filter(line -> line.equals("— …")).count());
+        ProfileMedal masked = new ProfileMedal(medal.id(), medal.metal(), medal.title(), List.of("…", "…"), medal.awardedAt(), "");
+        assertEquals(MedalPresentation.lore(masked, MedalSettings.defaults(), date, List.of()),
+                MedalPresentation.publicLore(medal, MedalSettings.defaults(), date));
         assertFalse(String.join(" ", lore).contains("Секретная"));
         assertFalse(String.join(" ", lore).contains("secret_source"));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {1, 3, 8})
+    void everyMeritGetsItsOwnWhiteDashAndEllipsis(int count) {
+        var medal = new ProfileMedal(UUID.randomUUID(), ProfileMedal.Metal.GOLD, "Медаль",
+                java.util.Collections.nCopies(count, "Секретная заслуга"), 1000, "");
+        var date = DateTimeFormatter.ofPattern("dd.MM.uuuu").withZone(ZoneId.of("UTC"));
+        var lore = MedalPresentation.publicLore(medal, MedalSettings.defaults(), date);
+        for (int i = 0; i < count; i++) {
+            assertEquals("— …", plain(lore.get(1 + 2 * i)));
+            assertEquals(NamedTextColor.WHITE, lore.get(1 + 2 * i).color());
+        }
+        assertTrue(plain(lore.getLast()).startsWith("Получена:"));
+        assertFalse(lore.stream().map(MedalPresentationTest::plain).anyMatch(line -> line.contains("Секретная")));
     }
 
     @Test

@@ -13,11 +13,16 @@ final class MedalPresentation {
     private MedalPresentation() { }
 
     static List<Component> lore(ProfileMedal medal, MedalSettings settings, DateTimeFormatter date, List<String> hints) {
+        return lore(medal, settings, date, hints, medal.reasons());
+    }
+
+    private static List<Component> lore(ProfileMedal medal, MedalSettings settings, DateTimeFormatter date,
+                                        List<String> hints, List<String> reasons) {
         List<Component> lines = new ArrayList<>();
         lines.add(ProfileItems.text(settings.style(medal.metal()).label(), NamedTextColor.GRAY));
-        for (int i = 0; i < medal.reasons().size(); i++) {
+        for (int i = 0; i < reasons.size(); i++) {
             if (i > 0) lines.add(Component.empty());
-            appendReason(lines, medal.reasons().get(i), 36);
+            appendReason(lines, reasons.get(i), 36);
         }
         if (!hints.isEmpty()) {
             lines.add(Component.empty());
@@ -29,10 +34,9 @@ final class MedalPresentation {
     }
 
     static List<Component> publicLore(ProfileMedal medal, MedalSettings settings, DateTimeFormatter date) {
-        // Свежий публичный предмет: ни текст заслуг, ни их количество сюда не попадают.
-        return List.of(ProfileItems.text(settings.style(medal.metal()).label(), NamedTextColor.GRAY),
-                ProfileItems.text("…", NamedTextColor.GRAY),
-                ProfileItems.text("Получена: " + date.format(Instant.ofEpochMilli(medal.awardedAt())), NamedTextColor.GRAY));
+        // Обычный вид медали, но каждое название заслуги заменено отдельно.
+        // Цвет, тире, промежутки и дата формируются тем же кодом, что и у настоящего предмета.
+        return lore(medal, settings, date, List.of(), java.util.Collections.nCopies(medal.reasons().size(), "…"));
     }
 
     static List<Component> tooltip(ProfileMedal medal, MedalSettings settings, DateTimeFormatter date) {

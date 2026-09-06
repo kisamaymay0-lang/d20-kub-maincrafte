@@ -89,4 +89,15 @@ class SkyMotionTest {
         assertTrue(100 * scale <= 10 * 16 * 0.7 + 0.001);
         assertEquals(3f, SkyOrbit.depthScale(80, 32, 32, 3));
     }
+    @Test
+    void positiveOrbitSpeedNowMovesRightAndKeepsTargetingAligned() {
+        double phase = SkyOrbit.advance(0, 0.15, 20);
+        Vector3f start = new Vector3f(0, 0, 80);
+        Vector3f rendered = new Vector3f(start).rotateY((float) phase);
+        assertTrue(rendered.x < 0); // При взгляде на юг справа запад, то есть отрицательный X.
+        assertEquals(80, rendered.length(), 0.0001);
+        assertTrue(SkyOrbit.local(rendered, phase, 1).distance(start) < 0.0001);
+        assertEquals(0, SkyOrbit.advance(0, 0, 20));
+    }
+
 }

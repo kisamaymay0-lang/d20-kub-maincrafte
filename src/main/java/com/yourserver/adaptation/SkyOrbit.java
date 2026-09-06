@@ -6,6 +6,11 @@ import org.joml.Vector3f;
 final class SkyOrbit {
     private SkyOrbit() { }
 
+    /** Положительная скорость — вправо при взгляде из центра сферы. */
+    static double advance(double radians, double degreesPerSecond, long ticks) {
+        return Math.IEEEremainder(radians - Math.toRadians(degreesPerSecond) * ticks / 20.0, Math.PI * 2);
+    }
+
     static Vector3f local(Vector3f world, double radians, float depthScale) {
         return new Vector3f(world).rotateY((float) -radians).div(depthScale);
     }

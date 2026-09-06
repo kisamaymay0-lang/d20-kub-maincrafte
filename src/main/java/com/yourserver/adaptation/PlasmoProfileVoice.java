@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
-@Addon(id = "f8_profiles", name = "Профили F8", version = "9.8", authors = {"F8"})
+@Addon(id = "f8_profiles", name = "Профили F8", version = "9.9", authors = {"F8"})
 public final class PlasmoProfileVoice implements ProfileVoiceBridge, AddonInitializer {
     @InjectPlasmoVoice private PlasmoVoiceServer voice;
     private volatile ServerSourceLine line;
