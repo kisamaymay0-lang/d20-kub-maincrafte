@@ -18,6 +18,8 @@ final class ProfileData {
     final UUID owner;
     private String name;
     private String description = "";
+    private ProfileVoiceNote voice;
+    private UUID skinOwner;
     private final Map<UUID, Vote> votes = new HashMap<>();
     private final Map<UUID, ProfileMedal> medals = new LinkedHashMap<>();
     private final Set<String> rewards = new HashSet<>();
@@ -32,12 +34,34 @@ final class ProfileData {
 
     ProfileData(UUID owner, String name) {
         this.owner = Objects.requireNonNull(owner);
+        this.skinOwner = owner;
         this.name = Objects.requireNonNullElse(name, owner.toString());
     }
 
     String name() { return name; }
     String description() { return description; }
-    String displayedDescription() { return description.isBlank() ? ProfileText.NO_DESCRIPTION : description; }
+    ProfileVoiceNote voice() { return voice; }
+    UUID skinOwner() { return skinOwner; }
+    String displayedDescription() { return voice != null ? "Голосовое описание · 30 сек." : description.isBlank() ? ProfileText.NO_DESCRIPTION : description; }
+    boolean voice(UUID actor, ProfileVoiceNote note) {
+        if (!owner.equals(actor) || (note != null && !owner.equals(note.speaker()))) return false;
+        voice = note; description = ""; revision++; return true;
+    }
+    void restoreDescription(String description, ProfileVoiceNote voice) {
+        this.description = description; this.voice = voice; revision++;
+    }
+
+    ProfileData previewCopy(UUID id) {
+        ProfileData copy = new ProfileData(id, name);
+        copy.skinOwner = skinOwner;
+        copy.description = description; copy.voice = voice;
+        copy.votes.putAll(votes); copy.likes = likes; copy.dislikes = dislikes;
+        copy.medals.putAll(medals); copy.rewards.addAll(rewards);
+        System.arraycopy(layout, 0, copy.layout, 0, layout.length);
+        copy.astronomyProgress = astronomyProgress;
+        return copy;
+    }
+    void newerThan(long previous) { revision = Math.max(revision, previous + 1); }
     int likes() { return likes; }
     int dislikes() { return dislikes; }
     long revision() { return revision; }
@@ -68,8 +92,9 @@ final class ProfileData {
         if (!owner.equals(actor)) return false;
         String cleaned = ProfileText.clean(text);
         if (ProfileText.length(cleaned) > ProfileText.DESCRIPTION_LIMIT) throw new IllegalArgumentException("Описание до 160 символов");
-        if (description.equals(cleaned)) return false;
+        if (voice == null && description.equals(cleaned)) return false;
         description = cleaned;
+        voice = null;
         revision++;
         return true;
     }

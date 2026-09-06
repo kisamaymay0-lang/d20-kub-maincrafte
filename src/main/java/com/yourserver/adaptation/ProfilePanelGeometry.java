@@ -7,7 +7,7 @@ import org.joml.Vector3f;
 
 /** Общая геометрия картинки и наведения. Направление курсора никогда не двигает саму панель. */
 final class ProfilePanelGeometry {
-    enum Action { NONE, LIKE, DISLIKE, OPEN }
+    enum Action { NONE, LIKE, DISLIKE, OPEN, PLAY_VOICE }
     record Rect(double x, double y, double width, double height) {
         boolean contains(double px, double py) {
             return Math.abs(px - x) <= width / 2 + 0.025 && Math.abs(py - y) <= height / 2 + 0.025;
@@ -46,8 +46,15 @@ final class ProfilePanelGeometry {
             return new Rect((like ? -total / 2 + left / 2 : total / 2 - rightWidth / 2) * pixel(),
                     footerBottom() + 25.5 * pixel(), Math.max((like ? left : rightWidth) * pixel(), width * 0.19), 8 * pixel());
         }
-        Action action(Hit hit, int likes, int dislikes) {
+        Rect voiceButton() {
+            double scale = height * 0.265;
+            return new Rect(0, height * 0.455 - 0.3625 * scale,
+                    Math.min(width * 0.85, 140 * 0.025 * scale), 6 * 0.025 * scale);
+        }
+        Action action(Hit hit, int likes, int dislikes) { return action(hit, likes, dislikes, false); }
+        Action action(Hit hit, int likes, int dislikes, boolean voice) {
             if (hit == null) return Action.NONE;
+            if (voice && voiceButton().contains(hit.x(), hit.y())) return Action.PLAY_VOICE;
             if (openProfile().contains(hit.x(), hit.y())) return Action.OPEN;
             if (vote(true, likes, dislikes).contains(hit.x(), hit.y())) return Action.LIKE;
             if (vote(false, likes, dislikes).contains(hit.x(), hit.y())) return Action.DISLIKE;

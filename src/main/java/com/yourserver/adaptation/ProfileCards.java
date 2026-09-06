@@ -37,6 +37,8 @@ final class ProfileCards {
 
     private static final class Card {
         UUID target;
+        UUID profile;
+        boolean hasVoice;
         ProfilePanelGeometry.Frame frame;
         ProfilePanelGeometry.Frame attachedFrame;
         Vector3d attachedFeet;
@@ -62,7 +64,8 @@ final class ProfileCards {
     }
 
     private final JavaPlugin plugin;
-    private final Function<Player, ProfileData> profiles;
+    private final Function<ProfileSubjects.Subject, ProfileData> profiles;
+    private final ProfileSubjects subjects;
     private final ProfileItems items;
     private final Set<UUID> sneaking = new HashSet<>();
     private final Map<UUID, Card> cards = new HashMap<>();
@@ -71,8 +74,8 @@ final class ProfileCards {
     private int frames;
     private boolean errorReported;
 
-    ProfileCards(JavaPlugin plugin, Function<Player, ProfileData> profiles, ProfileItems items) {
-        this.plugin = plugin; this.profiles = profiles; this.items = items;
+    ProfileCards(JavaPlugin plugin, Function<ProfileSubjects.Subject, ProfileData> profiles, ProfileItems items, ProfileSubjects subjects) {
+        this.plugin = plugin; this.profiles = profiles; this.items = items; this.subjects = subjects;
         double configured = plugin.getConfig().getDouble("profiles.quick-card-distance", 8);
         range = Double.isFinite(configured) ? Math.clamp(configured, 2, 16) : 8;
         for (Player player : Bukkit.getOnlinePlayers()) if (player.isSneaking()) sneaking.add(player.getUniqueId());
@@ -92,15 +95,15 @@ final class ProfileCards {
                 && player.getOpenInventory().getTopInventory().getType() == InventoryType.CRAFTING;
     }
 
-    private boolean validTarget(Player viewer, Player target) {
-        return target != null && canInspect(viewer, target)
-                && viewer.getLocation().distanceSquared(target.getLocation()) <= (range + 1) * (range + 1);
+    private boolean validTarget(Player viewer, ProfileSubjects.Subject target) {
+        return target != null && target.entity().isValid() && !target.entity().isDead()
+                && viewer.getLocation().distanceSquared(target.entity().getLocation()) <= (range + 1) * (range + 1);
     }
 
-    private Player aimedPlayer(Player viewer, Location eye) {
+    private ProfileSubjects.Subject aimedPlayer(Player viewer, Location eye) {
         RayTraceResult hit = viewer.getWorld().rayTrace(eye, eye.getDirection(), range, FluidCollisionMode.NEVER, true, 0.15,
-                entity -> entity instanceof Player target && canInspect(viewer, target));
-        return hit != null && hit.getHitEntity() instanceof Player target ? target : null;
+                entity -> subjects.resolve(viewer, entity) != null);
+        return hit == null || hit.getHitEntity() == null ? null : subjects.resolve(viewer, hit.getHitEntity());
     }
 
     private static Vector3d point(Location location) { return new Vector3d(location.getX(), location.getY(), location.getZ()); }
@@ -114,11 +117,11 @@ final class ProfileCards {
                 FluidCollisionMode.NEVER, true) == null;
     }
 
-    private ProfilePanelGeometry.Frame frame(Card card, Player viewer, Player target) {
-        Vector3d feet = point(target.getLocation());
+    private ProfilePanelGeometry.Frame frame(Card card, Player viewer, ProfileSubjects.Subject target) {
+        Vector3d feet = point(target.entity().getLocation());
         if (card.attachedFrame == null) {
             card.attachedFeet = new Vector3d(feet);
-            card.attachedFrame = ProfilePanelGeometry.beside(point(viewer.getEyeLocation()), feet, target.getWidth(), target.getHeight());
+            card.attachedFrame = ProfilePanelGeometry.beside(point(viewer.getEyeLocation()), feet, target.entity().getWidth(), target.entity().getHeight());
         }
         // Ориентация и сторона фиксируются до закрытия. Следуют только координаты владельца.
         return card.attachedFrame.translated(feet.sub(card.attachedFeet));
@@ -134,7 +137,7 @@ final class ProfileCards {
         }
         Location eye = viewer.getEyeLocation();
         boolean retained = false;
-        Player current = card == null ? null : Bukkit.getPlayer(card.target);
+        ProfileSubjects.Subject current = card == null ? null : subjects.resolve(viewer, card.target);
         if (card != null && validTarget(viewer, current)) {
             card.frame = frame(card, viewer, current);
             ProfilePanelGeometry.Hit hit = card.frame.intersect(point(eye), point(eye.getDirection()), range + 4);
@@ -144,7 +147,7 @@ final class ProfileCards {
             boolean overTip = hit != null && card.tooltip != null && card.tooltipRect != null
                     && (card.tooltipRect.contains(hit.x(), hit.y()) || card.frame.tooltipBridge(card.tooltipRect).contains(hit.x(), hit.y()));
             if (hit != null && (overPanel || overTip) && clearRay(viewer, eye, hit.point())
-                    && clearRay(viewer, eye, point(current.getEyeLocation()))) {
+                    && clearRay(viewer, eye, point(current.entity().getEyeLocation()))) {
                 retained = true;
                 card.lastFocused = tick;
                 card.visible = true;
@@ -152,12 +155,13 @@ final class ProfileCards {
             }
         }
         if (!retained) {
-            Player target = aimedPlayer(viewer, eye);
+            ProfileSubjects.Subject target = aimedPlayer(viewer, eye);
             if (target != null) {
-                if (card == null || !target.getUniqueId().equals(card.target)) {
+                if (card == null || !target.entity().getUniqueId().equals(card.target)) {
                     if (card != null) remove(card);
                     card = new Card();
-                    card.target = target.getUniqueId();
+                    card.target = target.entity().getUniqueId();
+                    card.profile = target.profile();
                     cards.put(id, card);
                 }
                 card.frame = frame(card, viewer, target);
@@ -166,26 +170,26 @@ final class ProfileCards {
                 card.showTip = false;
             } else if (card != null) {
                 card.visible = validTarget(viewer, current) && Integer.toUnsignedLong(tick - card.lastFocused) <= 6
-                        && clearRay(viewer, eye, point(current.getEyeLocation()));
+                        && clearRay(viewer, eye, point(current.entity().getEyeLocation()));
                 card.showTip = false;
             }
         }
     }
 
-    record Click(UUID owner, ProfilePanelGeometry.Action action) { }
+    record Click(UUID owner, UUID entity, ProfilePanelGeometry.Action action) { }
 
     boolean hasCard(UUID player) { return cards.containsKey(player); }
 
     Click click(Player viewer) {
         Card card = cards.get(viewer.getUniqueId());
         if (card == null || !card.visible || card.fade.value() < 0.05 || !ready(viewer)) return null;
-        Player target = Bukkit.getPlayer(card.target);
+        ProfileSubjects.Subject target = subjects.resolve(viewer, card.target);
         if (!validTarget(viewer, target)) return null;
         Location eye = viewer.getEyeLocation();
         var hit = card.frame.intersect(point(eye), point(eye.getDirection()), range + 4);
         if (hit == null || !card.frame.bounds().contains(hit.x(), hit.y())
-                || !clearRay(viewer, eye, hit.point()) || !clearRay(viewer, eye, point(target.getEyeLocation()))) return null;
-        return new Click(card.target, card.frame.action(hit, card.likes, card.dislikes));
+                || !clearRay(viewer, eye, hit.point()) || !clearRay(viewer, eye, point(target.entity().getEyeLocation()))) return null;
+        return new Click(card.profile, card.target, card.frame.action(hit, card.likes, card.dislikes, card.hasVoice));
     }
 
     private void tick() {
@@ -206,8 +210,8 @@ final class ProfileCards {
             var entry = iterator.next();
             Player viewer = Bukkit.getPlayer(entry.getKey());
             Card card = entry.getValue();
-            Player target = Bukkit.getPlayer(card.target);
-            if (viewer == null || target == null || !viewer.getWorld().equals(target.getWorld())) {
+            ProfileSubjects.Subject target = viewer == null ? null : subjects.resolve(viewer, card.target);
+            if (viewer == null || target == null || !viewer.getWorld().equals(target.entity().getWorld())) {
                 remove(card); iterator.remove(); continue;
             }
             boolean visible = card.visible && ready(viewer) && validTarget(viewer, target);
@@ -271,7 +275,9 @@ final class ProfileCards {
         List<String> description = ProfileText.wrap(data.displayedDescription(), 20);
         List<Component> body = new ArrayList<>();
         body.add(ProfileItems.text(data.name(), NamedTextColor.WHITE).decorate(TextDecoration.BOLD));
-        for (String line : description) body.add(ProfileItems.text(line, NamedTextColor.GRAY));
+        card.hasVoice = data.voice() != null;
+        if (card.hasVoice) body.add(ProfileItems.text("▶ Прослушать 30 сек.", NamedTextColor.WHITE).decorate(TextDecoration.UNDERLINED));
+        else for (String line : description) body.add(ProfileItems.text(line, NamedTextColor.GRAY));
         card.bodyLines = body.size();
         card.body.text(join(body));
         ProfileMedal latest = data.latestMedal();

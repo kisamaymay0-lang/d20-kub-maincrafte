@@ -78,6 +78,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private MedalSettings medalSettings;
     private final ProfileItems items;
     private final ProfileCards cards;
+    private final ProfileVoice voice;
+    private final ProfileSubjects subjects;
     private final BukkitTask maintenance;
     private final Map<UUID, Menu> menus = new HashMap<>();
     private final Map<UUID, Integer> cardClicks = new HashMap<>();
@@ -102,8 +104,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             try { zone = ZoneId.of(configuredZone); }
             catch (RuntimeException ex) { plugin.getLogger().warning("Некорректный profiles.date-time-zone, используется часовой пояс сервера"); }
         }
+        voice = new ProfileVoice(plugin, this::saveVoice);
         items = new ProfileItems(zone, medalSettings);
-        cards = new ProfileCards(plugin, this::profile, items);
+        subjects = new ProfileSubjects(plugin, this::profile);
+        cards = new ProfileCards(plugin, subject -> profile(subject.profile(), subject.name()), items, subjects);
         maintenance = Bukkit.getScheduler().runTaskTimer(plugin, this::maintenance, 20L, 20L);
         for (Player player : Bukkit.getOnlinePlayers()) join(player);
     }
@@ -117,6 +121,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private ProfileData profile(Player player) { return profile(player.getUniqueId(), player.getName()); }
 
     private ProfileData profile(UUID owner, String name) {
+        if (subjects != null && subjects.preview(owner)) return subjects.profile(owner);
         ProfileData data = storage.get(owner, name);
         Player online = Bukkit.getPlayer(owner);
         if (online != null && data.rename(online.getName())) storage.changed(owner);
@@ -282,14 +287,14 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         boolean own = player.getUniqueId().equals(data.owner);
         if (menu.screen == Screen.PROFILE) {
             if (slot == 12 || slot == 14) {
-                if (!own && data.vote(player.getUniqueId(), slot == 12 ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE)) {
+                if (!own && subjects.vote(data, player.getUniqueId(), slot == 12 ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE)) {
                     storage.changed(data.owner); refreshDetails(data.owner); clickSound(player);
                 }
             } else if (own && slot == 13) {
+                if (voice.active(player.getUniqueId())) { voice.chat(player, ""); return; }
                 player.closeInventory();
                 editing.put(player.getUniqueId(), new Editing());
-                player.sendMessage("§6Новое описание напишите в чат §7(до 160 символов, 2 минуты). Сообщение не публикуется в общем чате.");
-                player.sendMessage("§7«отмена» — отменить, «очистить» — вернуть «Нет описания.».");
+                player.sendMessage(voice.prompt());
             } else if (own && slot == 17) {
                 clickSound(player); open(player, data.owner, Screen.COLLECTION, 0, null);
             }
@@ -358,7 +363,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     @EventHandler(priority = EventPriority.LOWEST)
     public void cardAttack(PrePlayerAttackEntityEvent event) {
         // Перехват ДО урона: ЛКМ по карточке не бьёт игрока и не запускает его боевые чары.
-        if (useCard(event.getPlayer())) event.setCancelled(true);
+        if (useCard(event.getPlayer()) || subjects.cloneEntity(event.getAttacked().getUniqueId())) event.setCancelled(true);
     }
 
     private boolean useCard(Player player) {
@@ -372,16 +377,17 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         if (hit.action() == ProfilePanelGeometry.Action.NONE) return true;
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (stopping || !player.isOnline()) return;
-            Player target = Bukkit.getPlayer(hit.owner());
-            if (target == null || !ProfileCards.canInspect(player, target)) return;
+            ProfileSubjects.Subject target = subjects.resolve(player, hit.entity());
+            if (target == null || !target.profile().equals(hit.owner())) return;
             if (hit.action() == ProfilePanelGeometry.Action.OPEN) {
                 clickSound(player);
                 open(player, hit.owner(), Screen.PROFILE, 0, null);
             } else {
                 try {
-                    ProfileData data = profile(target);
+                    ProfileData data = profile(target.profile(), target.name());
+                    if (hit.action() == ProfilePanelGeometry.Action.PLAY_VOICE) { voice.play(player, data.voice()); return; }
                     ProfileData.Vote vote = hit.action() == ProfilePanelGeometry.Action.LIKE ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE;
-                    if (data.vote(player.getUniqueId(), vote)) { storage.changed(data.owner); refreshDetails(data.owner); clickSound(player); }
+                    if (subjects.vote(data, player.getUniqueId(), vote)) { storage.changed(data.owner); refreshDetails(data.owner); clickSound(player); }
                 } catch (RuntimeException ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не удалось обработать нажатие карточки", ex); }
             }
         });
@@ -391,6 +397,14 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     @EventHandler(priority = EventPriority.HIGHEST)
     public void chat(AsyncChatEvent event) {
         UUID id = event.getPlayer().getUniqueId();
+        if (voice.active(id)) {
+            event.setCancelled(true);
+            String input = PlainTextComponentSerializer.plainText().serialize(event.message());
+            if (!stopping) try {
+                Bukkit.getScheduler().runTask(plugin, () -> { Player player = Bukkit.getPlayer(id); if (player != null) voice.chat(player, input); });
+            } catch (org.bukkit.plugin.IllegalPluginAccessException ignored) { }
+            return;
+        }
         Editing session = editing.get(id);
         if (session == null) return;
         event.setCancelled(true);
@@ -413,6 +427,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         if (clean.equalsIgnoreCase("отмена") || clean.equalsIgnoreCase("cancel")) {
             editing.remove(id, session); open(player, id, Screen.PROFILE, 0, null); return;
         }
+        if (clean.equalsIgnoreCase("запись")) {
+            if (voice.start(player)) editing.remove(id, session);
+            else session.processing.set(false);
+            return;
+        }
         if (clean.isEmpty() || ProfileText.length(clean) > ProfileText.DESCRIPTION_LIMIT) {
             session.processing.set(false);
             player.sendMessage("§cНужно от 1 до 160 символов. Попробуйте ещё раз или напишите «отмена».");
@@ -421,10 +440,33 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         editing.remove(id, session);
         try {
             ProfileData data = profile(player);
-            if (data.describe(id, (clean.equals("-") || clean.equals("—") || clean.equalsIgnoreCase("очистить")) ? "" : clean)) storage.changed(id);
+            String before = data.description();
+            ProfileVoiceNote previousVoice = data.voice();
+            if (data.describe(id, (clean.equals("-") || clean.equals("—") || clean.equalsIgnoreCase("очистить")) ? "" : clean)) {
+                storage.changed(id);
+                if (!storage.flushBlocking(id)) {
+                    data.restoreDescription(before, previousVoice); storage.changed(id);
+                    throw new IllegalStateException("Не удалось сохранить описание");
+                }
+                voice.discard(previousVoice);
+            }
             refreshDetails(id); open(player, id, Screen.PROFILE, 0, null);
             player.sendMessage("§aОписание профиля сохранено.");
         } catch (RuntimeException ex) { player.sendMessage("§cОписание не сохранено: профиль недоступен."); }
+    }
+
+    private boolean saveVoice(Player player, ProfileVoiceNote note) {
+        ProfileData data = profile(player);
+        String before = data.description();
+        ProfileVoiceNote previous = data.voice();
+        if (!data.voice(player.getUniqueId(), note)) return false;
+        storage.changed(data.owner);
+        if (!storage.flushBlocking(data.owner)) {
+            data.restoreDescription(before, previous); storage.changed(data.owner); return false;
+        }
+        voice.discard(previous);
+        refreshDetails(data.owner);
+        return true;
     }
 
     private void maintenance() {
@@ -449,13 +491,26 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void sneak(PlayerToggleSneakEvent event) { cards.sneaking(event.getPlayer().getUniqueId(), event.isSneaking()); }
     @EventHandler public void world(PlayerChangedWorldEvent event) {
+        removeClone(event.getPlayer());
         cards.quit(event.getPlayer().getUniqueId());
         cards.sneaking(event.getPlayer().getUniqueId(), event.getPlayer().isSneaking());
     }
     @EventHandler public void quit(PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         editing.remove(id); menus.remove(id); cardClicks.remove(id); rightClicks.remove(id); queued.remove(id);
-        cards.quit(id); storage.unpin(id);
+        removeClone(event.getPlayer());
+        cards.quit(id); voice.quit(id); storage.unpin(id);
+    }
+
+    private void removeClone(Player owner) {
+        UUID profile = subjects.remove(owner.getUniqueId());
+        if (profile == null) return;
+        for (Menu menu : new ArrayList<>(menus.values())) {
+            if (profile.equals(menu.owner)) {
+                Player viewer = Bukkit.getPlayer(menu.viewer);
+                if (viewer != null && viewer.getOpenInventory().getTopInventory() == menu.inventory) viewer.closeInventory();
+            }
+        }
     }
 
     private static void clickSound(Player player) { player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.4f, 1.2f); }
@@ -465,7 +520,21 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0 && sender instanceof Player player) { open(player, player.getUniqueId(), Screen.PROFILE, 0, null); return true; }
         if (args.length == 1 && args[0].equalsIgnoreCase("cancel") && sender instanceof Player player) {
-            editing.remove(player.getUniqueId()); player.sendMessage("§7Редактирование описания отменено."); return true;
+            if (voice.active(player.getUniqueId())) voice.cancel(player.getUniqueId(), true);
+            else { editing.remove(player.getUniqueId()); player.sendMessage("§7Редактирование описания отменено."); }
+            return true;
+        }
+        if (args.length > 0 && args[0].equalsIgnoreCase("clone")) {
+            if (!(sender instanceof Player player) || !admin(sender)) { sender.sendMessage("§cКоманда доступна администратору в игре."); return true; }
+            try {
+                removeClone(player);
+                if (args.length > 1 && args[1].equalsIgnoreCase("remove")) player.sendMessage("§7Тестовый клон удалён.");
+                else {
+                    subjects.spawn(player);
+                    player.sendMessage("§aТестовый клон создан. §7Shift и взгляд — карточка. Оценки на клоне не меняют настоящий профиль.");
+                }
+            } catch (RuntimeException ex) { player.sendMessage("§cНе удалось создать клон: " + ex.getMessage()); }
+            return true;
         }
         if (args.length > 0 && args[0].equalsIgnoreCase("medal")) {
             if (!admin(sender)) { medalMessage(sender, "no-permission", "", "", 0, ""); return true; }
@@ -565,6 +634,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         sender.sendMessage("§6/profile §7— свой профиль; чужой — ЛКМ по «Открыть профиль» в карточке.");
         sender.sendMessage("§7/profile cancel — отменить ввод описания.");
         if (admin(sender)) {
+            sender.sendMessage("§7/profile clone — тестовый клон; /profile clone remove — убрать");
             sender.sendMessage("§6/profile medal give <игрок или UUID> <copper|silver|gold> <название> | <заслуга 1> | <заслуга 2>");
             sender.sendMessage("§7/profile medal list <игрок> — список и UUID медалей");
             sender.sendMessage("§7/profile medal take <игрок> <номер|UUID|all> — забрать медаль");
@@ -576,7 +646,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         List<String> options = List.of();
-        if (args.length == 1) options = admin(sender) ? List.of("cancel", "medal") : List.of("cancel");
+        if (args.length == 1) options = admin(sender) ? List.of("cancel", "medal", "clone") : List.of("cancel");
+        else if (admin(sender) && args.length == 2 && args[0].equalsIgnoreCase("clone")) options = List.of("remove");
         else if (admin(sender) && args[0].equalsIgnoreCase("medal")) {
             if (args.length == 2) options = List.of("give", "take", "list", "reload");
             else if (args.length == 3 && !args[1].equalsIgnoreCase("reload")) options = Bukkit.getOnlinePlayers().stream()
@@ -591,7 +662,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     public void disable() {
         stopping = true;
-        maintenance.cancel(); cards.disable();
+        maintenance.cancel(); cards.disable(); subjects.disable(); voice.disable();
         for (UUID id : editing.keySet()) {
             Player player = Bukkit.getPlayer(id);
             if (player != null) player.sendMessage("§7Редактирование описания отменено: плагин выключается.");

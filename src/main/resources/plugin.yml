@@ -1,7 +1,8 @@
 name: f8-plugin
-version: '9.6'
+version: '9.7'
 main: com.yourserver.adaptation.AdaptationPlugin
 api-version: '1.21.11'
+softdepend: [PlasmoVoice]
 
 commands:
   profile:
@@ -25,7 +26,7 @@ commands:
 
 permissions:
   profiles.admin:
-    description: Выдавать, забирать и перезагружать медали
+    description: Управлять медалями и создавать тестовые клоны
     default: op
 
   f8.admin:

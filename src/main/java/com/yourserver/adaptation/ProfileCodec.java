@@ -45,6 +45,10 @@ final class ProfileCodec {
     private static YamlConfiguration profileYaml(ProfileData data, int version) {
         YamlConfiguration yaml = identity(data, version);
         yaml.set("description", data.description());
+        if (data.voice() != null) {
+            yaml.set("voice.clip", data.voice().clip().toString());
+            yaml.set("voice.speaker", data.voice().speaker().toString());
+        }
         data.votes().forEach((voter, vote) -> yaml.set("votes." + voter, vote.name()));
         yaml.set("medal-history.astronomy-progress", data.astronomyProgress());
         yaml.set("medal-history.claimed", new ArrayList<>(data.rewardHistory()));
@@ -82,6 +86,11 @@ final class ProfileCodec {
         if (version != 1 && version != 2) throw new IllegalArgumentException("Неверная версия профиля");
         ProfileData data = new ProfileData(owner, yaml.getString("name", owner.toString()));
         data.describe(owner, yaml.getString("description", ""));
+        if (yaml.isConfigurationSection("voice")) {
+            ProfileVoiceNote note = new ProfileVoiceNote(UUID.fromString(yaml.getString("voice.clip", "")),
+                    UUID.fromString(yaml.getString("voice.speaker", owner.toString())));
+            if (!data.voice(owner, note)) throw new IllegalArgumentException("Неверный владелец голосового описания");
+        }
         ConfigurationSection votes = yaml.getConfigurationSection("votes");
         if (yaml.contains("votes") && votes == null) throw new IllegalArgumentException("Неверные оценки");
         if (votes != null) for (String voter : votes.getKeys(false)) {

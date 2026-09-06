@@ -67,9 +67,10 @@ final class ProfileItems {
         }
         ItemStack item = item(Material.PLAYER_HEAD, title, NamedTextColor.GOLD, lore);
         SkullMeta skull = (SkullMeta) item.getItemMeta();
-        Player player = Bukkit.getPlayer(data.owner);
-        if (player != null) skins.put(data.owner, player.getPlayerProfile());
-        var skin = skins.get(data.owner);
+        if (title.equals(data.name())) skull.displayName(text(title, NamedTextColor.WHITE).decorate(TextDecoration.BOLD));
+        Player player = Bukkit.getPlayer(data.skinOwner());
+        if (player != null) skins.put(data.skinOwner(), player.getPlayerProfile());
+        var skin = skins.get(data.skinOwner());
         if (skin != null) skull.setPlayerProfile(skin); // Не делаем сетевой поиск при выходе владельца из игры.
         item.setItemMeta(skull);
         return item;
