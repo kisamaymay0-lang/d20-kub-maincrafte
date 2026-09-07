@@ -39,11 +39,13 @@ public class CaviarListener implements Listener {
     private final JavaPlugin plugin;
     private final NamespacedKey caviarTypeKey;
     private final NamespacedKey depletedKey;
+    private final NamespacedKey winterKey;
 
     public CaviarListener(JavaPlugin plugin) {
         this.plugin = plugin;
         this.caviarTypeKey = new NamespacedKey(plugin, "caviar_type");
         this.depletedKey = new NamespacedKey(plugin, "fish_depleted");
+        this.winterKey = new NamespacedKey(plugin, "winter_item");
 
         registerRecipes();
     }
@@ -53,8 +55,15 @@ public class CaviarListener implements Listener {
     private void registerRecipes() {
         // Треска -> чёрная икра, лосось -> красная (в крафте — наоборот:
         // тип бутерброда зависит от типа икры).
-        Bukkit.addRecipe(createSandwichRecipe(RED));
-        Bukkit.addRecipe(createSandwichRecipe(BLACK));
+        for (String type : java.util.List.of(RED, BLACK)) {
+            ShapelessRecipe recipe = createSandwichRecipe(type);
+            Bukkit.removeRecipe(recipe.getKey()); Bukkit.addRecipe(recipe);
+        }
+        NamespacedKey dyeKey = new NamespacedKey(plugin, "red_caviar_orange_dye");
+        Bukkit.removeRecipe(dyeKey);
+        ShapelessRecipe dye = new ShapelessRecipe(dyeKey, new ItemStack(Material.ORANGE_DYE));
+        dye.addIngredient(new RecipeChoice.ExactChoice(createRedCaviar()));
+        Bukkit.addRecipe(dye);
     }
 
     private ShapelessRecipe createSandwichRecipe(String type) {
@@ -213,7 +222,8 @@ public class CaviarListener implements Listener {
     }
 
     private boolean isGuttableFish(ItemStack item) {
-        if (item == null || isDepletedFish(item)) {
+        if (item == null || isDepletedFish(item)
+                || item.getPersistentDataContainer().has(winterKey, PersistentDataType.STRING)) {
             return false;
         }
 

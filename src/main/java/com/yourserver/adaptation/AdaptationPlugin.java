@@ -49,6 +49,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private FlaskListener flaskListener;
     private CopperBlockListener copperBlockListener;
     private CaviarListener caviarListener;
+    private WinterFishing winterFishing;
     private ConstellationManager constellationManager;
     private ProfileManager profileManager;
 
@@ -111,6 +112,9 @@ public void onEnable() {
             this
     );
 
+    winterFishing = new WinterFishing(this);
+    getServer().getPluginManager().registerEvents(winterFishing, this);
+
     profileManager = new ProfileManager(this, dataWriter);
     getServer().getPluginManager().registerEvents(profileManager, this);
     if (getCommand("profile") != null) {
@@ -140,7 +144,8 @@ public void onEnable() {
                     flaskListener,
                     rollbackListener,
                     copperBlockListener,
-                    caviarListener
+                    caviarListener,
+                    winterFishing
             );
 
     getServer().getPluginManager().registerEvents(
@@ -192,6 +197,9 @@ public void onEnable() {
         }
         if (profileManager != null) {
             profileManager.disable();
+        }
+        if (winterFishing != null) {
+            winterFishing.disable();
         }
         if (dataWriter != null) {
             dataWriter.close();

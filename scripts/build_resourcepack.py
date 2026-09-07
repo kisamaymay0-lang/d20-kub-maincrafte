@@ -111,6 +111,11 @@ def validate() -> dict[str, bytes]:
         assert f"assets/f8resurs/models/item/{name}.json" in files
         assert f"assets/f8resurs/textures/item/{name}.png" in files
 
+    for item in ("icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich"):
+        assert f"assets/f8resurs/items/{item}.json" in files
+        assert f"assets/f8resurs/models/item/{item}.json" in files
+        assert f"assets/f8resurs/textures/item/{item}.png" in files
+
     # Both beams must be flat and unshaded: no rod base, side faces or AO.
     for beam in ("star_beam", "star_beam_preview"):
         model = json.loads(files[f"assets/f8resurs/models/item/{beam}.json"])

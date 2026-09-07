@@ -33,6 +33,7 @@ public class F8Command implements CommandExecutor, Listener {
     private final RollbackListener rollbackListener;
     private final CopperBlockListener copperBlockListener;
     private final CaviarListener caviarListener;
+    private final WinterFishing winterFishing;
 
     private final NamespacedKey menuKey;
 
@@ -42,7 +43,8 @@ public class F8Command implements CommandExecutor, Listener {
             FlaskListener flaskListener,
             RollbackListener rollbackListener,
             CopperBlockListener copperBlockListener,
-            CaviarListener caviarListener
+            CaviarListener caviarListener,
+            WinterFishing winterFishing
     ) {
         this.plugin = plugin;
         this.diceRollListener = diceRollListener;
@@ -50,6 +52,7 @@ public class F8Command implements CommandExecutor, Listener {
         this.rollbackListener = rollbackListener;
         this.copperBlockListener = copperBlockListener;
         this.caviarListener = caviarListener;
+        this.winterFishing = winterFishing;
         this.menuKey = new NamespacedKey(plugin, "f8_menu");
     }
 
@@ -209,7 +212,8 @@ public class F8Command implements CommandExecutor, Listener {
     }
 
     static final List<String> ITEM_CATALOG = List.of("water_flask", "poison_flask", "red_caviar", "black_caviar",
-            "empty_cod", "empty_salmon", "caviar_sandwich_red", "caviar_sandwich_black");
+            "empty_cod", "empty_salmon", "caviar_sandwich_red", "caviar_sandwich_black",
+            "icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich");
 
     private ItemStack catalogItem(String id) {
         return switch (id) {
@@ -221,6 +225,11 @@ public class F8Command implements CommandExecutor, Listener {
             case "empty_salmon" -> caviarListener.createDepletedFish(Material.SALMON);
             case "caviar_sandwich_red" -> caviarListener.createCaviarSandwich("red");
             case "caviar_sandwich_black" -> caviarListener.createCaviarSandwich("black");
+            case "icy_rime" -> winterFishing.items.create(WinterItems.Kind.TOOL);
+            case "rime" -> winterFishing.items.create(WinterItems.Kind.RAW);
+            case "depleted_rime" -> winterFishing.items.create(WinterItems.Kind.DEPLETED);
+            case "ice_caviar" -> winterFishing.items.create(WinterItems.Kind.ROE);
+            case "ice_caviar_sandwich" -> winterFishing.items.create(WinterItems.Kind.SANDWICH);
             default -> throw new IllegalArgumentException("Неизвестный предмет каталога");
         };
     }
@@ -228,7 +237,7 @@ public class F8Command implements CommandExecutor, Listener {
     private void openItemMenu(Player player) {
         Inventory inventory = Bukkit.createInventory(null, 36, ITEM_TITLE);
         fill(inventory);
-        int[] slots = {10, 12, 14, 16, 19, 21, 23, 25};
+        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25};
         for (int i = 0; i < ITEM_CATALOG.size(); i++) {
             String id = ITEM_CATALOG.get(i);
             inventory.setItem(slots[i], createTaggedItem(catalogItem(id), id));
