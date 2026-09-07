@@ -71,4 +71,36 @@ class WinterRulesTest {
         assertEquals(10 * 20, WinterRules.COLD_TICKS);
         assertTrue(WinterRules.CLIMB_VELOCITY > 0.42);
     }
+    @Test
+    void gripCorrectionPreservesTheLatestCameraAngles() {
+        org.bukkit.Location anchor = new org.bukkit.Location(null, 10, 20, 30, 0, 0);
+        org.bukkit.Location attempt = new org.bukkit.Location(null, 10.2, 19.9, 30.1, 125, -45);
+        var corrected = WinterRules.anchoredLook(anchor, attempt);
+        assertEquals(10, corrected.getX());
+        assertEquals(20, corrected.getY());
+        assertEquals(30, corrected.getZ());
+        assertEquals(125, corrected.getYaw());
+        assertEquals(-45, corrected.getPitch());
+        assertEquals(0, anchor.getYaw());
+        assertEquals(10.2, attempt.getX());
+    }
+
+    @Test
+    void winterColorsMatchIceDepletedFishAndExistingSandwiches() {
+        assertEquals(net.kyori.adventure.text.format.NamedTextColor.AQUA, WinterRules.titleColor("TOOL"));
+        assertEquals(net.kyori.adventure.text.format.NamedTextColor.AQUA, WinterRules.titleColor("RAW"));
+        assertEquals(net.kyori.adventure.text.format.NamedTextColor.AQUA, WinterRules.titleColor("ROE"));
+        assertEquals(net.kyori.adventure.text.format.NamedTextColor.GRAY, WinterRules.titleColor("DEPLETED"));
+        assertEquals(net.kyori.adventure.text.format.NamedTextColor.GOLD, WinterRules.titleColor("SANDWICH"));
+    }
+
+    @Test
+    void enchantmentIsBlockedButOrdinaryRepairAndRenameRemainAllowed() {
+        assertTrue(WinterRules.forbiddenEnchant(true, true, false, false));
+        assertTrue(WinterRules.forbiddenEnchant(true, false, true, false));
+        assertTrue(WinterRules.forbiddenEnchant(true, false, false, true));
+        assertFalse(WinterRules.forbiddenEnchant(true, false, false, false));
+        assertFalse(WinterRules.forbiddenEnchant(false, true, true, true));
+    }
+
 }

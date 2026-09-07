@@ -181,10 +181,14 @@ final class WinterMovement implements Listener {
         if (state.frozenUntil > tick) {
             state.correction = event.getFrom().clone(); state.correctionTick = tick;
             event.setCancelled(true); // Включая yaw/pitch. Не вызываем цепочку собственных PlayerTeleportEvent.
-        } else if (state.grip == Grip.HANG && (event.getFrom().getX() != event.getTo().getX()
-                || event.getFrom().getY() != event.getTo().getY() || event.getFrom().getZ() != event.getTo().getZ())) {
-            state.correction = event.getFrom().clone(); state.correctionTick = tick;
-            event.setCancelled(true); // Чистый поворот камеры в зацепе разрешён.
+        } else if (state.grip == Grip.HANG && state.hangAnchor != null && !event.isCancelled()
+                && event.getTo().getWorld().equals(state.hangAnchor.getWorld())
+                && event.getTo().distanceSquared(state.hangAnchor) > 1e-8) {
+            // Меняем только XYZ. Отмена всего события возвращала старый yaw/pitch,
+            // из-за чего при движении мышью вместе с телом камера застревала.
+            Location corrected = WinterRules.anchoredLook(state.hangAnchor, event.getTo());
+            state.correction = corrected.clone(); state.correctionTick = tick;
+            event.setTo(corrected);
         }
     }
 
@@ -211,7 +215,7 @@ final class WinterMovement implements Listener {
                 state.previousY = y;
             }
             if (state.frozenUntil > tick || state.grip == Grip.HANG) {
-                holdPosition(player, state, state.frozenUntil > tick);
+                if (state.frozenUntil > tick) holdFrozenPosition(player, state);
                 player.setFallDistance(0);
                 if (player.getVelocity().lengthSquared() > 1e-8) player.setVelocity(new Vector());
             } else if (state.grip == Grip.JUMP) {
@@ -222,19 +226,18 @@ final class WinterMovement implements Listener {
         }
     }
 
-    private void holdPosition(Player player, State state, boolean cameraLocked) {
-        Location anchor = cameraLocked ? state.freezeAnchor : state.hangAnchor;
+    private void holdFrozenPosition(Player player, State state) {
+        Location anchor = state.freezeAnchor;
         if (anchor == null) return;
         Location actual = player.getLocation();
         if (!actual.getWorld().equals(anchor.getWorld())) {
-            if (cameraLocked) state.freezeAnchor = actual; else release(player);
+            state.freezeAnchor = actual;
             return;
         }
         boolean positionChanged = actual.distanceSquared(anchor) > 1e-8;
-        boolean lookChanged = cameraLocked && (actual.getYaw() != anchor.getYaw() || actual.getPitch() != anchor.getPitch());
+        boolean lookChanged = actual.getYaw() != anchor.getYaw() || actual.getPitch() != anchor.getPitch();
         if (!positionChanged && !lookChanged) return;
         Location restore = anchor.clone();
-        if (!cameraLocked) { restore.setYaw(actual.getYaw()); restore.setPitch(actual.getPitch()); }
         // PlayerMoveEvent имеет порог: мелкие движения камеры тоже исправляются,
         // но неподвижному игроку не отправляется телепорт каждый тик.
         state.correcting = true;

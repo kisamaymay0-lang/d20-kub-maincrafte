@@ -55,6 +55,7 @@ final class WinterFishing implements Listener {
         movement = new WinterMovement(plugin, items);
         plugin.getServer().getPluginManager().registerEvents(movement, plugin);
         registerRecipes();
+        new WinterItemGuard(plugin, items);
     }
 
     private NamespacedKey recipeKey(String name) {
@@ -66,14 +67,14 @@ final class WinterFishing implements Listener {
         ItemStack sandwiches = items.create(WinterItems.Kind.SANDWICH); sandwiches.setAmount(2);
         ShapelessRecipe sandwich = new ShapelessRecipe(recipeKey("ice_caviar_sandwich"), sandwiches);
         sandwich.addIngredient(Material.BREAD);
-        sandwich.addIngredient(new RecipeChoice.ExactChoice(items.create(WinterItems.Kind.ROE)));
+        sandwich.addIngredient(items.recipeInput(WinterItems.Kind.ROE));
         Bukkit.addRecipe(sandwich);
         for (WinterItems.Kind kind : List.of(WinterItems.Kind.RAW, WinterItems.Kind.DEPLETED)) {
             ItemStack fish = items.create(kind);
             // Нагрев возвращает ту же рыбу. Нулевой опыт не превращает повторный нагрев в ферму XP.
-            Bukkit.addRecipe(new FurnaceRecipe(recipeKey(kind.id + "_furnace"), fish, new RecipeChoice.ExactChoice(fish), 0f, 200));
-            Bukkit.addRecipe(new SmokingRecipe(recipeKey(kind.id + "_smoker"), fish, new RecipeChoice.ExactChoice(fish), 0f, 100));
-            Bukkit.addRecipe(new CampfireRecipe(recipeKey(kind.id + "_campfire"), fish, new RecipeChoice.ExactChoice(fish), 0f, 600));
+            Bukkit.addRecipe(new FurnaceRecipe(recipeKey(kind.id + "_furnace"), fish, items.recipeInput(kind), 0f, 200));
+            Bukkit.addRecipe(new SmokingRecipe(recipeKey(kind.id + "_smoker"), fish, items.recipeInput(kind), 0f, 100));
+            Bukkit.addRecipe(new CampfireRecipe(recipeKey(kind.id + "_campfire"), fish, items.recipeInput(kind), 0f, 600));
         }
     }
 
@@ -125,6 +126,7 @@ final class WinterFishing implements Listener {
         WinterItems.Kind kind = items.kind(event.getSource());
         if (kind == WinterItems.Kind.RAW || kind == WinterItems.Kind.DEPLETED) {
             ItemStack unchanged = event.getSource().clone(); unchanged.setAmount(1);
+            items.refresh(unchanged);
             event.setResult(unchanged);
         }
     }
