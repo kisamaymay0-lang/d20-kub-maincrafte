@@ -44,7 +44,7 @@ final class MedalSettings {
         styles.put(ProfileMedal.Metal.GOLD, new Style("Золотая медаль", "Золотую медаль", TextColor.color(0xE6B94B)));
         Map<String, String> messages = new HashMap<>();
         messages.put("public", "{player} получил <green>[{rarity}]</green>!");
-        messages.put("personal", "Вы получили новую медаль! Подробнее /profile.");
+        messages.put("personal", "<green>Вы получили новую медаль!</green> Подробнее /profile.");
         messages.put("given", "<gray>Медаль «{title}» добавлена игроку {player}.</gray>");
         messages.put("taken", "<gray>У игрока {player} забрано медалей: {count}.</gray>");
         messages.put("list", "<gold>Медали игрока {player}:</gold>");

@@ -175,7 +175,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
     }
 
-    /** Съеден бутерброд: отмечаем вид навсегда и выдаём медали, заполненные в medals/config.yml. */
+    /**
+     * Съеден бутерброд: отмечаем вид навсегда и выдаём медали, заполненные в medals/config.yml.
+     * Запрет дубля — только пока медаль ЕСТЬ у игрока: изъятую (take/очистку) можно
+     * получить заново следующим подходящим съеденным бутербродом.
+     */
     void sandwichEaten(Player player, String kind) {
         if (!("red".equals(kind) || "black".equals(kind) || "ice".equals(kind))) return;
         try {
@@ -184,11 +188,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             storage.prepareMedalChange(owner);
             boolean changed = data.markClaimed(ProfileAwards.eatenMarker(kind));
             boolean all = medalSettings.sandwichAllKinds.filled()
-                    && !data.hasReward(ProfileMedal.SANDWICH_ALL_KINDS)
+                    && !data.ownsReward(ProfileMedal.SANDWICH_ALL_KINDS)
                     && ProfileAwards.allSandwichKindsEaten(data)
                     && data.award(medal(medalSettings.sandwichAllKinds, ProfileMedal.SANDWICH_ALL_KINDS));
             boolean ice = "ice".equals(kind) && medalSettings.sandwichIceCaviar.filled()
-                    && !data.hasReward(ProfileMedal.SANDWICH_ICE_CAVIAR)
+                    && !data.ownsReward(ProfileMedal.SANDWICH_ICE_CAVIAR)
                     && data.award(medal(medalSettings.sandwichIceCaviar, ProfileMedal.SANDWICH_ICE_CAVIAR));
             if (changed || all || ice) storage.changed(owner);
             if (!changed && !all && !ice) return;

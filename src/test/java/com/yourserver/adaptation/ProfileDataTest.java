@@ -128,6 +128,27 @@ class ProfileDataTest {
     }
 
     @Test
+    void revokedAutomaticMedalCanBeEarnedAgainButNeverDuplicatedWhileOwned() {
+        ProfileData data = new ProfileData(owner, "Player");
+        ProfileMedal first = new ProfileMedal(UUID.randomUUID(), ProfileMedal.Metal.GOLD, "Дегустатор",
+                List.of("Съедены все три вида бутербродов"), 1000, ProfileMedal.SANDWICH_ALL_KINDS);
+        assertTrue(data.award(first));
+        assertTrue(data.ownsReward(ProfileMedal.SANDWICH_ALL_KINDS));
+        // Пока медаль у игрока — вторая копия того же достижения не выдаётся.
+        ProfileMedal duplicate = new ProfileMedal(UUID.randomUUID(), ProfileMedal.Metal.GOLD, "Дегустатор",
+                List.of("Съедены все три вида бутербродов"), 2000, ProfileMedal.SANDWICH_ALL_KINDS);
+        assertFalse(data.award(duplicate));
+        // После изъятия (очистки) медали достижение можно получить заново.
+        data.revoke(first.id());
+        assertFalse(data.ownsReward(ProfileMedal.SANDWICH_ALL_KINDS));
+        ProfileMedal again = new ProfileMedal(UUID.randomUUID(), ProfileMedal.Metal.GOLD, "Дегустатор",
+                List.of("Съедены все три вида бутербродов"), 3000, ProfileMedal.SANDWICH_ALL_KINDS);
+        assertTrue(data.award(again), "Снятая автозачётная медаль не должна становиться пожизненным запретом");
+        assertEquals(1, data.medals().size());
+        assertEquals(again.id(), data.medals().keySet().iterator().next());
+    }
+
+    @Test
     void onlyTheUpperAndLowerRowsArePlacementTargets() {
         for (int i = 0; i < 27; i++) {
             int logical = ProfileText.medalSlot(i);

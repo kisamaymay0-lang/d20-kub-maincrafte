@@ -4,7 +4,7 @@
 # {player}, {rarity}, {title}, {count}, {error} подставляются как безопасный простой текст.
 messages:
   public: '{player} получил <green>[{rarity}]</green>!'
-  personal: 'Вы получили новую медаль! Подробнее /profile.'
+  personal: '<green>Вы получили новую медаль!</green> Подробнее /profile.'
   given: '<gray>Медаль «{title}» добавлена игроку {player}.</gray>'
   taken: '<gray>У игрока {player} забрано медалей: {count}.</gray>'
   list: '<gold>Медали игрока {player}:</gold>'
@@ -49,9 +49,14 @@ astronomy:
 sandwiches:
   all-kinds:
     metal: gold
-    title: ''
-    reasons: []
+    title: 'И это есть ваши деликатесы?'
+    reasons:
+    - 'Добыв красную икру, съешьте бутерброд с ней.'
+    - 'Добыв черную икру, съешьте бутерброд с ней.'
+    - 'Добыв ледяную икру, съешьте бутерброд с ней.'
   ice-caviar:
-    metal: copper
-    title: ''
-    reasons: []
+    metal: silver
+    title: 'Поймай, обработай и... отравись?'
+    reasons:
+    - 'Поймайте особый предмет с рыбалки в зимних биомах - Заледеневшая изморозь.'
+    - 'Добыв ледяную икру, съешьте бутерброд с ней.'

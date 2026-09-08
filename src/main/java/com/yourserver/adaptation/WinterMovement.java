@@ -23,6 +23,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -58,6 +59,7 @@ final class WinterMovement implements Listener {
     }
     private final WinterItems items;
     private final BlockData ice;
+    private final ItemStack rimeParticle;
     private final Map<UUID, State> states = new HashMap<>();
     private final NamespacedKey walk, fly, gravity, coldLock, coldTicks;
     private final BukkitTask task;
@@ -66,6 +68,7 @@ final class WinterMovement implements Listener {
     WinterMovement(JavaPlugin plugin, WinterItems items) {
         this.items = items;
         ice = Bukkit.createBlockData(Material.ICE);
+        rimeParticle = items.create(WinterItems.Kind.TOOL);
         walk = new NamespacedKey(plugin, "winter_saved_walk");
         fly = new NamespacedKey(plugin, "winter_saved_fly");
         gravity = new NamespacedKey(plugin, "winter_saved_gravity");
@@ -200,14 +203,14 @@ final class WinterMovement implements Listener {
         if (!items.useClimb(player)) release(player); // Последний прыжок остаётся, но сломанной киркой больше не зацепиться.
     }
 
-    /** Частицы «поломки льда» и звук в точке удара изморозью о стену. */
+    /** Осколки текстуры самой изморози и звук в точке удара о стену. */
     private void iceBreakEffects(Player player, State state) {
         Location at = player.getLocation().add(0, 1.1, 0);
         Block wallBlock = state.wall;
         if (wallBlock != null && !wallBlock.getType().isAir()) at = nearestFace(wallBlock, player.getEyeLocation());
         player.getWorld().playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.7f, 0.9f);
-        player.getWorld().spawnParticle(Particle.BLOCK, at, 26, 0.35, 0.35, 0.35, 0.05, ice);
-        player.getWorld().spawnParticle(Particle.ITEM_SNOWBALL, at, 8, 0.3, 0.3, 0.3, 0.02);
+        // Частицы предмета изморози из руки, а не снега/льда.
+        player.getWorld().spawnParticle(Particle.ITEM, at, 22, 0.35, 0.35, 0.35, 0.04, rimeParticle);
     }
 
     /** Центр грани блока, обращённой к игроку. */
@@ -335,8 +338,8 @@ final class WinterMovement implements Listener {
         }
         Location base = state.freezeAnchor != null && state.freezeAnchor.getWorld().equals(player.getWorld())
                 ? state.freezeAnchor : player.getLocation();
-        placeIce(state.iceLower, base, 0.5);
-        placeIce(state.iceUpper, base, 1.5);
+        placeIce(state.iceLower, base, 0.0);
+        placeIce(state.iceUpper, base, 1.0);
     }
 
     private void configureIce(BlockDisplay display) {
@@ -350,11 +353,18 @@ final class WinterMovement implements Listener {
     }
 
     private void placeIce(BlockDisplay display, Location base, double up) {
+        // BlockDisplay растёт из нижнего угла блока (у ItemDisplay позиция — центр).
+        // Чтобы колонна льда стояла ровно вокруг игрока, сдвигаем полблока по X/Z
+        // и ставим нижний куб от ног (up=0), верхний — на блок выше (up=1).
         Location target = base.clone();
+        target.setX(target.getX() - 0.5);
+        target.setZ(target.getZ() - 0.5);
         target.setY(target.getY() + up);
         target.setYaw(0); target.setPitch(0);
         if (!display.getLocation().getWorld().equals(target.getWorld())
-                || display.getLocation().distanceSquared(target) > 1e-6) display.teleport(target);
+                || display.getLocation().distanceSquared(target) > 1e-6
+                || display.getLocation().getYaw() != 0
+                || display.getLocation().getPitch() != 0) display.teleport(target);
     }
 
     private static void clearIce(State state) {
