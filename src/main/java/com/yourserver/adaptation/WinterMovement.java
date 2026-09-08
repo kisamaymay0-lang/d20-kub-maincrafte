@@ -13,6 +13,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerInputEvent;
@@ -418,6 +420,17 @@ final class WinterMovement implements Listener {
     @EventHandler public void join(PlayerJoinEvent event) { recover(event.getPlayer()); }
     @EventHandler public void quit(PlayerQuitEvent event) { cleanup(event.getPlayer()); }
     @EventHandler public void death(PlayerDeathEvent event) { cleanup(event.getEntity()); }
+
+    /** Пока действует заморозка изморозью, игрок не получает НИКАКОГО урона, кроме
+     *  ванильного «мороза» (FREEZE), которым сама изморозь и бьёт: можно взорвать
+     *  динамит вплотную или упасть в лаву — урон придёт только от заморозки. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void damage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+        State state = states.get(player.getUniqueId());
+        if (state == null || state.frozenUntil <= tick) return;
+        if (event.getCause() != DamageCause.FREEZE) event.setCancelled(true);
+    }
 
     void disable() {
         task.cancel();

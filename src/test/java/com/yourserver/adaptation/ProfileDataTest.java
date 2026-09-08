@@ -149,6 +149,25 @@ class ProfileDataTest {
     }
 
     @Test
+    void prefixOwnershipCasesAndEquippedPrefixPersistInProfileFile() throws Exception {
+        ProfileData data = new ProfileData(owner, "Player");
+        assertTrue(data.addPrefix("pref1"));
+        assertFalse(data.addPrefix("pref1"), "Повторное добавление того же префикса не меняет файл");
+        assertTrue(data.addPrefix("pref2"));
+        assertTrue(data.equipPrefix("pref2"));
+        assertFalse(data.equipPrefix("pref99"), "Чужой префикс нельзя надеть");
+        assertTrue(data.addPrefixCase());
+        ProfileData back = ProfileCodec.decode(owner, ProfileCodec.encodeProfile(data));
+        assertTrue(back.ownsPrefix("pref1"));
+        assertTrue(back.ownsPrefix("pref2"));
+        assertFalse(back.ownsPrefix("pref3"));
+        assertEquals("pref2", back.equippedPrefix());
+        assertEquals(1, back.prefixCases());
+        assertTrue(back.takePrefixCase());
+        assertFalse(back.takePrefixCase(), "Нельзя взять кейс, которого нет");
+    }
+
+    @Test
     void onlyTheUpperAndLowerRowsArePlacementTargets() {
         for (int i = 0; i < 27; i++) {
             int logical = ProfileText.medalSlot(i);

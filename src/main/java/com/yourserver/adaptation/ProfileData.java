@@ -31,6 +31,9 @@ final class ProfileData {
     private long revision;
     private long medalRevision;
     private long astronomyProgress;
+    private final Set<String> ownedPrefixes = new HashSet<>();
+    private String equippedPrefix;
+    private int prefixCases;
 
     ProfileData(UUID owner, String name) {
         this.owner = Objects.requireNonNull(owner);
@@ -57,6 +60,9 @@ final class ProfileData {
         copy.description = description; copy.voice = voice;
         copy.votes.putAll(votes); copy.likes = likes; copy.dislikes = dislikes;
         copy.medals.putAll(medals); copy.rewards.addAll(rewards);
+        copy.ownedPrefixes.addAll(ownedPrefixes);
+        copy.equippedPrefix = equippedPrefix;
+        copy.prefixCases = prefixCases;
         System.arraycopy(layout, 0, copy.layout, 0, layout.length);
         copy.astronomyProgress = astronomyProgress;
         return copy;
@@ -74,6 +80,42 @@ final class ProfileData {
         return medals.values().stream().anyMatch(medal -> medal.source().equals(source));
     }
     Set<String> rewardHistory() { return Set.copyOf(rewards); }
+    boolean ownsPrefix(String id) { return id != null && ownedPrefixes.contains(id); }
+    Set<String> ownedPrefixes() { return Set.copyOf(ownedPrefixes); }
+    String equippedPrefix() { return equippedPrefix; }
+    int prefixCases() { return prefixCases; }
+    boolean addPrefix(String id) {
+        if (id == null || id.isEmpty() || !ownedPrefixes.add(id)) return false;
+        revision++;
+        return true;
+    }
+    boolean equipPrefix(String id) {
+        if (id != null && !ownedPrefixes.contains(id)) return false;
+        if (java.util.Objects.equals(equippedPrefix, id)) return false;
+        equippedPrefix = id;
+        revision++;
+        return true;
+    }
+    boolean addPrefixCase() {
+        prefixCases++;
+        revision++;
+        return true;
+    }
+    boolean takePrefixCase() {
+        if (prefixCases <= 0) return false;
+        prefixCases--;
+        revision++;
+        return true;
+    }
+    /** Только чтение из файла: без пометки изменения, как restoreHistory. */
+    void restorePrefixes(Set<String> owned, String equipped, int cases) {
+        ownedPrefixes.clear();
+        if (owned != null) {
+            for (String id : owned) if (id != null && !id.isEmpty()) ownedPrefixes.add(id);
+        }
+        equippedPrefix = (equipped != null && ownedPrefixes.contains(equipped)) ? equipped : null;
+        prefixCases = Math.max(0, cases);
+    }
     Map<UUID, Long> notificationHistory() { return Map.copyOf(notified); }
     Vote voteBy(UUID voter) { return votes.get(voter); }
     Map<UUID, Vote> votes() { return Collections.unmodifiableMap(votes); }

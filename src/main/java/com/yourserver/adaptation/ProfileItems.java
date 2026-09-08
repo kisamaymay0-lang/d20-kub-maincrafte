@@ -44,6 +44,77 @@ final class ProfileItems {
         return Component.text(value, color).decoration(TextDecoration.ITALIC, false);
     }
 
+    static Component bold(String value, TextColor color) {
+        return Component.text(value, color).decorate(TextDecoration.BOLD).decoration(TextDecoration.ITALIC, false);
+    }
+
+    private static ItemStack named(Material material, Component display, List<Component> lore) {
+        ItemStack item = new ItemStack(material);
+        ItemMeta meta = item.getItemMeta();
+        meta.displayName(display);
+        meta.lore(lore);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private static ItemStack model(ItemStack item, String file) {
+        if (file == null || file.isEmpty()) return item;
+        ItemMeta meta = item.getItemMeta();
+        meta.setItemModel(new NamespacedKey("f8resurs", file));
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** Кнопка «Настроить префикс»: случайная иконка префикса при каждом открытии профиля. */
+    ItemStack prefixButton(PrefixCatalog.Prefix icon, PrefixCatalog.Prefix equipped, boolean owner) {
+        List<Component> lore = new ArrayList<>();
+        if (equipped != null) lore.add(text("Текущий: ", NamedTextColor.GRAY).append(text(equipped.name(), equipped.color())));
+        else lore.add(text("Префикс не выбран", NamedTextColor.DARK_GRAY));
+        lore.add(text(owner ? "Выберите префикс или откройте кейс" : "Настраивать можно только свой профиль", NamedTextColor.DARK_GRAY));
+        return model(named(Material.NAME_TAG, medals.title("Настроить префикс", ProfileMedal.Metal.GOLD), lore),
+                icon == null ? null : icon.file());
+    }
+
+    /** Префикс в списке выбора. Чужой показан красным «У вас нету этого префикса!». */
+    ItemStack prefixEntry(PrefixCatalog.Prefix prefix, boolean owned, boolean equipped) {
+        if (!owned) {
+            ItemStack item = named(Material.NAME_TAG, bold("У вас нету этого префикса!", NamedTextColor.RED), List.of(
+                    text("Префикс: ", NamedTextColor.GRAY).append(text(prefix.name(), prefix.color())),
+                    text("Получите его из кейса префиксов", NamedTextColor.DARK_GRAY)));
+            return model(item, prefix.file());
+        }
+        List<Component> lore = new ArrayList<>();
+        if (equipped) {
+            lore.add(text("Выбран. Shift + клик — снять префикс", NamedTextColor.DARK_GRAY));
+        } else {
+            lore.add(text("Нажмите, чтобы надеть префикс", NamedTextColor.DARK_GRAY));
+        }
+        lore.add(text("Отображается перед ником", NamedTextColor.GRAY));
+        ItemStack item = named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(equipped);
+        item.setItemMeta(meta);
+        return model(item, prefix.file());
+    }
+
+    /** Кнопка «Кейс префиксов»: показывает число кейсов у игрока. */
+    ItemStack prefixCase(int cases) {
+        String count = cases == 1 ? "Есть 1 кейс префиксов" : "Есть " + cases + " кейсов префиксов";
+        ItemStack item = named(Material.CHEST, medals.title("Кейс префиксов", ProfileMedal.Metal.GOLD), List.of(
+                text(count, cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED),
+                text(cases > 0 ? "Нажмите, чтобы открыть" : "Кейсы выдаёт администратор", NamedTextColor.DARK_GRAY)));
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** Карточка префикса во время вскрытия кейса (5 → 1). */
+    ItemStack prefixReveal(PrefixCatalog.Prefix prefix) {
+        return model(named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), List.of(
+                text("Вскрытие кейса…", NamedTextColor.DARK_GRAY))), prefix.file());
+    }
+
     static ItemStack item(Material material, String name, TextColor color, List<Component> lore) {
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();

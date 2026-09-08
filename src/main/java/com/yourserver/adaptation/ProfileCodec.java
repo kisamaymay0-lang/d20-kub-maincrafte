@@ -53,6 +53,9 @@ final class ProfileCodec {
         yaml.set("medal-history.astronomy-progress", data.astronomyProgress());
         yaml.set("medal-history.claimed", new ArrayList<>(data.rewardHistory()));
         data.notificationHistory().forEach((id, when) -> yaml.set("medal-history.announced." + id, when));
+        yaml.set("prefixes.owned", new ArrayList<>(data.ownedPrefixes()));
+        yaml.set("prefixes.equipped", data.equippedPrefix() == null ? "" : data.equippedPrefix());
+        yaml.set("prefixes.cases", data.prefixCases());
         List<String> slots = new ArrayList<>();
         for (UUID id : data.layout()) slots.add(id == null ? "" : id.toString());
         yaml.set("display", slots);
@@ -103,6 +106,12 @@ final class ProfileCodec {
         if (history != null) for (String id : history.getKeys(false)) announced.put(UUID.fromString(id), history.getLong(id));
         data.restoreHistory(yaml.getStringList("medal-history.claimed"), announced);
         data.astronomyProgress(yaml.getLong("medal-history.astronomy-progress", 0));
+        ConfigurationSection prefixes = yaml.getConfigurationSection("prefixes");
+        if (yaml.contains("prefixes") && prefixes == null) throw new IllegalArgumentException("Неверные префиксы");
+        if (prefixes != null) {
+            data.restorePrefixes(new HashSet<>(prefixes.getStringList("owned")),
+                    prefixes.getString("equipped", ""), prefixes.getInt("cases", 0));
+        }
         if (version == 1) data.replaceMedals(readMedals(yaml));
         if (!yaml.isList("display")) throw new IllegalArgumentException("Неверные слоты профиля");
         List<?> display = yaml.getList("display", List.of());

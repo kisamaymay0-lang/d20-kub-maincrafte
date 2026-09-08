@@ -1,0 +1,46 @@
+# /profile → «Настроить префикс» → список и кейсы префиксов.
+# Каждый префикс: id (как в данных игрока), name — как он выглядит перед ником,
+# color — цвет текста префикса, file — файл иконки в ресурспаке (items/<file>.json,
+# модели/текстуры называются pref1, pref2, … и их можно заменить своими).
+# Кейсы выдаёт администратор: /profile case prefix give <ник>
+prefixes:
+  pref1:
+    name: 'Морозный'
+    color: '#8FE3F5'
+    file: pref1
+  pref2:
+    name: 'Закалённый'
+    color: '#B9C3CE'
+    file: pref2
+  pref3:
+    name: 'Звездочёт'
+    color: '#C0A6FF'
+    file: pref3
+  pref4:
+    name: 'Полярный'
+    color: '#6FB1FF'
+    file: pref4
+  pref5:
+    name: 'Зимний мастер'
+    color: '#E6B94B'
+    file: pref5
+  pref6:
+    name: 'Ледяной'
+    color: '#A9E2F2'
+    file: pref6
+  pref7:
+    name: 'Северный'
+    color: '#7BE0A0'
+    file: pref7
+  pref8:
+    name: 'Неуловимый'
+    color: '#C9CDD4'
+    file: pref8
+  pref9:
+    name: 'Аврора'
+    color: '#7FF0D2'
+    file: pref9
+  pref10:
+    name: 'Легенда'
+    color: '#FFB347'
+    file: pref10

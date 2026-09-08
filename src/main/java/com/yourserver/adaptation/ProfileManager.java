@@ -1,11 +1,14 @@
 package com.yourserver.adaptation;
 
+import io.papermc.paper.chat.ChatRenderer;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
+import org.bukkit.FireworkEffect;
+import org.bukkit.Location;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.Sound;
 import org.bukkit.command.Command;
@@ -27,9 +30,11 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
+import org.bukkit.entity.Firework;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.inventory.meta.FireworkMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -38,6 +43,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -50,7 +56,19 @@ import java.util.function.ToLongFunction;
 
 /** Профиль/коллекция/размещение. Доступ проверяется по UUID и серверному holder, не по названию предмета. */
 public final class ProfileManager implements Listener, CommandExecutor, TabCompleter {
-    private enum Screen { PROFILE, COLLECTION, PLACE }
+    private enum Screen { PROFILE, COLLECTION, PLACE, PREFIX, PREFIX_CASE }
+
+    private static final class CaseRun {
+        final UUID owner;
+        final List<String> remaining = new ArrayList<>();
+        int removed;
+        int elapsed;
+        boolean victory;
+        boolean victoryHeld;
+        int victoryTick;
+        BukkitTask task;
+        CaseRun(UUID owner) { this.owner = owner; }
+    }
 
     private static final class Menu implements InventoryHolder {
         final UUID viewer;
@@ -58,6 +76,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         final Screen screen;
         final UUID chosen;
         final Map<Integer, UUID> medalsBySlot = new HashMap<>();
+        final Map<Integer, String> prefixesBySlot = new HashMap<>();
         int page;
         Inventory inventory;
         Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen) {
@@ -75,6 +94,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private final JavaPlugin plugin;
     private final ProfileStorage storage;
     private final Path medalConfig;
+    private final Path prefixConfig;
+    private final PrefixCatalog prefixes;
     private MedalSettings medalSettings;
     private final ProfileItems items;
     private final ProfileCards cards;
@@ -86,6 +107,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private final Map<UUID, Integer> rightClicks = new HashMap<>();
     private final Set<UUID> queued = new HashSet<>();
     private final ConcurrentHashMap<UUID, Editing> editing = new ConcurrentHashMap<>();
+    private final Map<UUID, CaseRun> caseRuns = new HashMap<>();
+    private final Map<UUID, String> pendingPrefixGrants = new HashMap<>();
+    /** Надетый префикс для быстрого чтения из асинхронных событий (чат) без обращения к хранилищу. */
+    private final Map<UUID, String> equippedPrefixes = new ConcurrentHashMap<>();
     private ToLongFunction<UUID> constellationMilestone = ignored -> 0L;
     private volatile boolean stopping;
 
@@ -96,6 +121,12 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         medalSettings = MedalSettings.defaults();
         try { medalSettings = MedalSettings.load(medalConfig); }
         catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка настройки медалей; временно используются стандартные значения", ex); }
+        prefixConfig = plugin.getDataFolder().toPath().resolve("prefixes.yml");
+        if (!Files.exists(prefixConfig)) plugin.saveResource("prefixes.yml", false);
+        PrefixCatalog loadedPrefixes = PrefixCatalog.defaults();
+        try { loadedPrefixes = PrefixCatalog.load(prefixConfig); }
+        catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка prefixes.yml; используются стандартные префиксы", ex); }
+        prefixes = loadedPrefixes;
         storage = new ProfileStorage(plugin.getDataFolder().toPath().resolve("profiles"),
                 plugin.getDataFolder().toPath().resolve("medals/players"), writer, plugin.getLogger(), medal -> medalSettings.migrate(medal));
         ZoneId zone = ZoneId.systemDefault();
@@ -209,6 +240,194 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         return new ProfileMedal(UUID.randomUUID(), spec.metal(), spec.title(), spec.reasons(), System.currentTimeMillis(), source);
     }
 
+    // ===================== Префиксы и кейсы =====================
+
+    private void savePrefix(ProfileData data) {
+        storage.changed(data.owner);
+        if (!storage.flushBlocking(data.owner)) throw new IllegalStateException("Не удалось сохранить профиль");
+    }
+
+    /** «Префикс перед ником везде»: список игроков (tab) и отображаемое имя (чат, смерти). */
+    private void applyPrefixName(Player player, ProfileData data) {
+        PrefixCatalog.Prefix prefix = prefixes.get(data.equippedPrefix());
+        Component name = Component.text(player.getName());
+        if (prefix != null) {
+            name = Component.text("[" + prefix.name() + "] ", prefix.color()).append(Component.text(player.getName()));
+        }
+        if (prefix == null) equippedPrefixes.remove(player.getUniqueId());
+        else equippedPrefixes.put(player.getUniqueId(), prefix.id());
+        player.displayName(name);
+        player.playerListName(name);
+    }
+
+    private void equipPrefix(Player player, ProfileData data, String id) {
+        String previous = data.equippedPrefix();
+        if (previous != null && previous.equals(id)) return;
+        if (!data.equipPrefix(id)) return;
+        try { savePrefix(data); }
+        catch (RuntimeException ex) { data.equipPrefix(previous); throw ex; }
+        clickSound(player);
+        applyPrefixName(player, data);
+        refresh(data.owner);
+    }
+
+    private void unequipPrefix(Player player, ProfileData data) {
+        String previous = data.equippedPrefix();
+        if (previous == null) return;
+        if (!data.equipPrefix(null)) return;
+        try { savePrefix(data); }
+        catch (RuntimeException ex) { data.equipPrefix(previous); throw ex; }
+        clickSound(player);
+        applyPrefixName(player, data);
+        refresh(data.owner);
+    }
+
+    /** Списывает кейс и запускает вскрытие 5 → 1 (кейс не возвращается даже при выходе). */
+    private void openPrefixCase(Player player, ProfileData data) {
+        if (caseRuns.containsKey(data.owner)) {
+            player.sendMessage(ProfileItems.text("Вскрытие кейса уже идёт.", NamedTextColor.RED));
+            return;
+        }
+        List<PrefixCatalog.Prefix> pool = prefixes.list().stream()
+                .filter(prefix -> !data.ownsPrefix(prefix.id())).toList();
+        if (pool.isEmpty()) {
+            player.sendMessage(ProfileItems.text("У вас уже есть все префиксы.", NamedTextColor.RED));
+            return;
+        }
+        if (!data.takePrefixCase()) {
+            player.sendMessage(ProfileItems.text("У вас нет кейсов префиксов.", NamedTextColor.RED));
+            return;
+        }
+        try { savePrefix(data); }
+        catch (RuntimeException ex) {
+            data.addPrefixCase();
+            player.sendMessage(ProfileItems.text("Не удалось открыть кейс: " + ex.getMessage(), NamedTextColor.RED));
+            return;
+        }
+        List<PrefixCatalog.Prefix> shuffled = new ArrayList<>(pool);
+        Collections.shuffle(shuffled, new java.util.Random());
+        CaseRun run = new CaseRun(data.owner);
+        for (int i = 0; i < Math.min(5, shuffled.size()); i++) run.remaining.add(shuffled.get(i).id());
+        if (run.remaining.size() == 1) run.victory = true; // Доступен один префикс: финальные 4 секунды сразу.
+        caseRuns.put(data.owner, run);
+        clickSound(player);
+        open(player, data.owner, Screen.PREFIX_CASE, 0, null);
+        run.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> caseStep(run), 20L, 20L);
+    }
+
+    private void caseStep(CaseRun run) {
+        try {
+            caseTick(run);
+        } catch (RuntimeException ex) {
+            // Даже если анимация упала (например, не загрузился мир), кейс уже списан —
+            // завершаем вскрытие и выдаём оставшийся префикс.
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка анимации кейса префиксов " + run.owner, ex);
+            if (caseRuns.get(run.owner) == run) finalizeCase(run);
+        }
+    }
+
+    private void caseTick(CaseRun run) {
+        run.elapsed += 20;
+        if (run.remaining.size() > 1 && run.elapsed >= (run.removed + 1) * 80) {
+            run.remaining.remove(new java.util.Random().nextInt(run.remaining.size()));
+            run.removed++;
+            Player player = Bukkit.getPlayer(run.owner);
+            if (player != null) {
+                player.playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.9f, 0.7f);
+                renderOpenCase(player);
+            }
+            if (run.remaining.size() == 1) run.victory = true; // Финальный префикс остаётся.
+        }
+        if (run.remaining.size() == 1 && run.victory) {
+            Player player = Bukkit.getPlayer(run.owner);
+            if (!run.victoryHeld) {
+                run.victoryHeld = true;
+                run.victoryTick = run.elapsed;
+                if (player != null) {
+                    player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.1f);
+                    fireworks(player, run.remaining.getFirst());
+                    renderOpenCase(player);
+                }
+            } else {
+                int since = run.elapsed - run.victoryTick;
+                if (since == 40 && player != null) player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_BLAST, 1.0f, 1.2f);
+                else if (since == 60 && player != null) player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 1.0f, 1.4f);
+                else if (since >= 80) { finalizeCase(run); return; }
+            }
+            return;
+        }
+        if (run.elapsed >= 400) finalizeCase(run); // Страховка от вечного тика.
+    }
+
+    /** Салют цветом выигранного префикса над игроком. */
+    private void fireworks(Player player, String prefixId) {
+        PrefixCatalog.Prefix prefix = prefixes.get(prefixId);
+        if (prefix == null) return;
+        try {
+            int rgb = prefix.color().value();
+            var color = org.bukkit.Color.fromRGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+            for (int i = 0; i < 2; i++) {
+                Location location = player.getLocation().add(0, 1.2, 0);
+                Firework firework = player.getWorld().spawn(location, Firework.class);
+                FireworkMeta meta = firework.getFireworkMeta();
+                meta.addEffect(FireworkEffect.builder().with(FireworkEffect.Type.BURST)
+                        .withColor(color).withFlicker().build());
+                meta.setPower(1);
+                firework.setFireworkMeta(meta);
+                Bukkit.getScheduler().runTaskLater(plugin, firework::detonate, 6L + 8L * i);
+            }
+        } catch (RuntimeException ignored) { }
+    }
+
+    private void finalizeCase(CaseRun run) {
+        if (run.task != null) run.task.cancel();
+        caseRuns.remove(run.owner);
+        Player player = Bukkit.getPlayer(run.owner);
+        String winner = run.remaining.isEmpty() ? null : run.remaining.getFirst();
+        try {
+            ProfileData data = profile(run.owner, player == null ? run.owner.toString() : player.getName());
+            if (winner == null || !data.addPrefix(winner)) {
+                // Победитель уже был получен (например, выдан администратором во время вскрытия):
+                // кейс не пропадает, добираем любой ещё не полученный префикс.
+                winner = prefixes.list().stream().map(PrefixCatalog.Prefix::id)
+                        .filter(candidate -> !data.ownsPrefix(candidate)).findFirst().orElse(null);
+                if (winner == null || !data.addPrefix(winner)) {
+                    plugin.getLogger().warning("Кейс префиксов " + run.owner + ": все префиксы уже получены");
+                    return;
+                }
+            }
+            savePrefix(data);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Префикс из кейса не сохранён: " + run.owner, ex);
+            return;
+        }
+        if (player == null || !player.isOnline()) {
+            pendingPrefixGrants.put(run.owner, winner); // Сообщим при входе.
+            return;
+        }
+        announcePrefix(player, winner);
+        Menu open = menus.get(player.getUniqueId());
+        if (open != null && open.screen == Screen.PREFIX_CASE
+                && player.getOpenInventory().getTopInventory() == open.inventory) {
+            open(player, run.owner, Screen.PROFILE, 0, null);
+        }
+    }
+
+    private void announcePrefix(Player player, String winner) {
+        PrefixCatalog.Prefix prefix = prefixes.get(winner);
+        String name = prefix == null ? winner : prefix.name();
+        player.sendMessage(ProfileItems.text("Вы получили префикс «" + name + "»!", NamedTextColor.GREEN)
+                .append(ProfileItems.text(" Поменяйте его в /profile", NamedTextColor.WHITE)));
+        player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
+    }
+
+    private void renderOpenCase(Player player) {
+        Menu menu = menus.get(player.getUniqueId());
+        if (menu == null || menu.screen != Screen.PREFIX_CASE
+                || player.getOpenInventory().getTopInventory() != menu.inventory) return;
+        populate(menu, profile(menu.owner, menu.owner.toString()));
+    }
+
     private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen) {
         if (stopping) return;
         if (screen != Screen.PROFILE && !viewer.getUniqueId().equals(owner)) return;
@@ -221,6 +440,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 case PROFILE -> "Профиль • " + data.name();
                 case COLLECTION -> "Выбрать медаль";
                 case PLACE -> "Разместить медаль";
+                case PREFIX -> "Выбрать префикс";
+                case PREFIX_CASE -> "Вскрытие кейса префиксов";
             };
             menu.inventory = Bukkit.createInventory(menu, 27, Component.text(title, NamedTextColor.DARK_GRAY));
             populate(menu, data);
@@ -241,6 +462,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         var filler = ProfileItems.filler();
         for (int i = 0; i < 27; i++) if (ProfileText.medalSlot(i) >= 0) inventory.setItem(i, filler);
         menu.medalsBySlot.clear();
+        menu.prefixesBySlot.clear();
         populateDetails(menu, data);
         if (menu.screen == Screen.COLLECTION) {
             List<ProfileMedal> medals = new ArrayList<>(data.medals().values());
@@ -257,6 +479,26 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             if (menu.page + 1 < pages) inventory.setItem(17, items.page(true, menu.page, pages));
             return;
         }
+        if (menu.screen == Screen.PREFIX) {
+            List<PrefixCatalog.Prefix> all = prefixes.list();
+            int pages = Math.max(1, (all.size() + 17) / 18);
+            menu.page = Math.clamp(menu.page, 0, pages - 1);
+            for (int i = 0; i < 18 && menu.page * 18 + i < all.size(); i++) {
+                PrefixCatalog.Prefix prefix = all.get(menu.page * 18 + i);
+                int slot = ProfileText.inventorySlot(i);
+                menu.prefixesBySlot.put(slot, prefix.id());
+                inventory.setItem(slot, items.prefixEntry(prefix, data.ownsPrefix(prefix.id()),
+                        prefix.id().equals(data.equippedPrefix())));
+            }
+            if (menu.page > 0) inventory.setItem(9, items.page(false, menu.page, pages));
+            if (menu.page + 1 < pages) inventory.setItem(17, items.page(true, menu.page, pages));
+            inventory.setItem(13, items.prefixCase(data.prefixCases()));
+            return;
+        }
+        if (menu.screen == Screen.PREFIX_CASE) {
+            renderCaseMenu(menu);
+            return;
+        }
         for (int i = 0; i < 18; i++) {
             ProfileMedal medal = data.medals().get(data.medalAt(i));
             int slot = ProfileText.inventorySlot(i);
@@ -267,11 +509,29 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     private void populateDetails(Menu menu, ProfileData data) {
         boolean owner = menu.viewer.equals(menu.owner);
-        menu.inventory.setItem(13, items.head(data, menu.screen == Screen.PROFILE ? data.name() : "Отмена.", menu.screen == Screen.PROFILE && owner));
-        if (menu.screen != Screen.COLLECTION) {
+        if (menu.screen == Screen.PROFILE || menu.screen == Screen.PLACE) {
+            menu.inventory.setItem(13, items.head(data, menu.screen == Screen.PROFILE ? data.name() : "Отмена.", menu.screen == Screen.PROFILE && owner));
             menu.inventory.setItem(12, items.vote(ProfileData.Vote.LIKE, data.voteBy(menu.viewer) == ProfileData.Vote.LIKE, owner));
             menu.inventory.setItem(14, items.vote(ProfileData.Vote.DISLIKE, data.voteBy(menu.viewer) == ProfileData.Vote.DISLIKE, owner));
             menu.inventory.setItem(17, items.settings(data.medals().size(), owner));
+        }
+        if (menu.screen == Screen.PROFILE) {
+            menu.inventory.setItem(9, items.prefixButton(randomPrefix(), prefixes.get(data.equippedPrefix()), owner));
+        }
+    }
+
+    private PrefixCatalog.Prefix randomPrefix() {
+        List<PrefixCatalog.Prefix> all = prefixes.list();
+        return all.isEmpty() ? null : all.get(Math.abs(new java.util.Random().nextInt()) % all.size());
+    }
+
+    private void renderCaseMenu(Menu menu) {
+        CaseRun run = caseRuns.get(menu.owner);
+        int total = run == null ? 0 : run.remaining.size();
+        for (int i = 0; i < total; i++) {
+            int slot = 13 - (total - 1) / 2 + i;
+            PrefixCatalog.Prefix prefix = prefixes.get(run.remaining.get(i));
+            if (prefix != null) menu.inventory.setItem(slot, items.prefixReveal(prefix));
         }
     }
 
@@ -331,10 +591,36 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 player.sendMessage(voice.prompt());
             } else if (own && slot == 17) {
                 clickSound(player); open(player, data.owner, Screen.COLLECTION, 0, null);
+            } else if (slot == 9) {
+                clickSound(player);
+                if (own) open(player, data.owner, Screen.PREFIX, 0, null);
+                else player.sendMessage(ProfileItems.text("Настраивать можно только свой профиль.", NamedTextColor.RED));
             }
             return;
         }
         if (!own) return;
+        if (menu.screen == Screen.PREFIX) {
+            if (slot == 9 && menu.page > 0) { clickSound(player); open(player, data.owner, Screen.PREFIX, menu.page - 1, null); return; }
+            if (slot == 17 && (menu.page + 1) * 18 < prefixes.size()) { clickSound(player); open(player, data.owner, Screen.PREFIX, menu.page + 1, null); return; }
+            if (slot == 13) { clickSound(player); openPrefixCase(player, data); return; }
+            String id = menu.prefixesBySlot.get(slot);
+            if (id == null) return;
+            PrefixCatalog.Prefix prefix = prefixes.get(id);
+            if (prefix == null) return;
+            if (!data.ownsPrefix(id)) {
+                player.sendMessage(ProfileItems.text("У вас нету этого префикса!", NamedTextColor.RED));
+                return;
+            }
+            if (shift && id.equals(data.equippedPrefix())) {
+                unequipPrefix(player, data);
+            } else if (!id.equals(data.equippedPrefix())) {
+                equipPrefix(player, data, id);
+            } else {
+                clickSound(player);
+            }
+            return;
+        }
+        if (menu.screen == Screen.PREFIX_CASE) return; // Вскрытие идёт само; клики по меню не мешают.
         if (slot == 13) {
             clickSound(player);
             open(player, data.owner, menu.screen == Screen.PLACE ? Screen.COLLECTION : Screen.PROFILE, menu.page, null);
@@ -440,7 +726,22 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             return;
         }
         Editing session = editing.get(id);
-        if (session == null) return;
+        if (session == null) {
+            // Обычное сообщение: надетый префикс рисуем перед ником гарантированно,
+            // не полагаясь на то, какой отображаемое имя выберет рендерер сервера.
+            String equipped = equippedPrefixes.get(id);
+            if (equipped != null) {
+                PrefixCatalog.Prefix prefix = prefixes.get(equipped);
+                if (prefix != null) {
+                    Player speaker = event.getPlayer();
+                    Component prefixed = Component.text("[" + prefix.name() + "] ", prefix.color())
+                            .append(Component.text(speaker.getName()));
+                    event.renderer(ChatRenderer.viewerUnaware((sourcePlayer, sourceDisplayName, message) ->
+                            Component.translatable("chat.type.text", prefixed, message)));
+                }
+            }
+            return;
+        }
         event.setCancelled(true);
         if (!session.processing.compareAndSet(false, true)) return; // Пакеты второго сообщения тоже остаются приватными.
         String message = PlainTextComponentSerializer.plainText().serialize(event.message());
@@ -516,7 +817,12 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     private void join(Player player) {
         storage.pin(player.getUniqueId());
-        try { profile(player); }
+        try {
+            ProfileData data = profile(player);
+            applyPrefixName(player, data);
+            String pending = pendingPrefixGrants.remove(player.getUniqueId());
+            if (pending != null) announcePrefix(player, pending);
+        }
         catch (RuntimeException ex) { player.sendMessage("§cПрофиль недоступен; обратитесь к администратору."); }
         cards.sneaking(player.getUniqueId(), player.isSneaking());
     }
@@ -532,6 +838,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     @EventHandler public void quit(PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         editing.remove(id); menus.remove(id); cardClicks.remove(id); rightClicks.remove(id); queued.remove(id);
+        equippedPrefixes.remove(id);
         removeClone(event.getPlayer());
         cards.quit(id); voice.quit(id); storage.unpin(id);
     }
@@ -580,8 +887,37 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             }
             return true;
         }
+        if (args.length > 0 && args[0].equalsIgnoreCase("case")) {
+            if (!admin(sender)) { sender.sendMessage("§cНет прав."); return true; }
+            try { caseCommand(sender, args); }
+            catch (Exception ex) {
+                sender.sendMessage("§cНе удалось выдать кейс префиксов: " + ex.getMessage());
+                plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применена команда кейсов", ex);
+            }
+            return true;
+        }
         help(sender);
         return true;
+    }
+
+    /** /profile case prefix give <ник> — выдать игроку кейс префиксов. */
+    private void caseCommand(CommandSender sender, String[] args) throws Exception {
+        if (args.length != 4 || !args[1].equalsIgnoreCase("prefix") || !args[2].equalsIgnoreCase("give")) {
+            throw new IllegalArgumentException("Использование: /profile case prefix give <ник>");
+        }
+        Target target = medalTarget(args[3]);
+        ProfileData data = profile(target.id(), target.name());
+        data.addPrefixCase();
+        savePrefix(data);
+        Player online = Bukkit.getPlayer(data.owner);
+        if (online != null && online.isOnline()) {
+            online.sendMessage(ProfileItems.text("Вы получили кейс префиксов!", NamedTextColor.GREEN)
+                    .append(ProfileItems.text(" Откройте его в /profile!", NamedTextColor.WHITE)));
+            online.playSound(online.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
+        }
+        if (!(sender instanceof Player player) || !player.getUniqueId().equals(data.owner)) {
+            sender.sendMessage("§7Кейс префиксов выдан: " + data.name());
+        }
     }
 
     private record Target(UUID id, String name) { }
@@ -674,6 +1010,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             sender.sendMessage("§7/profile medal list <игрок> — список и UUID медалей");
             sender.sendMessage("§7/profile medal take <игрок> <номер|UUID|all> — забрать медаль");
             sender.sendMessage("§7/profile medal reload — применить файлы и сообщения без перезапуска");
+            sender.sendMessage("§6/profile case prefix give <игрок> — выдать кейс префиксов");
+            sender.sendMessage("§7Префиксы: /profile → «Настроить префикс». Список в prefixes.yml.");
             sender.sendMessage("§7Имя ищется только в локальном кэше сервера; если игрок не найден, укажите UUID.");
         }
     }
@@ -681,10 +1019,17 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         List<String> options = List.of();
-        if (args.length == 1) options = admin(sender) ? List.of("medal", "clone", "voice") : List.of();
+        if (args.length == 1) options = admin(sender) ? List.of("medal", "case", "clone", "voice") : List.of();
         else if (admin(sender) && args.length == 2 && args[0].equalsIgnoreCase("voice")) options = List.of("reload");
         else if (admin(sender) && args.length == 2 && args[0].equalsIgnoreCase("clone")) options = List.of("remove");
-        else if (admin(sender) && args[0].equalsIgnoreCase("medal")) {
+        else if (admin(sender) && args[0].equalsIgnoreCase("case")) {
+            if (args.length == 2) options = List.of("prefix");
+            else if (args.length == 3 && args[1].equalsIgnoreCase("prefix")) options = List.of("give");
+            else if (args.length == 4 && args[1].equalsIgnoreCase("prefix") && args[2].equalsIgnoreCase("give"))
+                options = Bukkit.getOnlinePlayers().stream()
+                        .filter(player -> !(sender instanceof Player viewer) || viewer.canSee(player))
+                        .map(Player::getName).toList();
+        } else if (admin(sender) && args[0].equalsIgnoreCase("medal")) {
             if (args.length == 2) options = List.of("give", "take", "list", "reload");
             else if (args.length == 3 && !args[1].equalsIgnoreCase("reload")) options = Bukkit.getOnlinePlayers().stream()
                     .filter(player -> !(sender instanceof Player viewer) || viewer.canSee(player))
@@ -708,6 +1053,17 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             Player player = Bukkit.getPlayer(menu.viewer);
             if (player != null && player.getOpenInventory().getTopInventory() == menu.inventory) player.closeInventory();
         }
+        // Незавершённые вскрытия кейсов при выключении: отдаём оставшийся префикс без анимации.
+        for (CaseRun run : new ArrayList<>(caseRuns.values())) {
+            if (run.task != null) run.task.cancel();
+            if (!run.remaining.isEmpty()) {
+                try {
+                    ProfileData data = profile(run.owner, run.owner.toString());
+                    if (data.addPrefix(run.remaining.getFirst())) storage.changed(run.owner);
+                } catch (RuntimeException ignored) { }
+            }
+        }
+        caseRuns.clear(); pendingPrefixGrants.clear();
         menus.clear(); queued.clear(); cardClicks.clear(); rightClicks.clear(); storage.shutdown();
     }
 }
