@@ -36,8 +36,10 @@ final class ProfileTags {
 
     private static final class Entry {
         TextDisplay display;
-        Team team;
-        String entryName;
+    }
+
+    private static String teamName(UUID owner) {
+        return "f8p" + owner.toString().replace("-", "").substring(0, 12); // ≤16 символов
     }
 
     ProfileTags(JavaPlugin plugin, Function<Player, PrefixCatalog.Prefix> equipped) {
@@ -60,7 +62,7 @@ final class ProfileTags {
                 entry = new Entry();
                 tags.put(id, entry);
             }
-            ensureTeam(entry, player);
+            ensureTeam(player);
             TextDisplay display = entry.display;
             if (display == null || !display.isValid() || !display.getWorld().equals(player.getWorld())) {
                 removeDisplay(entry);
@@ -119,24 +121,17 @@ final class ProfileTags {
         }
     }
 
-    private void ensureTeam(Entry entry, Player player) {
-        Team team = entry.team;
-        if (team != null && team.isRegistered() && entry.entryName != null) {
-            if (!team.hasEntry(entry.entryName)) team.addEntry(entry.entryName);
-            return;
-        }
-        if (team != null) team = null;
+    private void ensureTeam(Player player) {
         try {
             Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
-            String uuidHex = player.getUniqueId().toString().replace("-", "");
-            String teamName = "f8p" + uuidHex.substring(0, 12); // ≤16 символов
-            team = board.getTeam(teamName);
-            if (team == null) team = board.registerNewTeam(teamName);
-            team.setOption(Team.Option.NAME_TAG_VISIBILITY, Team.OptionStatus.NEVER);
-            String name = player.getName();
-            if (!team.hasEntry(name)) team.addEntry(name);
-            entry.team = team;
-            entry.entryName = name;
+            String name = teamName(player.getUniqueId());
+            Team team = board.getTeam(name);
+            if (team == null) {
+                team = board.registerNewTeam(name);
+                team.setOption(Team.Option.NAME_TAG_VISIBILITY, Team.OptionStatus.NEVER);
+            }
+            String entry = player.getName();
+            if (!team.hasEntry(entry)) team.addEntry(entry);
         } catch (RuntimeException ex) {
             plugin.getLogger().log(java.util.logging.Level.WARNING, "Не удалось скрыть ванильный ник " + player.getName(), ex);
         }
@@ -174,12 +169,13 @@ final class ProfileTags {
 
     private void remove(UUID id) {
         Entry entry = tags.remove(id);
-        if (entry == null) return;
         try {
-            removeDisplay(entry);
-            if (entry.team != null && entry.team.isRegistered()) {
-                if (entry.entryName != null) entry.team.removeEntry(entry.entryName);
-                entry.team.unregisterTeam();
+            if (entry != null) removeDisplay(entry);
+            Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
+            Team team = board.getTeam(teamName(id));
+            if (team != null) {
+                for (String member : team.getEntries()) team.removeEntry(member);
+                team.unregister();
             }
         } catch (RuntimeException ignored) { }
     }
