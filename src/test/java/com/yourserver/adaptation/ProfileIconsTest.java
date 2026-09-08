@@ -1,5 +1,6 @@
 package com.yourserver.adaptation;
 
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
@@ -31,19 +32,34 @@ class ProfileIconsTest {
     }
 
     @Test
-    void prefixIconTakesGlyphFromItsFileAndNameStaysWhite() {
+    void prefixIconTakesGlyphFromItsFileAndNameStaysWhiteInDefaultFont() {
         var prefix = new PrefixCatalog.Prefix("pref1", "Морозный", TextColor.color(0x8FE3F5), "pref1", 1);
         var icon = ProfileIcons.prefixIcon(prefix);
         assertEquals("\uE106", PlainTextComponentSerializer.plainText().serialize(icon));
         assertEquals(ProfileIcons.FONT, icon.font(), "Иконка рисуется шрифтом профиля");
-        // Ник не меняется: префикс добавляет только иконку, имя остаётся белым.
+        // Ник не меняется: префикс добавляет только иконку, имя остаётся белым обычным шрифтом.
+        // (Если ник унаследует шрифт иконки, клиент покажет его буквы пустыми квадратами.)
         var row = ProfileIcons.prefixedName(prefix, "Steve");
         assertEquals("\uE106 Steve", PlainTextComponentSerializer.plainText().serialize(row));
         assertEquals(NamedTextColor.WHITE, leafColor(row, "Steve"));
-        // Не prefN-файлы иконки не имеют; без префикса ник белый.
+        assertEquals(Key.key("minecraft", "default"), leafFont(row, "Steve"));
+        assertEquals(ProfileIcons.FONT, leafFont(row, "\uE106"));
+        // Не prefN-файлы иконки не имеют; без префикса ник белый обычным шрифтом.
         var custom = new PrefixCatalog.Prefix("pref11", "Самодельный", TextColor.color(0x123456), "my_icon", 11);
         assertEquals("", PlainTextComponentSerializer.plainText().serialize(ProfileIcons.prefixIcon(custom)));
-        assertEquals(NamedTextColor.WHITE, ProfileIcons.prefixedName(null, "Steve").color());
+        var plain = ProfileIcons.prefixedName(null, "Steve");
+        assertEquals(NamedTextColor.WHITE, plain.color());
+        assertEquals(Key.key("minecraft", "default"), plain.font());
+    }
+
+    /** Шрифт листа с заданным текстом (текст может быть частью строки из нескольких листьев). */
+    private static Key leafFont(Component component, String leaf) {
+        if (leaf.equals(PlainTextComponentSerializer.plainText().serialize(component))) return component.font();
+        for (Component child : component.children()) {
+            Key found = leafFont(child, leaf);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     /** Цвет листа с заданным текстом (текст может быть частью префиксной строки из нескольких листьев). */

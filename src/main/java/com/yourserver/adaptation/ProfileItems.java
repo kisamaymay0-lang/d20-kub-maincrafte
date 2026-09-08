@@ -1,5 +1,6 @@
 package com.yourserver.adaptation;
 
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
@@ -46,6 +47,11 @@ final class ProfileItems {
 
     static Component bold(String value, TextColor color) {
         return Component.text(value, color).decorate(TextDecoration.BOLD).decoration(TextDecoration.ITALIC, false);
+    }
+
+    /** Ник игрока как есть: белый текст обычным шрифтом. Префикс не меняет ни цвет, ни шрифт ника. */
+    static Component nick(String name) {
+        return text(name, NamedTextColor.WHITE).font(Key.key("minecraft", "default"));
     }
 
     private static ItemStack named(Material material, Component display, List<Component> lore) {
@@ -138,9 +144,10 @@ final class ProfileItems {
         ItemStack item = item(Material.PLAYER_HEAD, title, NamedTextColor.GOLD, lore);
         SkullMeta skull = (SkullMeta) item.getItemMeta();
         if (title.equals(data.name())) {
-            // Иконка префикса перед ником; сам ник всегда белый — префикс его не красит.
-            Component nick = text(title, NamedTextColor.WHITE).decorate(TextDecoration.BOLD);
-            skull.displayName(prefix == null ? nick : ProfileIcons.prefixIcon(prefix).append(Component.space().append(nick)));
+            // Иконка префикса перед ником; сам ник всегда белый обычным шрифтом — префикс его не меняет.
+            Component nameText = nick(title).decorate(TextDecoration.BOLD);
+            if (prefix == null) skull.displayName(nameText);
+            else skull.displayName(Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(Component.space()).append(nameText));
         }
         Player player = Bukkit.getPlayer(data.skinOwner());
         if (player != null) skins.put(data.skinOwner(), player.getPlayerProfile());
