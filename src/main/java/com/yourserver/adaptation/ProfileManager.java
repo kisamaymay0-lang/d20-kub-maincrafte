@@ -963,6 +963,22 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     /** /profile prefix give|take <игрок или UUID> <номер|all>, /profile prefix list <игрок>, /profile prefix reload. */
     private void prefixCommand(CommandSender sender, String[] args) throws Exception {
         if (args.length == 1) { help(sender); return; }
+        if (args.length >= 2 && args[1].equalsIgnoreCase("test")) {
+            // Проверка ресурспака: глифы E101–E10F и образец «иконка префикса + белый ник».
+            String name = (sender instanceof Player self) ? self.getName() : "Steve";
+            if (args.length >= 3) name = medalTarget(args[2]).name();
+            PrefixCatalog.Prefix sample = prefixes.list().isEmpty() ? null : prefixes.list().get(0);
+            Player target = Bukkit.getPlayerExact(name);
+            if (target != null && equippedPrefixes.get(target.getUniqueId()) != null) {
+                PrefixCatalog.Prefix equipped = prefixes.get(equippedPrefixes.get(target.getUniqueId()));
+                if (equipped != null) sample = equipped;
+            }
+            sender.sendMessage(ProfileItems.text("Глифы E101-E10F (тут должны быть картинки, не квадраты):", NamedTextColor.GRAY)
+                    .append(Component.space()).append(ProfileIcons.glyphSample()));
+            sender.sendMessage(ProfileItems.text("Иконка префикса + белый ник «" + name + "»:", NamedTextColor.GRAY)
+                    .append(Component.space()).append(ProfileIcons.prefixedName(sample, name)));
+            return;
+        }
         if (args.length == 2 && args[1].equalsIgnoreCase("reload")) {
             PrefixCatalog next = PrefixCatalog.load(prefixConfig); // Сначала проверяем файл: состояние не меняется при ошибке.
             prefixes = next;
@@ -1194,6 +1210,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             sender.sendMessage("§7/profile medal reload — применить файлы и сообщения без перезапуска");
             sender.sendMessage("§6/profile case prefix give <игрок> — выдать кейс префиксов");
             sender.sendMessage("§6/profile prefix give|take <игрок> <номер|all> — выдать/забрать префикс по номеру или все сразу");
+            sender.sendMessage("§7/profile prefix test [игрок] — проверить глифы ресурспака (картинки, а не квадраты)");
             sender.sendMessage("§6/profile prefix list <игрок> — какие префиксы есть у игрока");
             sender.sendMessage("§6/profile prefix reload — перечитать prefixes.yml");
             sender.sendMessage("§7Префиксы: /profile → «Настроить префикс». Файл: §e" + prefixConfig);
@@ -1223,7 +1240,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             else if (args.length == 4 && args[1].equalsIgnoreCase("give")) options = List.of("copper", "silver", "gold");
             else if (args.length == 4 && args[1].equalsIgnoreCase("take")) options = List.of("all");
         } else if (admin(sender) && args[0].equalsIgnoreCase("prefix")) {
-            if (args.length == 2) options = List.of("give", "take", "list", "reload");
+            if (args.length == 2) options = List.of("give", "take", "list", "reload", "test");
+            else if (args.length == 3 && args[1].equalsIgnoreCase("test")) options = Bukkit.getOnlinePlayers().stream()
+                    .filter(player -> !(sender instanceof Player viewer) || viewer.canSee(player))
+                    .map(Player::getName).toList();
             else if (args.length == 3 && !args[1].equalsIgnoreCase("reload")) options = Bukkit.getOnlinePlayers().stream()
                     .filter(player -> !(sender instanceof Player viewer) || viewer.canSee(player))
                     .map(Player::getName).toList();

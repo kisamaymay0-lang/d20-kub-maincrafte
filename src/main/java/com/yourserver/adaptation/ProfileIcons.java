@@ -52,6 +52,15 @@ final class ProfileIcons {
         return prefixIcon(prefix).append(Component.space()).append(nick);
     }
 
+    /** Строка глифов E101–E10F для проверки ресурспака: видны картинки — пакет и шрифт загружены. */
+    static Component glyphSample() {
+        Component row = Component.empty();
+        for (int code = 0xE101; code <= 0xE10F; code++) {
+            row = row.append(glyph((char) code)).append(Component.space());
+        }
+        return row;
+    }
+
     static Component openProfile() {
         return ProfileItems.text("Открыть профиль", NamedTextColor.WHITE).decorate(TextDecoration.UNDERLINED);
     }
