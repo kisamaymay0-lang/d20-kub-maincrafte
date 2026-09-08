@@ -165,6 +165,19 @@ class ProfileDataTest {
         assertEquals(1, back.prefixCases());
         assertTrue(back.takePrefixCase());
         assertFalse(back.takePrefixCase(), "Нельзя взять кейс, которого нет");
+        // Изъятие надетого префикса снимает его; изъятие не надетого — нет.
+        assertTrue(back.revokePrefix("pref2"));
+        assertFalse(back.ownsPrefix("pref2"));
+        assertNull(back.equippedPrefix(), "Изъятый надетый префикс снимается");
+        assertFalse(back.revokePrefix("pref2"), "Повторно изъять нельзя");
+        assertTrue(back.revokePrefix("pref1"));
+        assertFalse(back.clearPrefixes(), "Очистка без префиксов ничего не меняет");
+        assertTrue(data.clearPrefixes(), "Очистка убирает и надетый префикс");
+        assertNull(data.equippedPrefix());
+        assertFalse(data.ownsPrefix("pref1"));
+        assertTrue(data.addPrefix("pref1"));
+        assertTrue(data.clearPrefixes());
+        assertFalse(data.ownsPrefix("pref1"));
     }
 
     @Test

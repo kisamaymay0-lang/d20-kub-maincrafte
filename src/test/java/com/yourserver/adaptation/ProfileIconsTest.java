@@ -1,6 +1,7 @@
 package com.yourserver.adaptation;
 
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,22 @@ class ProfileIconsTest {
         for (ProfileMedal.Metal metal : ProfileMedal.Metal.values()) {
             assertEquals(ProfileIcons.FONT, ProfileIcons.medal(metal).font());
         }
+    }
+
+    @Test
+    void prefixIconTakesGlyphFromItsFileAndColoredNameFollowsPrefixColor() {
+        var prefix = new PrefixCatalog.Prefix("pref1", "Морозный", TextColor.color(0x8FE3F5), "pref1", 1);
+        var icon = ProfileIcons.prefixIcon(prefix);
+        assertEquals("\uE106", PlainTextComponentSerializer.plainText().serialize(icon));
+        assertEquals(ProfileIcons.FONT, icon.font(), "Иконка рисуется шрифтом профиля");
+        var row = ProfileIcons.prefixedName(prefix, "Steve");
+        assertEquals("\uE106 Steve", PlainTextComponentSerializer.plainText().serialize(row));
+        var namePart = row.children().get(1).children().get(1);
+        assertEquals(TextColor.color(0x8FE3F5), namePart.color());
+        // Не prefN-файлы иконки не имеют; без префикса ник белый.
+        var custom = new PrefixCatalog.Prefix("pref11", "Самодельный", TextColor.color(0x123456), "my_icon", 11);
+        assertEquals("", PlainTextComponentSerializer.plainText().serialize(ProfileIcons.prefixIcon(custom)));
+        assertEquals(NamedTextColor.WHITE, ProfileIcons.prefixedName(null, "Steve").color());
     }
 
     @Test

@@ -79,7 +79,7 @@ final class ProfileItems {
     ItemStack prefixEntry(PrefixCatalog.Prefix prefix, boolean owned, boolean equipped) {
         if (!owned) {
             ItemStack item = named(Material.NAME_TAG, bold("У вас нету этого префикса!", NamedTextColor.RED), List.of(
-                    text("Префикс: ", NamedTextColor.GRAY).append(text(prefix.name(), prefix.color())),
+                    text("№" + prefix.number() + ": ", NamedTextColor.DARK_GRAY).append(text(prefix.name(), prefix.color())),
                     text("Получите его из кейса префиксов", NamedTextColor.DARK_GRAY)));
             return model(item, prefix.file());
         }
@@ -89,7 +89,8 @@ final class ProfileItems {
         } else {
             lore.add(text("Нажмите, чтобы надеть префикс", NamedTextColor.DARK_GRAY));
         }
-        lore.add(text("Отображается перед ником", NamedTextColor.GRAY));
+        lore.add(text("№" + prefix.number() + " · файл " + prefix.file(), NamedTextColor.DARK_GRAY));
+        lore.add(text("Картинка и цвет ника", NamedTextColor.GRAY));
         ItemStack item = named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), lore);
         ItemMeta meta = item.getItemMeta();
         meta.setEnchantmentGlintOverride(equipped);
@@ -109,9 +110,10 @@ final class ProfileItems {
         return item;
     }
 
-    /** Карточка префикса во время вскрытия кейса (5 → 1). */
-    ItemStack prefixReveal(PrefixCatalog.Prefix prefix) {
+    /** Карточка префикса во время вскрытия кейса. slot — номер места (1…9). */
+    ItemStack prefixReveal(PrefixCatalog.Prefix prefix, int slot) {
         return model(named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), List.of(
+                text("Место " + slot, NamedTextColor.DARK_GRAY),
                 text("Вскрытие кейса…", NamedTextColor.DARK_GRAY))), prefix.file());
     }
 
@@ -126,7 +128,7 @@ final class ProfileItems {
 
     static ItemStack filler() { return item(Material.GRAY_STAINED_GLASS_PANE, " ", NamedTextColor.GRAY, List.of()); }
 
-    ItemStack head(ProfileData data, String title, boolean editHint) {
+    ItemStack head(ProfileData data, String title, boolean editHint, PrefixCatalog.Prefix prefix) {
         List<Component> lore = new ArrayList<>();
         for (String line : ProfileText.wrap(data.displayedDescription(), 34)) lore.add(text(line, NamedTextColor.GRAY));
         lore.add(Component.empty());
@@ -136,9 +138,16 @@ final class ProfileItems {
             lore.add(Component.empty());
             lore.add(text("Нажмите, чтобы изменить описание", NamedTextColor.DARK_GRAY));
         }
+        if (prefix != null) {
+            lore.add(Component.empty());
+            lore.add(text("Префикс №" + prefix.number() + ": ", NamedTextColor.DARK_GRAY).append(text(prefix.name(), prefix.color())));
+        }
         ItemStack item = item(Material.PLAYER_HEAD, title, NamedTextColor.GOLD, lore);
         SkullMeta skull = (SkullMeta) item.getItemMeta();
-        if (title.equals(data.name())) skull.displayName(text(title, NamedTextColor.WHITE).decorate(TextDecoration.BOLD));
+        if (title.equals(data.name())) {
+            if (prefix == null) skull.displayName(text(title, NamedTextColor.WHITE).decorate(TextDecoration.BOLD));
+            else skull.displayName(ProfileIcons.prefixIcon(prefix).append(text(title, prefix.color()).decorate(TextDecoration.BOLD)));
+        }
         Player player = Bukkit.getPlayer(data.skinOwner());
         if (player != null) skins.put(data.skinOwner(), player.getPlayerProfile());
         var skin = skins.get(data.skinOwner());

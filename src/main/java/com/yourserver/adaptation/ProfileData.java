@@ -89,6 +89,20 @@ final class ProfileData {
         revision++;
         return true;
     }
+    /** Забрать префикс; надетый префикс при этом снимается. */
+    boolean revokePrefix(String id) {
+        if (id == null || !ownedPrefixes.remove(id)) return false;
+        if (java.util.Objects.equals(equippedPrefix, id)) equippedPrefix = null;
+        revision++;
+        return true;
+    }
+    boolean clearPrefixes() {
+        boolean changed = !ownedPrefixes.isEmpty();
+        ownedPrefixes.clear();
+        if (equippedPrefix != null) { equippedPrefix = null; changed = true; }
+        if (changed) revision++;
+        return changed;
+    }
     boolean equipPrefix(String id) {
         if (id != null && !ownedPrefixes.contains(id)) return false;
         if (java.util.Objects.equals(equippedPrefix, id)) return false;

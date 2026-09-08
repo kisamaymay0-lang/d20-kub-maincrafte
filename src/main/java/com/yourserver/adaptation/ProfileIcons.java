@@ -8,6 +8,10 @@ import net.kyori.adventure.text.format.TextDecoration;
 /** Пиктограммы используют PNG ресурспака и прозрачность TextDisplay, без масштабирования при появлении. */
 final class ProfileIcons {
     static final Key FONT = Key.key("f8resurs", "profile_ui");
+    /** Первый символ глифов префиксов в font/profile_ui.json (файл pref1 = E106 … pref10 = E10F). */
+    static final int PREFIX_GLYPH_START = 0xE106;
+    /** Сколько глифов префиксов идёт в комплекте ресурспака. */
+    static final int PREFIX_GLYPH_COUNT = 10;
     private ProfileIcons() { }
 
     private static Component glyph(char character) {
@@ -29,6 +33,22 @@ final class ProfileIcons {
             case SILVER -> '\uE104';
             case GOLD -> '\uE105';
         });
+    }
+
+    /** Картинка префикса: файл prefN из prefixes.yml отвечает глифу N (pref1 → E106 … pref10 → E10F). */
+    static Component prefixIcon(PrefixCatalog.Prefix prefix) {
+        if (prefix == null) return Component.empty();
+        String file = prefix.file();
+        for (int i = 1; i <= PREFIX_GLYPH_COUNT; i++) {
+            if (("pref" + i).equals(file)) return glyph((char) (PREFIX_GLYPH_START + i - 1));
+        }
+        return Component.empty();
+    }
+
+    /** Иконка префикса + ник цветом префикса. Без префикса — обычный белый ник. */
+    static Component prefixedName(PrefixCatalog.Prefix prefix, String name) {
+        if (prefix == null) return ProfileItems.text(name, NamedTextColor.WHITE);
+        return prefixIcon(prefix).append(Component.space()).append(ProfileItems.text(name, prefix.color()));
     }
 
     static Component openProfile() {

@@ -70,6 +70,7 @@ final class ProfileCards {
     private final ProfileSubjects subjects;
     private final ProfileVoice voice;
     private final ProfileItems items;
+    private final PrefixCatalog prefixes;
     private final Set<UUID> sneaking = new HashSet<>();
     private final Map<UUID, Card> cards = new HashMap<>();
     private final BukkitTask task;
@@ -77,8 +78,8 @@ final class ProfileCards {
     private int frames;
     private boolean errorReported;
 
-    ProfileCards(JavaPlugin plugin, Function<ProfileSubjects.Subject, ProfileData> profiles, ProfileItems items, ProfileSubjects subjects, ProfileVoice voice) {
-        this.plugin = plugin; this.profiles = profiles; this.items = items; this.subjects = subjects; this.voice = voice;
+    ProfileCards(JavaPlugin plugin, Function<ProfileSubjects.Subject, ProfileData> profiles, ProfileItems items, ProfileSubjects subjects, ProfileVoice voice, PrefixCatalog prefixes) {
+        this.plugin = plugin; this.profiles = profiles; this.items = items; this.subjects = subjects; this.voice = voice; this.prefixes = prefixes;
         double configured = plugin.getConfig().getDouble("profiles.quick-card-distance", 8);
         range = Double.isFinite(configured) ? Math.clamp(configured, 2, 16) : 8;
         for (Player player : Bukkit.getOnlinePlayers()) if (player.isSneaking()) sneaking.add(player.getUniqueId());
@@ -286,7 +287,14 @@ final class ProfileCards {
     private void contents(Player viewer, Card card, ProfileData data) {
         List<String> description = ProfileText.wrap(data.displayedDescription(), 20);
         List<Component> body = new ArrayList<>();
-        body.add(ProfileItems.text(data.name(), NamedTextColor.WHITE).decorate(TextDecoration.BOLD));
+        // Имя в карточке: картинка префикса + ник цветом префикса (жирный — только текст ника).
+        PrefixCatalog.Prefix prefix = prefixes.get(data.equippedPrefix());
+        if (prefix == null) {
+            body.add(ProfileItems.text(data.name(), NamedTextColor.WHITE).decorate(TextDecoration.BOLD));
+        } else {
+            body.add(ProfileIcons.prefixIcon(prefix)
+                    .append(Component.space().append(ProfileItems.text(data.name(), prefix.color()).decorate(TextDecoration.BOLD))));
+        }
         card.hasVoice = data.voice() != null;
         card.voiceNote = data.voice();
         if (card.hasVoice) {

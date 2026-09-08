@@ -20,6 +20,10 @@ def main():
         providers.append({'type': 'bitmap', 'file': f'f8resurs:gui/{name}.png', 'height': 8, 'ascent': 7, 'chars': [glyph]})
     for metal, glyph in (('copper', '\ue103'), ('silver', '\ue104'), ('gold', '\ue105')):
         providers.append({'type': 'bitmap', 'file': f'f8resurs:item/medal_{metal}.png', 'height': 8, 'ascent': 7, 'chars': [glyph]})
+    # Картинки префиксов: файлам pref1.png…pref10.png отвечают глифы \ue106…\ue10F.
+    for number in range(1, 11):
+        glyph = chr(0xE105 + number)
+        providers.append({'type': 'bitmap', 'file': f'f8resurs:item/pref{number}.png', 'height': 8, 'ascent': 7, 'chars': [glyph]})
     (ROOT / 'font').mkdir(parents=True, exist_ok=True)
     (ROOT / 'font/profile_ui.json').write_text(json.dumps({'providers': providers}, indent=2) + '\n')
     print('Profile icons and font: OK')
