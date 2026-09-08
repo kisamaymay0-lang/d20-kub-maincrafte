@@ -45,10 +45,11 @@ final class ProfileIcons {
         return Component.empty();
     }
 
-    /** Иконка префикса + ник цветом префикса. Без префикса — обычный белый ник. */
+    /** Иконка префикса перед ником. Сам ник всегда белый и не меняется — префикс не красит имя. */
     static Component prefixedName(PrefixCatalog.Prefix prefix, String name) {
-        if (prefix == null) return ProfileItems.text(name, NamedTextColor.WHITE);
-        return prefixIcon(prefix).append(Component.space()).append(ProfileItems.text(name, prefix.color()));
+        Component nick = ProfileItems.text(name, NamedTextColor.WHITE);
+        if (prefix == null) return nick;
+        return prefixIcon(prefix).append(Component.space()).append(nick);
     }
 
     static Component openProfile() {

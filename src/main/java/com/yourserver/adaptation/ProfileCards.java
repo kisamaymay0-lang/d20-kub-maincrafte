@@ -287,13 +287,13 @@ final class ProfileCards {
     private void contents(Player viewer, Card card, ProfileData data) {
         List<String> description = ProfileText.wrap(data.displayedDescription(), 20);
         List<Component> body = new ArrayList<>();
-        // Имя в карточке: картинка префикса + ник цветом префикса (жирный — только текст ника).
+        // Имя в карточке: картинка префикса перед ником; ник всегда белый, префикс его не красит.
         PrefixCatalog.Prefix prefix = prefixes.get(data.equippedPrefix());
+        Component nick = ProfileItems.text(data.name(), NamedTextColor.WHITE).decorate(TextDecoration.BOLD);
         if (prefix == null) {
-            body.add(ProfileItems.text(data.name(), NamedTextColor.WHITE).decorate(TextDecoration.BOLD));
+            body.add(nick);
         } else {
-            body.add(ProfileIcons.prefixIcon(prefix)
-                    .append(Component.space().append(ProfileItems.text(data.name(), prefix.color()).decorate(TextDecoration.BOLD))));
+            body.add(ProfileIcons.prefixIcon(prefix).append(Component.space().append(nick)));
         }
         card.hasVoice = data.voice() != null;
         card.voiceNote = data.voice();

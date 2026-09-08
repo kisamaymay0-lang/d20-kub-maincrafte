@@ -65,11 +65,9 @@ final class ProfileItems {
         return item;
     }
 
-    /** Кнопка «Настроить префикс»: случайная иконка префикса при каждом открытии профиля. */
-    ItemStack prefixButton(PrefixCatalog.Prefix icon, PrefixCatalog.Prefix equipped, boolean owner) {
+    /** Кнопка «Настроить префикс»: иконка надетого префикса как образец (без подписи), иначе случайный образец. */
+    ItemStack prefixButton(PrefixCatalog.Prefix icon, boolean owner) {
         List<Component> lore = new ArrayList<>();
-        if (equipped != null) lore.add(text("Текущий: ", NamedTextColor.GRAY).append(text(equipped.name(), equipped.color())));
-        else lore.add(text("Префикс не выбран", NamedTextColor.DARK_GRAY));
         lore.add(text(owner ? "Выберите префикс или откройте кейс" : "Настраивать можно только свой профиль", NamedTextColor.DARK_GRAY));
         return model(named(Material.NAME_TAG, medals.title("Настроить префикс", ProfileMedal.Metal.GOLD), lore),
                 icon == null ? null : icon.file());
@@ -90,7 +88,6 @@ final class ProfileItems {
             lore.add(text("Нажмите, чтобы надеть префикс", NamedTextColor.DARK_GRAY));
         }
         lore.add(text("№" + prefix.number() + " · файл " + prefix.file(), NamedTextColor.DARK_GRAY));
-        lore.add(text("Картинка и цвет ника", NamedTextColor.GRAY));
         ItemStack item = named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), lore);
         ItemMeta meta = item.getItemMeta();
         meta.setEnchantmentGlintOverride(equipped);
@@ -138,15 +135,12 @@ final class ProfileItems {
             lore.add(Component.empty());
             lore.add(text("Нажмите, чтобы изменить описание", NamedTextColor.DARK_GRAY));
         }
-        if (prefix != null) {
-            lore.add(Component.empty());
-            lore.add(text("Префикс №" + prefix.number() + ": ", NamedTextColor.DARK_GRAY).append(text(prefix.name(), prefix.color())));
-        }
         ItemStack item = item(Material.PLAYER_HEAD, title, NamedTextColor.GOLD, lore);
         SkullMeta skull = (SkullMeta) item.getItemMeta();
         if (title.equals(data.name())) {
-            if (prefix == null) skull.displayName(text(title, NamedTextColor.WHITE).decorate(TextDecoration.BOLD));
-            else skull.displayName(ProfileIcons.prefixIcon(prefix).append(text(title, prefix.color()).decorate(TextDecoration.BOLD)));
+            // Иконка префикса перед ником; сам ник всегда белый — префикс его не красит.
+            Component nick = text(title, NamedTextColor.WHITE).decorate(TextDecoration.BOLD);
+            skull.displayName(prefix == null ? nick : ProfileIcons.prefixIcon(prefix).append(Component.space().append(nick)));
         }
         Player player = Bukkit.getPlayer(data.skinOwner());
         if (player != null) skins.put(data.skinOwner(), player.getPlayerProfile());

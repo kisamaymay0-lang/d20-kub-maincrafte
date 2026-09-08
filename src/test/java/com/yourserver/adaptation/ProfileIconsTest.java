@@ -31,14 +31,15 @@ class ProfileIconsTest {
     }
 
     @Test
-    void prefixIconTakesGlyphFromItsFileAndColoredNameFollowsPrefixColor() {
+    void prefixIconTakesGlyphFromItsFileAndNameStaysWhite() {
         var prefix = new PrefixCatalog.Prefix("pref1", "Морозный", TextColor.color(0x8FE3F5), "pref1", 1);
         var icon = ProfileIcons.prefixIcon(prefix);
         assertEquals("\uE106", PlainTextComponentSerializer.plainText().serialize(icon));
         assertEquals(ProfileIcons.FONT, icon.font(), "Иконка рисуется шрифтом профиля");
+        // Ник не меняется: префикс добавляет только иконку, имя остаётся белым.
         var row = ProfileIcons.prefixedName(prefix, "Steve");
         assertEquals("\uE106 Steve", PlainTextComponentSerializer.plainText().serialize(row));
-        assertEquals(TextColor.color(0x8FE3F5), leafColor(row, "Steve"));
+        assertEquals(NamedTextColor.WHITE, leafColor(row, "Steve"));
         // Не prefN-файлы иконки не имеют; без префикса ник белый.
         var custom = new PrefixCatalog.Prefix("pref11", "Самодельный", TextColor.color(0x123456), "my_icon", 11);
         assertEquals("", PlainTextComponentSerializer.plainText().serialize(ProfileIcons.prefixIcon(custom)));

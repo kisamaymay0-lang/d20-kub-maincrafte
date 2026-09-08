@@ -58,9 +58,14 @@ import java.util.function.ToLongFunction;
 public final class ProfileManager implements Listener, CommandExecutor, TabCompleter {
     private enum Screen { PROFILE, COLLECTION, PLACE, PREFIX, PREFIX_CASE }
 
-    /** Сколько префиксов помещается в кейс и как часто они «бьются». */
+    /** Сколько префиксов помещается в кейс и как они «бьются».
+     *  Моменты «поломок» (тики от открытия, 20 тиков = 1 с): первая через 2 с,
+     *  затем 4 с шагом 1 с, 2 с шагом 0.8 с и последняя с шагом 0.5 с.
+     *  Карточек максимум 9 — значит «поломок» максимум 8 (победитель уцелевший). */
     private static final int CASE_MAX = 9;
-    private static final int CASE_BREAK_INTERVAL = 40; // 2 секунды между «поломками»
+    private static final int[] CASE_BREAK_TICKS = { 40, 60, 80, 100, 120, 136, 152, 162 };
+    private static final int CASE_TICK = 2;             // тик анимации (попадает в все моменты поломок)
+    private static final int CASE_VICTORY_TICKS = 30;   // финал: ~1.5 секунды после последней поломки
     private static final int CASE_SLOT_START = 9;       // фиксированные места: слот 9, 10, … 17
 
     private static final class CaseRun {
@@ -122,7 +127,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     /** Надетый префикс для быстрого чтения из асинхронных событий (чат) без обращения к хранилищу. */
     private final Map<UUID, String> equippedPrefixes = new ConcurrentHashMap<>();
     private ToLongFunction<UUID> constellationMilestone = ignored -> 0L;
-    /** Замена ванильного ника над головой на картинку префикса + цветной ник. */
+    /** Замена ванильного ника над головой на картинку префикса + белый ник. */
     private ProfileTags tags;
     private volatile boolean stopping;
 
@@ -264,7 +269,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         if (!storage.flushBlocking(data.owner)) throw new IllegalStateException("Не удалось сохранить профиль");
     }
 
-    /** «Префикс перед ником везде»: картинка + ник цветом префикса в табе и поверх головы.
+    /** «Префикс перед ником везде»: картинка префикса перед белым ником в табе и поверх головы.
      *  displayName красим только ник — чтобы события, берущие displayName сами, не задваивали иконку. */
     private void applyPrefixName(Player player, ProfileData data) {
         PrefixCatalog.Prefix prefix = prefixes.get(data.equippedPrefix());
@@ -330,13 +335,13 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         clickSound(player);
         open(player, data.owner, Screen.PREFIX_CASE, 0, null);
         if (count == 1) {
-            // Не выбитых префиксов меньше двух: показываем единственного и забираем через 4 секунды.
+            // Не выбитых префиксов меньше двух: показываем единственного и забираем через ~1.5 секунды.
             run.victory = true;
             run.victoryTick = 0;
             player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.1f);
             fireworks(player, run.slots.get(0));
         }
-        run.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> caseStep(run), 20L, 20L);
+        run.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> caseStep(run), CASE_TICK, CASE_TICK);
     }
 
     private void caseStep(CaseRun run) {
@@ -351,16 +356,17 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     private void caseTick(CaseRun run) {
-        run.elapsed += 20;
-        // Пока есть больше одного префикса, каждые 2 секунды бьётся один случайный.
-        if (run.alive > 1 && run.elapsed >= (countBroken(run) + 1) * CASE_BREAK_INTERVAL) {
+        run.elapsed += CASE_TICK;
+        // Ритм «поломок»: первая через 2 с, 4 с шагом 1 с, 2 с шагом 0.8 с, последняя с шагом 0.5 с.
+        int broken = countBroken(run);
+        if (run.alive > 1 && broken < CASE_BREAK_TICKS.length && run.elapsed >= CASE_BREAK_TICKS[broken]) {
             breakRandomPrefix(run);
             Player player = Bukkit.getPlayer(run.owner);
             if (player != null) {
                 player.playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.9f, 0.7f);
                 renderOpenCase(player);
             }
-            if (run.alive == 1) { // Последний уцелевший: финальные 4 секунды.
+            if (run.alive == 1) { // Последний уцелевший: короткий финал ~1.5 секунды.
                 run.victory = true;
                 run.victoryTick = run.elapsed;
                 if (player != null) {
@@ -372,13 +378,13 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         if (run.alive == 1 && run.victory) {
             Player player = Bukkit.getPlayer(run.owner);
             int since = run.elapsed - run.victoryTick;
-            if (since == 40 && player != null) player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_BLAST, 1.0f, 1.2f);
-            else if (since == 60 && player != null) player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 1.0f, 1.4f);
-            else if (since >= 80) { finalizeCase(run); return; }
+            if (since == CASE_VICTORY_TICKS / 3 && player != null) player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_BLAST, 1.0f, 1.2f);
+            else if (since == CASE_VICTORY_TICKS * 2 / 3 && player != null) player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 1.0f, 1.4f);
+            else if (since >= CASE_VICTORY_TICKS) { finalizeCase(run); return; }
             return;
         }
-        // Страховка от вечного тика (9 мест × 2 с + финал).
-        if (run.elapsed >= CASE_MAX * CASE_BREAK_INTERVAL + 80) finalizeCase(run);
+        // Страховка от вечного тика (крайний момент поломки + финал).
+        if (run.elapsed >= CASE_BREAK_TICKS[CASE_BREAK_TICKS.length - 1] + CASE_VICTORY_TICKS) finalizeCase(run);
     }
 
     private int countBroken(CaseRun run) {
@@ -547,6 +553,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         boolean owner = menu.viewer.equals(menu.owner);
         boolean profileScreen = menu.screen == Screen.PROFILE;
         if (menu.screen == Screen.PROFILE || menu.screen == Screen.PLACE) {
+            // Иконка префикса перед ником на голове профиля; текст, какой префикс надет, нигде не пишем.
             PrefixCatalog.Prefix equipped = profileScreen ? prefixes.get(data.equippedPrefix()) : null;
             menu.inventory.setItem(13, items.head(data, profileScreen ? data.name() : "Отмена.", profileScreen && owner, equipped));
             menu.inventory.setItem(12, items.vote(ProfileData.Vote.LIKE, data.voteBy(menu.viewer) == ProfileData.Vote.LIKE, owner));
@@ -554,9 +561,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             menu.inventory.setItem(17, items.settings(data.medals().size(), owner));
         }
         if (profileScreen) {
-            // Кнопка показывает иконку надетого префикса (иначе — случайный образец).
+            // Кнопка: иконка надетого префикса как образец (без подписи «Текущий: …»), иначе случайный образец.
             PrefixCatalog.Prefix equipped = prefixes.get(data.equippedPrefix());
-            menu.inventory.setItem(9, items.prefixButton(equipped != null ? equipped : randomPrefix(), equipped, owner));
+            menu.inventory.setItem(9, items.prefixButton(equipped != null ? equipped : randomPrefix(), owner));
         }
     }
 
@@ -776,7 +783,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             PrefixCatalog.Prefix prefix = prefixes.get(equippedPrefixes.get(id));
             if (prefix != null) {
                 Player speaker = event.getPlayer();
-                // Картинка префикса + ник цветом префикса (без текстового «[Название]»).
+                // Картинка префикса перед белым ником (без текстового «[Название]»).
                 Component prefixed = ProfileIcons.prefixedName(prefix, speaker.getName());
                 event.renderer(ChatRenderer.viewerUnaware((sourcePlayer, sourceDisplayName, message) ->
                         Component.translatable("chat.type.text", prefixed, message)));
