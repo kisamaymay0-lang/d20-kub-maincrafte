@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class WinterRulesTest {
     @ParameterizedTest
-    @CsvSource({"0,0.08", "1,0.10", "2,0.12", "3,0.14", "-1,0.08", "100,0.14"})
+    @CsvSource({"0,0.02", "1,0.03", "2,0.04", "3,0.05", "-1,0.02", "100,0.05"})
     void fishingOddsMatchLuckOfTheSea(int luck, double expected) {
         assertEquals(expected, WinterRules.catchChance(luck), 1e-9);
     }
@@ -46,6 +46,17 @@ class WinterRulesTest {
         assertFalse(WinterRules.canGrab(true, true, false, false, false));
         assertFalse(WinterRules.canGrab(true, true, true, true, false));
         assertFalse(WinterRules.canGrab(true, true, true, false, true));
+    }
+
+    @Test
+    void heldSneakOnlyGrabsWhileFallingWithTheTool() {
+        assertTrue(WinterRules.canAutoGrab(true, true, true, false, false, true));
+        assertFalse(WinterRules.canAutoGrab(false, true, true, false, false, true));
+        assertFalse(WinterRules.canAutoGrab(true, false, true, false, false, true));
+        assertFalse(WinterRules.canAutoGrab(true, true, false, false, false, true));
+        assertFalse(WinterRules.canAutoGrab(true, true, true, true, false, true));
+        assertFalse(WinterRules.canAutoGrab(true, true, true, false, true, true));
+        assertFalse(WinterRules.canAutoGrab(true, true, true, false, false, false));
     }
 
     @Test

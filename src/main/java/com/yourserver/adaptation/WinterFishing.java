@@ -109,6 +109,7 @@ final class WinterFishing implements Listener {
         if (fish.getAmount() <= 1) player.getInventory().setItemInMainHand(depleted);
         else { fish.setAmount(fish.getAmount() - 1); give(player, depleted); }
         give(player, items.create(WinterItems.Kind.ROE));
+        player.sendActionBar("§aВ рыбе нашлась икра! (+1)");
         player.playSound(player.getLocation(), Sound.ENTITY_ITEM_PICKUP, 0.6f, 1.3f);
     }
 

@@ -8,6 +8,8 @@ import java.util.UUID;
 /** Медаль принадлежит профилю, а не физическому ItemStack: GUI не может её размножить. */
 record ProfileMedal(UUID id, Metal metal, String title, List<String> reasons, long awardedAt, String source) {
     static final String FIRST_CONSTELLATION = "first_constellation_9_3";
+    static final String SANDWICH_ALL_KINDS = "sandwich_all_kinds";
+    static final String SANDWICH_ICE_CAVIAR = "sandwich_ice_caviar";
 
     enum Metal {
         COPPER("Медная медаль", "medal_copper"),

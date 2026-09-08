@@ -122,6 +122,11 @@ public void onEnable() {
         getCommand("profile").setTabCompleter(profileManager);
     }
 
+    getServer().getPluginManager().registerEvents(
+            new SandwichListener(profileManager),
+            this
+    );
+
     constellationManager =
             new ConstellationManager(this, dataWriter, profileManager);
     profileManager.constellationMilestone(constellationManager::profileMedalEarnedAt);

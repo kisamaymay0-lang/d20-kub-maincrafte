@@ -45,6 +45,24 @@ class MedalPresentationTest {
     }
 
     @Test
+    void longReasonKeepsContinuationAlignedUnderTheDashText() {
+        ProfileMedal medal = new ProfileMedal(UUID.randomUUID(), ProfileMedal.Metal.COPPER, "Астрономия!",
+                List.of("Очень длинная заслуга, которая не помещается в одну строку и переносится на следующую строку подсказки"), 1_788_600_000_000L, "");
+        var date = DateTimeFormatter.ofPattern("dd.MM.uuuu").withZone(ZoneId.of("UTC"));
+        List<String> lines = MedalPresentation.lore(medal, MedalSettings.defaults(), date, List.of())
+                .stream().map(MedalPresentationTest::plain).toList();
+        int dash = 0;
+        while (dash < lines.size() && !lines.get(dash).startsWith("— ")) dash++;
+        assertTrue(dash < lines.size() - 2, "Длинная заслуга обязана перенестись на вторую строку");
+        // Продолжение перенесённой строки начинается ровно под текстом после «— »:
+        // три пробела той же ширины, что и «— » (а не два, из-за которых строка съезжала влево).
+        String continuation = lines.get(dash + 1);
+        assertTrue(continuation.startsWith("   "), "Продолжение должно иметь отступ под текст первой строки: " + continuation);
+        assertFalse(continuation.startsWith("    "), "Отступ не должен превышать ширину «— »: " + continuation);
+        assertFalse(continuation.stripLeading().isEmpty());
+    }
+
+    @Test
     void loreStartsWithGrayTypeUsesEmDashesAndEndsWithGrayDate() {
         ProfileMedal medal = new ProfileMedal(UUID.randomUUID(), ProfileMedal.Metal.COPPER, "Астрономия!",
                 List.of("Собрано созвездие", "- Вторая заслуга"), 1_788_600_000_000L, "");

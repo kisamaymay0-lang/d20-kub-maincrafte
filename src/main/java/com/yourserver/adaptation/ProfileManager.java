@@ -175,6 +175,36 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
     }
 
+    /** Съеден бутерброд: отмечаем вид навсегда и выдаём медали, заполненные в medals/config.yml. */
+    void sandwichEaten(Player player, String kind) {
+        if (!("red".equals(kind) || "black".equals(kind) || "ice".equals(kind))) return;
+        try {
+            ProfileData data = profile(player);
+            UUID owner = player.getUniqueId();
+            storage.prepareMedalChange(owner);
+            boolean changed = data.markClaimed(ProfileAwards.eatenMarker(kind));
+            boolean all = medalSettings.sandwichAllKinds.filled()
+                    && !data.hasReward(ProfileMedal.SANDWICH_ALL_KINDS)
+                    && ProfileAwards.allSandwichKindsEaten(data)
+                    && data.award(medal(medalSettings.sandwichAllKinds, ProfileMedal.SANDWICH_ALL_KINDS));
+            boolean ice = "ice".equals(kind) && medalSettings.sandwichIceCaviar.filled()
+                    && !data.hasReward(ProfileMedal.SANDWICH_ICE_CAVIAR)
+                    && data.award(medal(medalSettings.sandwichIceCaviar, ProfileMedal.SANDWICH_ICE_CAVIAR));
+            if (changed || all || ice) storage.changed(owner);
+            if (!changed && !all && !ice) return;
+            if (!storage.flushBlocking(owner)) throw new IllegalStateException("Медали не записаны; проверьте файл и примените /profile medal reload");
+            announcePending(player, data);
+            refresh(owner);
+        } catch (RuntimeException ex) {
+            medalMessage(player, "pending-error", player.getName(), "", 0, ex.getMessage());
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Не выдана медаль за бутерброд игроку " + player.getName(), ex);
+        }
+    }
+
+    private static ProfileMedal medal(MedalSettings.SandwichSpec spec, String source) {
+        return new ProfileMedal(UUID.randomUUID(), spec.metal(), spec.title(), spec.reasons(), System.currentTimeMillis(), source);
+    }
+
     private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen) {
         if (stopping) return;
         if (screen != Screen.PROFILE && !viewer.getUniqueId().equals(owner)) return;

@@ -131,6 +131,14 @@ final class ProfileData {
         return rewards.contains(source);
     }
 
+    /** Постоянный маркер прогресса (например, съеденный вид бутерброда) без создания медали. */
+    boolean markClaimed(String source) {
+        if (source.isEmpty() || rewards.contains(source)) return false;
+        rewards.add(source);
+        revision++;
+        return true;
+    }
+
     boolean revoke(UUID medal) {
         if (medals.remove(medal) == null) return false;
         unannounced.remove(medal);

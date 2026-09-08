@@ -2,8 +2,13 @@ package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
 import org.bukkit.block.Block;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -49,8 +54,10 @@ final class WinterMovement implements Listener {
         boolean gravity;
         boolean previousColdLock;
         int previousColdTicks;
+        BlockDisplay iceLower, iceUpper;
     }
     private final WinterItems items;
+    private final BlockData ice;
     private final Map<UUID, State> states = new HashMap<>();
     private final NamespacedKey walk, fly, gravity, coldLock, coldTicks;
     private final BukkitTask task;
@@ -58,6 +65,7 @@ final class WinterMovement implements Listener {
 
     WinterMovement(JavaPlugin plugin, WinterItems items) {
         this.items = items;
+        ice = Bukkit.createBlockData(Material.ICE);
         walk = new NamespacedKey(plugin, "winter_saved_walk");
         fly = new NamespacedKey(plugin, "winter_saved_fly");
         gravity = new NamespacedKey(plugin, "winter_saved_gravity");
@@ -96,7 +104,9 @@ final class WinterMovement implements Listener {
             state.controlled = true;
         }
         player.setWalkSpeed(0); player.setFlySpeed(0);
-        player.setGravity(state.grip == Grip.JUMP && state.frozenUntil <= tick ? state.gravity : false);
+        // Заморозка запрещает движение и поворот, но не отключает гравитацию:
+        // съевший рыбу в воздухе падает, а не зависает на месте.
+        player.setGravity(state.frozenUntil > tick || state.grip == Grip.JUMP ? state.gravity : false);
     }
 
     private void restoreControl(Player player, State state) {
@@ -145,6 +155,21 @@ final class WinterMovement implements Listener {
         player.setFallDistance(0); player.setVelocity(new Vector());
     }
 
+    /** Падение с уже зажатым Shift: зацеп срабатывает сам, как только рядом появилась стена. */
+    private void autoGrab() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (player.isDead() || player.isFlying() || !player.isSneaking() || player.isOnGround()) continue;
+            State existing = states.get(player.getUniqueId());
+            if (!WinterRules.canAutoGrab(player.isSneaking(), !player.isOnGround() && !player.isFlying(),
+                    items.holdsTool(player), existing != null && existing.frozenUntil > tick,
+                    existing != null && existing.grip != Grip.NONE, player.getVelocity().getY() <= 0)) continue;
+            Block wall = wall(player);
+            if (wall == null) continue;
+            State state = states.computeIfAbsent(player.getUniqueId(), ignored -> new State());
+            if (state.grip == Grip.NONE && state.frozenUntil <= tick) latch(player, state, wall);
+        }
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void sneak(PlayerToggleSneakEvent event) {
         Player player = event.getPlayer();
@@ -171,7 +196,30 @@ final class WinterMovement implements Listener {
         control(player, state);
         player.setFallDistance(0);
         player.setVelocity(new Vector(0, WinterRules.CLIMB_VELOCITY, 0));
+        iceBreakEffects(player, state); // Осколки и звук ломающегося льда — только для красоты.
         if (!items.useClimb(player)) release(player); // Последний прыжок остаётся, но сломанной киркой больше не зацепиться.
+    }
+
+    /** Частицы «поломки льда» и звук в точке удара изморозью о стену. */
+    private void iceBreakEffects(Player player, State state) {
+        Location at = player.getLocation().add(0, 1.1, 0);
+        Block wallBlock = state.wall;
+        if (wallBlock != null && !wallBlock.getType().isAir()) at = nearestFace(wallBlock, player.getEyeLocation());
+        player.getWorld().playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.7f, 0.9f);
+        player.getWorld().spawnParticle(Particle.BLOCK, at, 26, 0.35, 0.35, 0.35, 0.05, ice);
+        player.getWorld().spawnParticle(Particle.ITEM_SNOWBALL, at, 8, 0.3, 0.3, 0.3, 0.02);
+    }
+
+    /** Центр грани блока, обращённой к игроку. */
+    private static Location nearestFace(Block block, Location eye) {
+        Location center = block.getLocation().add(0.5, 0.5, 0.5);
+        double dx = center.getX() - eye.getX(), dy = center.getY() - eye.getY(), dz = center.getZ() - eye.getZ();
+        double ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
+        Location face = center.clone();
+        if (ax >= ay && ax >= az) face.setX(center.getX() - (dx < 0 ? -0.5 : 0.5));
+        else if (ay >= az) face.setY(center.getY() - (dy < 0 ? -0.5 : 0.5));
+        else face.setZ(center.getZ() - (dz < 0 ? -0.5 : 0.5));
+        return face;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -179,8 +227,23 @@ final class WinterMovement implements Listener {
         State state = states.get(event.getPlayer().getUniqueId());
         if (state == null || event.getTo() == null) return;
         if (state.frozenUntil > tick) {
-            state.correction = event.getFrom().clone(); state.correctionTick = tick;
-            event.setCancelled(true); // Включая yaw/pitch. Не вызываем цепочку собственных PlayerTeleportEvent.
+            Location from = event.getFrom(), to = event.getTo();
+            // Падение по гравитации заморозка не отменяет: разрешаем только строго
+            // вертикальное движение вниз, при этом взгляд остаётся зафиксированным.
+            boolean pureFall = to.getWorld().equals(from.getWorld())
+                    && to.getY() < from.getY() - 1e-9
+                    && Math.abs(to.getX() - from.getX()) <= 1e-9
+                    && Math.abs(to.getZ() - from.getZ()) <= 1e-9;
+            if (pureFall && state.freezeAnchor != null
+                    && (to.getYaw() != state.freezeAnchor.getYaw() || to.getPitch() != state.freezeAnchor.getPitch())) {
+                Location locked = to.clone();
+                locked.setYaw(state.freezeAnchor.getYaw());
+                locked.setPitch(state.freezeAnchor.getPitch());
+                event.setTo(locked);
+            } else if (!pureFall) {
+                state.correction = event.getFrom().clone(); state.correctionTick = tick;
+                event.setCancelled(true); // Включая yaw/pitch. Не вызываем цепочку собственных PlayerTeleportEvent.
+            }
         } else if (state.grip == Grip.HANG && state.hangAnchor != null && !event.isCancelled()
                 && event.getTo().getWorld().equals(state.hangAnchor.getWorld())
                 && event.getTo().distanceSquared(state.hangAnchor) > 1e-8) {
@@ -214,16 +277,34 @@ final class WinterMovement implements Listener {
                 } else if (player.isOnGround() || tick - state.launched > 80) release(player);
                 state.previousY = y;
             }
-            if (state.frozenUntil > tick || state.grip == Grip.HANG) {
-                if (state.frozenUntil > tick) holdFrozenPosition(player, state);
+            if (state.frozenUntil > tick) {
+                // Пока заморозка действует: на земле держим позицию, в воздухе разрешаем
+                // падение (гравитация) и следуем якорем за игроком, гася только горизонталь.
+                player.setFallDistance(0);
+                Location actual = player.getLocation();
+                Location anchor = state.freezeAnchor;
+                boolean anchored = anchor != null && anchor.getWorld().equals(actual.getWorld());
+                boolean airborne = !player.isOnGround() && !player.isFlying() && !player.isInsideVehicle();
+                if (!anchored || airborne || actual.getY() < anchor.getY() - 1e-8) {
+                    state.freezeAnchor = actual.clone();
+                    Vector velocity = player.getVelocity();
+                    if (Math.abs(velocity.getX()) + Math.abs(velocity.getZ()) > 1e-8) player.setVelocity(new Vector(0, velocity.getY(), 0));
+                } else {
+                    holdFrozenPosition(player, state);
+                    if (player.getVelocity().lengthSquared() > 1e-8) player.setVelocity(new Vector());
+                }
+            } else if (state.grip == Grip.HANG) {
                 player.setFallDistance(0);
                 if (player.getVelocity().lengthSquared() > 1e-8) player.setVelocity(new Vector());
             } else if (state.grip == Grip.JUMP) {
                 Vector velocity = player.getVelocity();
                 if (Math.abs(velocity.getX()) + Math.abs(velocity.getZ()) > 1e-8) player.setVelocity(new Vector(0, velocity.getY(), 0));
             } else restoreControl(player, state);
+            if (state.frozenUntil > tick) updateIce(player, state);
+            else clearIce(state);
             if (state.grip == Grip.NONE && state.frozenUntil <= tick && state.coldUntil == 0) states.remove(player.getUniqueId(), state);
         }
+        autoGrab();
     }
 
     private void holdFrozenPosition(Player player, State state) {
@@ -244,9 +325,47 @@ final class WinterMovement implements Listener {
         try { player.teleport(restore); } finally { state.correcting = false; }
     }
 
+    /** Два декоративных «фантомных» блока льда на весь рост игрока: без хитбокса и урона. */
+    private void updateIce(Player player, State state) {
+        if (state.iceLower == null || !state.iceLower.isValid() || state.iceUpper == null || !state.iceUpper.isValid()) {
+            clearIce(state);
+            Location at = player.getLocation();
+            state.iceLower = player.getWorld().spawn(at, BlockDisplay.class, display -> configureIce(display));
+            state.iceUpper = player.getWorld().spawn(at, BlockDisplay.class, display -> configureIce(display));
+        }
+        Location base = state.freezeAnchor != null && state.freezeAnchor.getWorld().equals(player.getWorld())
+                ? state.freezeAnchor : player.getLocation();
+        placeIce(state.iceLower, base, 0.5);
+        placeIce(state.iceUpper, base, 1.5);
+    }
+
+    private void configureIce(BlockDisplay display) {
+        display.setBlock(ice);
+        display.setPersistent(false);
+        display.setGravity(false);
+        display.setInvulnerable(true);
+        display.setSilent(true);
+        display.setTeleportDuration(0);
+        display.setInterpolationDelay(0);
+    }
+
+    private void placeIce(BlockDisplay display, Location base, double up) {
+        Location target = base.clone();
+        target.setY(target.getY() + up);
+        target.setYaw(0); target.setPitch(0);
+        if (!display.getLocation().getWorld().equals(target.getWorld())
+                || display.getLocation().distanceSquared(target) > 1e-6) display.teleport(target);
+    }
+
+    private static void clearIce(State state) {
+        if (state.iceLower != null) { state.iceLower.remove(); state.iceLower = null; }
+        if (state.iceUpper != null) { state.iceUpper.remove(); state.iceUpper = null; }
+    }
+
     private void cleanup(Player player) {
         State state = states.remove(player.getUniqueId());
         if (state != null) {
+            clearIce(state);
             restoreControl(player, state);
             if (state.coldUntil != 0) restoreCold(player, state);
         }

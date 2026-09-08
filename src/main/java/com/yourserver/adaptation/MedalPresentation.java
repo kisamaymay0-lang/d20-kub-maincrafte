@@ -59,6 +59,10 @@ final class MedalPresentation {
         String value = ProfileText.clean(source);
         while (value.startsWith("— ") || value.startsWith("– ") || value.startsWith("- ")) value = value.substring(2).stripLeading();
         List<String> wrapped = ProfileText.wrap(value, width - 2);
-        for (int i = 0; i < wrapped.size(); i++) target.add(ProfileItems.text((i == 0 ? "— " : "  ") + wrapped.get(i), NamedTextColor.WHITE));
+        for (int i = 0; i < wrapped.size(); i++) {
+            // Тире «— » по ширине примерно равно трём пробелам ванильного шрифта (пробел 4 px).
+            // Три пробела, а не два, чтобы перенесённая строка начиналась ровно под текстом первой.
+            target.add(ProfileItems.text((i == 0 ? "— " : "   ") + wrapped.get(i), NamedTextColor.WHITE));
+        }
     }
 }

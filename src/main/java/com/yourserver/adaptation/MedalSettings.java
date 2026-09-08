@@ -19,14 +19,22 @@ import java.util.Map;
 /** Неизменяемые настройки оформления и сообщений из medals/config.yml. */
 final class MedalSettings {
     record Style(String label, String rarity, TextColor end) { }
+    /** Автоматическая медаль из medals/config.yml: пустые название/заслуги отключают выдачу. */
+    record SandwichSpec(ProfileMedal.Metal metal, String title, List<String> reasons, boolean filled) {
+        static SandwichSpec disabled(ProfileMedal.Metal metal) { return new SandwichSpec(metal, "", List.of(), false); }
+    }
     private final Map<ProfileMedal.Metal, Style> styles;
     private final Map<String, String> messages;
     final String astronomyTitle;
     final List<String> astronomyReasons;
+    final SandwichSpec sandwichAllKinds;
+    final SandwichSpec sandwichIceCaviar;
 
-    private MedalSettings(Map<ProfileMedal.Metal, Style> styles, Map<String, String> messages, String title, List<String> reasons) {
+    private MedalSettings(Map<ProfileMedal.Metal, Style> styles, Map<String, String> messages, String title, List<String> reasons,
+                          SandwichSpec sandwichAllKinds, SandwichSpec sandwichIceCaviar) {
         this.styles = Map.copyOf(styles); this.messages = Map.copyOf(messages);
         astronomyTitle = title; astronomyReasons = List.copyOf(reasons);
+        this.sandwichAllKinds = sandwichAllKinds; this.sandwichIceCaviar = sandwichIceCaviar;
     }
 
     static MedalSettings defaults() {
@@ -45,7 +53,8 @@ final class MedalSettings {
         messages.put("error", "<red>Изменение медалей не применено: {error}</red>");
         messages.put("pending-error", "<red>Медаль пока не удалось записать. Право на неё сохранено; обратитесь к администратору.</red>");
         messages.put("no-permission", "<red>Нет прав управлять медалями.</red>");
-        return new MedalSettings(styles, messages, "Астрономия!", List.of("Собрано 1 созвездие."));
+        return new MedalSettings(styles, messages, "Астрономия!", List.of("Собрано 1 созвездие."),
+                SandwichSpec.disabled(ProfileMedal.Metal.GOLD), SandwichSpec.disabled(ProfileMedal.Metal.COPPER));
     }
 
     static MedalSettings load(Path file) throws Exception {
@@ -69,9 +78,25 @@ final class MedalSettings {
         List<String> reasons = yaml.isList("astronomy.reasons") ? yaml.getStringList("astronomy.reasons") : defaults.astronomyReasons;
         // Те же ограничения, что у выдаваемой медали; неправильный конфиг не заменит действующий.
         ProfileMedal validation = new ProfileMedal(java.util.UUID.randomUUID(), ProfileMedal.Metal.COPPER, title, reasons, 0, "");
-        MedalSettings settings = new MedalSettings(styles, messages, validation.title(), validation.reasons());
+        MedalSettings settings = new MedalSettings(styles, messages, validation.title(), validation.reasons(),
+                sandwichSpec(yaml, "sandwiches.all-kinds", ProfileMedal.Metal.GOLD),
+                sandwichSpec(yaml, "sandwiches.ice-caviar", ProfileMedal.Metal.COPPER));
         for (String key : messages.keySet()) settings.message(key, "Player", "Медную медаль", "Медаль", 1, "Ошибка");
         return settings;
+    }
+
+    /** Пустая секция отключает автовыдачу; частично заполненная считается ошибкой конфигурации. */
+    private static SandwichSpec sandwichSpec(YamlConfiguration yaml, String root, ProfileMedal.Metal fallbackMetal) {
+        ProfileMedal.Metal metal = fallbackMetal;
+        String metalName = ProfileText.clean(yaml.getString(root + ".metal", ""));
+        if (!metalName.isEmpty()) metal = ProfileMedal.Metal.parse(metalName);
+        String title = ProfileText.clean(yaml.getString(root + ".title", ""));
+        List<String> reasons = yaml.isList(root + ".reasons") ? yaml.getStringList(root + ".reasons") : List.of();
+        reasons = reasons.stream().map(ProfileText::clean).filter(reason -> !reason.isEmpty()).toList();
+        if (title.isEmpty() && reasons.isEmpty()) return SandwichSpec.disabled(metal);
+        if (title.isEmpty() || reasons.isEmpty()) throw new IllegalArgumentException("Заполните и название, и заслуги " + root);
+        new ProfileMedal(java.util.UUID.randomUUID(), metal, title, reasons, 0, ""); // Те же ограничения, что у выдаваемой медали.
+        return new SandwichSpec(metal, title, reasons, true);
     }
 
     Style style(ProfileMedal.Metal metal) { return styles.get(metal); }

@@ -19,9 +19,14 @@ final class WinterRules {
             "minecraft:frozen_peaks", "minecraft:jagged_peaks");
 
     private WinterRules() { }
-    static double catchChance(int luck) { return 0.08 + 0.02 * Math.clamp(luck, 0, 3); }
+    /** 2% без «Удачи моря», +1% за уровень (I–III) до максимума 5%. */
+    static double catchChance(int luck) { return 0.02 + 0.01 * Math.clamp(luck, 0, 3); }
     static boolean canGrab(boolean newlySneaking, boolean airborne, boolean tool, boolean frozen, boolean alreadyClimbing) {
         return newlySneaking && airborne && tool && !frozen && !alreadyClimbing;
+    }
+    /** Зацеп удержанным Shift: без нового нажатия, когда игрок уже падает рядом со стеной. */
+    static boolean canAutoGrab(boolean sneaking, boolean airborne, boolean tool, boolean frozen, boolean alreadyClimbing, boolean falling) {
+        return sneaking && airborne && tool && !frozen && !alreadyClimbing && falling;
     }
     static boolean jumpPressed(boolean previous, boolean current) { return current && !previous; }
     static Location anchoredLook(Location anchor, Location attempt) {

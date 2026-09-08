@@ -111,6 +111,23 @@ class ProfileDataTest {
     }
 
     @Test
+    void eatenKindMarkersPersistWithoutCreatingMedals() {
+        ProfileData data = new ProfileData(owner, "Player");
+        assertFalse(data.hasReward(ProfileAwards.eatenMarker("red")));
+        assertTrue(data.markClaimed(ProfileAwards.eatenMarker("red")));
+        assertFalse(data.markClaimed(ProfileAwards.eatenMarker("red")), "Повторное поедание того же вида не должно менять файл");
+        assertFalse(ProfileAwards.allSandwichKindsEaten(data));
+        data.markClaimed(ProfileAwards.eatenMarker("ice"));
+        data.markClaimed(ProfileAwards.eatenMarker("black"));
+        assertTrue(data.hasReward(ProfileAwards.eatenMarker("red")));
+        assertTrue(data.hasReward(ProfileAwards.eatenMarker("black")));
+        assertTrue(data.hasReward(ProfileAwards.eatenMarker("ice")));
+        assertTrue(ProfileAwards.allSandwichKindsEaten(data));
+        assertTrue(data.medals().isEmpty(), "Маркер прогресса не является медалью и не занимает слот");
+        assertFalse(data.markClaimed(""), "Пустой маркер не записывается");
+    }
+
+    @Test
     void onlyTheUpperAndLowerRowsArePlacementTargets() {
         for (int i = 0; i < 27; i++) {
             int logical = ProfileText.medalSlot(i);
