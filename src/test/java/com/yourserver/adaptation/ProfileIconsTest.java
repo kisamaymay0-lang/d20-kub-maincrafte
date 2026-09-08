@@ -1,5 +1,6 @@
 package com.yourserver.adaptation;
 
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -37,12 +38,21 @@ class ProfileIconsTest {
         assertEquals(ProfileIcons.FONT, icon.font(), "Иконка рисуется шрифтом профиля");
         var row = ProfileIcons.prefixedName(prefix, "Steve");
         assertEquals("\uE106 Steve", PlainTextComponentSerializer.plainText().serialize(row));
-        var namePart = row.children().get(1).children().get(1);
-        assertEquals(TextColor.color(0x8FE3F5), namePart.color());
+        assertEquals(TextColor.color(0x8FE3F5), leafColor(row, "Steve"));
         // Не prefN-файлы иконки не имеют; без префикса ник белый.
         var custom = new PrefixCatalog.Prefix("pref11", "Самодельный", TextColor.color(0x123456), "my_icon", 11);
         assertEquals("", PlainTextComponentSerializer.plainText().serialize(ProfileIcons.prefixIcon(custom)));
         assertEquals(NamedTextColor.WHITE, ProfileIcons.prefixedName(null, "Steve").color());
+    }
+
+    /** Цвет листа с заданным текстом (текст может быть частью префиксной строки из нескольких листьев). */
+    private static TextColor leafColor(Component component, String leaf) {
+        if (leaf.equals(PlainTextComponentSerializer.plainText().serialize(component))) return component.color();
+        for (Component child : component.children()) {
+            TextColor found = leafColor(child, leaf);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     @Test
