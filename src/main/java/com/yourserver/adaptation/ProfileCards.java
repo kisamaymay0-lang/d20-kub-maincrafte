@@ -293,7 +293,7 @@ final class ProfileCards {
         if (prefix == null) {
             body.add(nameText);
         } else {
-            body.add(Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(Component.space()).append(nameText));
+            body.add(Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(nameText));
         }
         card.hasVoice = data.voice() != null;
         card.voiceNote = data.voice();

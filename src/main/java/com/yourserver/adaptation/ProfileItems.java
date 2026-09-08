@@ -147,7 +147,7 @@ final class ProfileItems {
             // Иконка префикса перед ником; сам ник всегда белый обычным шрифтом — префикс его не меняет.
             Component nameText = nick(title).decorate(TextDecoration.BOLD);
             if (prefix == null) skull.displayName(nameText);
-            else skull.displayName(Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(Component.space()).append(nameText));
+            else skull.displayName(Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(nameText));
         }
         Player player = Bukkit.getPlayer(data.skinOwner());
         if (player != null) skins.put(data.skinOwner(), player.getPlayerProfile());

@@ -45,15 +45,12 @@ final class ProfileIcons {
         return Component.empty();
     }
 
-    /** Иконка префикса перед ником. Сам ник всегда белый обычным шрифтом — префикс его не меняет.
-     *  Шрифт иконки ставится только на саму иконку: если его унаследуют буквы ника,
-     *  клиент покажет их пустыми квадратами (в шрифте иконок нет букв). */
+    /** Иконка префикса сразу перед ником, без пробела. Сам ник всегда белый обычным шрифтом —
+     *  префикс его не меняет. Шрифт иконки ставится только на саму иконку: если его унаследуют
+     *  буквы ника, клиент покажет их пустыми квадратами (в шрифте иконок нет букв). */
     static Component prefixedName(PrefixCatalog.Prefix prefix, String name) {
         if (prefix == null) return ProfileItems.nick(name);
-        return Component.empty()
-                .append(prefixIcon(prefix))
-                .append(Component.space())
-                .append(ProfileItems.nick(name));
+        return Component.empty().append(prefixIcon(prefix)).append(ProfileItems.nick(name));
     }
 
     /** Строка глифов E101–E10F для проверки ресурспака: видны картинки — пакет и шрифт загружены. */

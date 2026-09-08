@@ -13,15 +13,17 @@ import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 
 /**
  * Замена ванильного ника над головой на «картинка префикса + белый ник».
  * Ванильный тег прячется командой на основной таблице (каждая команда — один игрок),
- * а поверх головы игрока держится один TextDisplay: его видно всем, кроме самого владельца
- * (как и ванильный тег). Без префикса ничего не создаётся — игрок остаётся с обычным ником.
+ * а поверх головы игрока держится один TextDisplay: его видно всем (и владельцу в F5).
+ * Без префикса ничего не создаётся — игрок остаётся с обычным ником.
  */
 final class ProfileTags {
     private static final double TAG_HEIGHT = 2.24; // над ногами, как у ванильного ника
@@ -31,7 +33,9 @@ final class ProfileTags {
     private final JavaPlugin plugin;
     private final Function<Player, PrefixCatalog.Prefix> equipped;
     private final Map<UUID, Entry> tags = new HashMap<>();
+    private final Set<UUID> teamBroken = new HashSet<>(); // логируем одну ошибку на игрока
     private final BukkitTask task;
+    private int tickCount;
     private boolean disabled;
 
     private static final class Entry {
@@ -68,7 +72,6 @@ final class ProfileTags {
                 removeDisplay(entry);
                 display = spawn(player);
                 entry.display = display;
-                player.hideEntity(plugin, display); // Свой ник над головой, как и в ваниле, не виден владельцу.
             }
             Component line = ProfileIcons.prefixedName(prefix, player.getName());
             if (!line.equals(display.text())) display.text(line);
@@ -88,6 +91,8 @@ final class ProfileTags {
 
     private void tick() {
         if (tags.isEmpty()) return;
+        tickCount++;
+        boolean reassert = tickCount % 20 == 0; // раз в секунду напоминаем серверу про скрытие ванильного ника
         for (Map.Entry<UUID, Entry> entry : new java.util.ArrayList<>(tags.entrySet())) {
             Entry tag = entry.getValue();
             Player player = Bukkit.getPlayer(entry.getKey());
@@ -95,6 +100,7 @@ final class ProfileTags {
                 remove(entry.getKey());
                 continue;
             }
+            if (reassert) ensureTeam(player);
             try {
                 if (tag.display == null || !tag.display.isValid()) {
                     // Тега нет: создаём для живого видимого игрока; иначе просто ждём.
@@ -132,8 +138,15 @@ final class ProfileTags {
             }
             String entry = player.getName();
             if (!team.hasEntry(entry)) team.addEntry(entry);
+            teamBroken.remove(player.getUniqueId());
         } catch (RuntimeException ex) {
-            plugin.getLogger().log(java.util.logging.Level.WARNING, "Не удалось скрыть ванильный ник " + player.getName(), ex);
+            // Например, игрок уже в чужой команде этой таблицы. Логируем один раз, чтобы
+            // было видно в latest.log, почему над головой остался ванильный ник.
+            if (teamBroken.add(player.getUniqueId())) {
+                plugin.getLogger().log(java.util.logging.Level.WARNING,
+                        "Не удалось скрыть ванильный ник над головой " + player.getName()
+                                + " (тег префикса может дублироваться с ванильным): ", ex);
+            }
         }
     }
 

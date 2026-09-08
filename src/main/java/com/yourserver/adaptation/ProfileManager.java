@@ -62,11 +62,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
      *  Моменты «поломок» (тики от открытия, 20 тиков = 1 с): первая через 2 с,
      *  затем 4 с шагом 1 с и оставшиеся 3 с шагом 0.8 с (включая последнюю).
      *  Карточек максимум 9 — значит «поломок» максимум 8 (победитель уцелевший).
-     *  После победы — пауза 2 с, чтобы рассмотреть выигранный префикс, затем закрытие. */
+     *  После победы — пауза 4 с, чтобы рассмотреть выигранный префикс, затем закрытие. */
     private static final int CASE_MAX = 9;
     private static final int[] CASE_BREAK_TICKS = { 40, 60, 80, 100, 120, 136, 152, 168 };
     private static final int CASE_TICK = 2;             // тик анимации (попадает во все моменты поломок)
-    private static final int CASE_VICTORY_TICKS = 40;   // пауза 2 секунды на рассмотрение префикса
+    private static final int CASE_VICTORY_TICKS = 80;   // пауза 4 секунды на рассмотрение префикса
     private static final int CASE_SLOT_START = 9;       // фиксированные места: слот 9, 10, … 17
 
     private static final class CaseRun {
@@ -336,7 +336,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         clickSound(player);
         open(player, data.owner, Screen.PREFIX_CASE, 0, null);
         if (count == 1) {
-            // Не выбитых префиксов меньше двух: показываем единственного и забираем через 2 секунды.
+            // Не выбитых префиксов меньше двух: показываем единственного и забираем через 4 секунды.
             run.victory = true;
             run.victoryTick = 0;
             player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.1f);
@@ -367,7 +367,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 player.playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.9f, 0.7f);
                 renderOpenCase(player);
             }
-            if (run.alive == 1) { // Последний уцелевший: 2 секунды показать его и закрыть окно.
+            if (run.alive == 1) { // Последний уцелевший: 4 секунды показать его и закрыть окно.
                 run.victory = true;
                 run.victoryTick = run.elapsed;
                 if (player != null) {
@@ -379,8 +379,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         if (run.alive == 1 && run.victory) {
             Player player = Bukkit.getPlayer(run.owner);
             int since = run.elapsed - run.victoryTick;
-            if (since == 10 && player != null) player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_BLAST, 1.0f, 1.2f);
-            else if (since == 20 && player != null) player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 1.0f, 1.4f);
+            if (since == 20 && player != null) player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_BLAST, 1.0f, 1.2f);
+            else if (since == 40 && player != null) player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_TWINKLE, 1.0f, 1.4f);
             else if (since >= CASE_VICTORY_TICKS) { finalizeCase(run); return; }
             return;
         }
