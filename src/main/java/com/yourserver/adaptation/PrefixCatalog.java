@@ -32,9 +32,9 @@ final class PrefixCatalog {
         return new PrefixCatalog(byId);
     }
 
-    static PrefixCatalog load(Path file) throws Exception {
+    static PrefixCatalog load(Path path) throws Exception {
         YamlConfiguration yaml = new YamlConfiguration();
-        yaml.loadFromString(Files.readString(file));
+        yaml.loadFromString(Files.readString(path));
         ConfigurationSection section = yaml.getConfigurationSection("prefixes");
         if (section == null) throw new IllegalArgumentException("В prefixes.yml нет раздела prefixes");
         Map<String, Prefix> byId = new LinkedHashMap<>();
