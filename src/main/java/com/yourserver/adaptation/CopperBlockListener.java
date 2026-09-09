@@ -145,9 +145,25 @@ public class CopperBlockListener implements Listener {
                     sessionInventories.get(key)
             );
         } else {
+            Material frameMaterial =
+                    Material.matchMaterial(
+                            plugin.getConfig().getString(
+                                    "gui.frames.copper",
+                                    "BLACK_STAINED_GLASS_PANE"
+                            ),
+                            false
+                    );
+
+            if (frameMaterial == null
+                    || !frameMaterial.isItem()) {
+
+                frameMaterial =
+                        Material.BLACK_STAINED_GLASS_PANE;
+            }
+
             ItemStack separator =
                     new ItemStack(
-                            Material.BLACK_STAINED_GLASS_PANE
+                            frameMaterial
                     );
 
             ItemMeta meta =
@@ -514,7 +530,7 @@ public class CopperBlockListener implements Listener {
                     playedAny = true;
                 }
 
-                if (playedAny) {
+                if (playedAny && MessageUtils.particles()) {
                     block.getWorld().spawnParticle(
                             org.bukkit.Particle.NOTE,
                             particleLoc,

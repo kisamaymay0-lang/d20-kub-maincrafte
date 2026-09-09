@@ -66,13 +66,13 @@ public class DiceRollListener implements Listener, CommandExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>, /d20 cheat <1-20> или /d20 enchant <ID>");
+            MessageUtils.send(sender, "d20.usage");
             return true;
         }
 
         if (args[0].equalsIgnoreCase("cheat")) {
             if (!(sender instanceof Player)) {
-                sender.sendMessage(ChatColor.RED + "Эту команду может использовать только игрок.");
+                MessageUtils.send(sender, "d20.players-only");
                 return true;
             }
             Player player = (Player) sender;
@@ -81,7 +81,8 @@ public class DiceRollListener implements Listener, CommandExecutor {
             if (cheatCooldowns.containsKey(uuid)) {
                 long timeLeft = (cheatCooldowns.get(uuid) + CHEAT_COOLDOWN_SECONDS * 1000L) - System.currentTimeMillis();
                 if (timeLeft > 0) {
-                    player.sendMessage(ChatColor.RED + "Подождите " + (timeLeft / 1000 + 1) + " секунд перед следующим использованием чита!");
+                    MessageUtils.send(player, "d20.cheat-cooldown",
+                            "{seconds}", String.valueOf(timeLeft / 1000 + 1));
                     return true;
                 }
             }
@@ -90,9 +91,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 if (activeCheaters.containsKey(uuid)) {
                     activeCheaters.remove(uuid);
                     cheatCooldowns.remove(uuid);
-                    player.sendMessage(ChatColor.RED + "Чит-режим отключен. Роллы снова случайны.");
+                    MessageUtils.send(player, "d20.cheat-off");
                 } else {
-                    player.sendMessage(ChatColor.RED + "Укажите число! Пример: /d20 cheat 20");
+                    MessageUtils.send(player, "d20.cheat-need-number");
                 }
                 return true;
             }
@@ -100,33 +101,35 @@ public class DiceRollListener implements Listener, CommandExecutor {
             try {
                 int targetRoll = Integer.parseInt(args[1]);
                 if (targetRoll < 1 || targetRoll > 20) {
-                    player.sendMessage(ChatColor.RED + "Число кубика должно быть строго от 1 до 20!");
+                    MessageUtils.send(player, "d20.cheat-range");
                     return true;
                 }
                 activeCheaters.put(uuid, targetRoll);
                 cheatCooldowns.put(uuid, System.currentTimeMillis());
-                player.sendMessage(ChatColor.GREEN + "Чит-режим активирован! Следующий удар гарантированно выдаст: §e§l[" + targetRoll + "]");
+                MessageUtils.send(player, "d20.cheat-on",
+                        "{roll}", String.valueOf(targetRoll));
             } catch (NumberFormatException e) {
-                player.sendMessage(ChatColor.RED + "Некорректное число! Пример: /d20 cheat 7");
+                MessageUtils.send(player, "d20.cheat-bad-number");
             }
             return true;
         }
 
         if (args[0].equalsIgnoreCase("enchant")) {
             if (!(sender instanceof Player)) {
-                sender.sendMessage(ChatColor.RED + "Эту команду может использовать только игрок.");
+                MessageUtils.send(sender, "d20.players-only");
                 return true;
             }
             Player player = (Player) sender;
             if (args.length < 2) {
-                player.sendMessage(ChatColor.RED + "Укажите ID предмета! Пример: /d20 enchant mace");
+                MessageUtils.send(player, "d20.enchant-need-id");
                 return true;
             }
 
             String matName = args[1].toUpperCase();
             Material material = Material.getMaterial(matName);
             if (material == null || material == Material.AIR) {
-                player.sendMessage(ChatColor.RED + "Предмет с ID '" + args[1] + "' не найден в базе Minecraft!");
+                MessageUtils.send(player, "d20.enchant-not-found",
+                        "{item}", args[1]);
                 return true;
             }
 
@@ -141,30 +144,32 @@ public class DiceRollListener implements Listener, CommandExecutor {
             }
 
             player.getInventory().addItem(item);
-            player.sendMessage(ChatColor.GREEN + "Вам успешно выдан предмет " + material.name() + " с чаром Бросок I!");
+            MessageUtils.send(player, "d20.enchant-given",
+                    "{item}", material.name());
             return true;
         }
 
         if (args[0].equalsIgnoreCase("give") && args.length >= 2) {
             Player target = Bukkit.getPlayer(args[1]);
             if (target == null) {
-                sender.sendMessage(ChatColor.RED + "Игрок не найден.");
+                MessageUtils.send(sender, "d20.give-not-found");
                 return true;
             }
             ItemStack book = new ItemStack(Material.ENCHANTED_BOOK);
             ItemMeta meta = book.getItemMeta();
             if (meta != null) {
-                meta.setDisplayName("§bЧародейская книга");
+                meta.setDisplayName(MessageUtils.legacy("&bЧародейская книга"));
                 meta.setLore(Collections.singletonList(CHAR_LORE));
                 meta.setEnchantmentGlintOverride(true);
                 book.setItemMeta(meta);
             }
             target.getInventory().addItem(book);
-            sender.sendMessage(ChatColor.GREEN + "Книга выдана игроку " + target.getName());
+            MessageUtils.send(sender, "d20.give-given",
+                    "{player}", target.getName());
             return true;
         }
 
-        sender.sendMessage(ChatColor.RED + "Неизвестный аргумент. Используйте give, cheat или enchant.");
+        MessageUtils.send(sender, "d20.unknown");
         return true;
     }
 
@@ -346,7 +351,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
             if (rollingTasks.containsKey(victimUUID) && !waitingForHit.containsKey(victimUUID)) {
                 if (!(event.getDamager() instanceof Player && event.getDamager().equals(victim))) {
                     event.setDamage(event.getDamage() * 0.70);
-                    victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 3, 0.2, 0.2, 0.2, 0.01);
+                    if (MessageUtils.particles()) {
+                        victim.getWorld().spawnParticle(Particle.CRIT, victim.getLocation().add(0, 1, 0), 3, 0.2, 0.2, 0.2, 0.01);
+                    }
                 }
             }
         }
@@ -381,7 +388,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
             ItemStack newHand = player.getInventory().getItem(event.getNewSlot());
             if (!hasD20Lore(newHand)) {
                 cleanup(uuid);
-                player.sendMessage(ChatColor.RED + "Бафф чара \"Бросок I\" был отменен, так как вы сменили предмет в руке!");
+                MessageUtils.send(player, "d20.buff-cancelled");
             }
         }
     }
@@ -395,8 +402,14 @@ public class DiceRollListener implements Listener, CommandExecutor {
         }
 
         BossBar bossBar = Bukkit.createBossBar("", BarColor.YELLOW, BarStyle.SOLID);
-        bossBar.addPlayer(player);
-        bossBar.setVisible(true);
+        /*
+         * effects.bossbar=false: бар не показывается игроку,
+         * но таймер/фазы ролла продолжают работать как раньше.
+         */
+        if (MessageUtils.bossBars()) {
+            bossBar.addPlayer(player);
+            bossBar.setVisible(true);
+        }
         playerBossBars.put(uuid, bossBar);
 
         BukkitTask task = new BukkitRunnable() {
@@ -424,10 +437,15 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 double progress = (double) ticks / 80.0;
                 bossBar.setProgress(Math.max(0.0, Math.min(1.0, progress)));
                 int randomNum = ThreadLocalRandom.current().nextInt(1, 21);
-                String color = (ticks % 4 == 0) ? "§e§l" : "§f§l";
-                bossBar.setTitle("§f§lВыпало: " + color + "[" + randomNum + "]");
+                String color = (ticks % 4 == 0) ? "&e&l" : "&f&l";
+                bossBar.setTitle(MessageUtils.legacyKey(
+                        "gui.bossbar.dice-rolling",
+                        "&f&lВыпало: {color}[{num}]",
+                        "{color}", color,
+                        "{num}", String.valueOf(randomNum)
+                ));
 
-                if (ticks % 4 == 0) {
+                if (ticks % 4 == 0 && MessageUtils.sounds()) {
                     player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 0.3f, 1.5f);
                 }
                 ticks -= 2;
@@ -439,9 +457,15 @@ public class DiceRollListener implements Listener, CommandExecutor {
     private void startWaitingForHitPhase(Player player, BossBar bossBar, int finalRoll) {
         UUID uuid = player.getUniqueId();
         bossBar.setProgress(1.0);
-        bossBar.setTitle("§f§lВыпало: §e§l[" + finalRoll + "] §f§lВремя для §e§lУДАРА!");
+        bossBar.setTitle(MessageUtils.legacyKey(
+                "gui.bossbar.dice-hit",
+                "&f&lВыпало: &e&l[{roll}] &f&lВремя для &e&lУДАРА!",
+                "{roll}", String.valueOf(finalRoll)
+        ));
         waitingForHit.put(uuid, finalRoll);
-        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_CHIME, 0.8f, 1.2f);
+        if (MessageUtils.sounds()) {
+            player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_CHIME, 0.8f, 1.2f);
+        }
 
         BukkitTask task = new BukkitRunnable() {
             int ticks = 100;
@@ -453,12 +477,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
                 if (!hasD20Lore(player.getInventory().getItemInMainHand())) {
                     cleanup(uuid);
-                    player.sendMessage(ChatColor.RED + "Бафф чара \"Бросок I\" был отменен, так как вы сменили предмет в руке!");
+                    MessageUtils.send(player, "d20.buff-cancelled");
                     return;
                 }
                 if (ticks <= 0) {
                     cleanup(uuid);
-                    player.sendMessage(ChatColor.RED + "Время для удара истекло!");
+                    MessageUtils.send(player, "d20.time-expired");
                     return;
                 }
                 double progress = (double) ticks / 100.0;
@@ -488,14 +512,18 @@ public class DiceRollListener implements Listener, CommandExecutor {
         if (roll == 1) {
             event.setCancelled(true);
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, 40, 0));
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ZOMBIE_ATTACK_IRON_DOOR, 1f, 1.2f);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 0.8f, 0.7f);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.6f, 1.5f);
+            if (MessageUtils.sounds()) {
+                attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_ZOMBIE_ATTACK_IRON_DOOR, 1f, 1.2f);
+                attacker.getWorld().playSound(attacker.getLocation(), Sound.ITEM_SHIELD_BREAK, 0.8f, 0.7f);
+                attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.6f, 1.5f);
+            }
 
-            victim.getWorld().spawnParticle(Particle.EXPLOSION_EMITTER, victim.getLocation().add(0, 1, 0), 2, 0.1, 0.1, 0.1, 0);
-            victim.getWorld().spawnParticle(Particle.LARGE_SMOKE, victim.getLocation().add(0, 1, 0), 85, 0.5, 0.6, 0.5, 0.03);
+            if (MessageUtils.particles()) {
+                victim.getWorld().spawnParticle(Particle.EXPLOSION_EMITTER, victim.getLocation().add(0, 1, 0), 2, 0.1, 0.1, 0.1, 0);
+                victim.getWorld().spawnParticle(Particle.LARGE_SMOKE, victim.getLocation().add(0, 1, 0), 85, 0.5, 0.6, 0.5, 0.03);
+            }
 
-            attacker.sendMessage("§c§lКРИТИЧЕСКИЙ ПРОВАЛ! Текущий удар нанес 0 урона.");
+            MessageUtils.send(attacker, "d20.crit-fail");
             return;
         }
 
@@ -524,7 +552,9 @@ public class DiceRollListener implements Listener, CommandExecutor {
             hitSound = Sound.ITEM_SHIELD_BREAK;
             particle = Particle.LAVA;
             particleCount = 20;
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_STRONG, 1f, 1.2f);
+            if (MessageUtils.sounds()) {
+                attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_PLAYER_ATTACK_STRONG, 1f, 1.2f);
+            }
         } else if (roll <= 19) {
             multiplier = 2.50;
             hitSound = Sound.ENTITY_DRAGON_FIREBALL_EXPLODE;
@@ -538,11 +568,15 @@ public class DiceRollListener implements Listener, CommandExecutor {
             particleCount = 45;
 
             attacker.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 80, 1));
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.8f, 1.1f);
-            attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_BELL_USE, 0.5f, 1.6f);
+            if (MessageUtils.sounds()) {
+                attacker.getWorld().playSound(attacker.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.8f, 1.1f);
+                attacker.getWorld().playSound(attacker.getLocation(), Sound.BLOCK_BELL_USE, 0.5f, 1.6f);
+            }
 
-            victim.getWorld().spawnParticle(Particle.SOUL_FIRE_FLAME, victim.getLocation().add(0, 1, 0), 45, 0.4, 0.6, 0.4, 0.05);
-            victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 35, 0.3, 0.5, 0.3, 0.1);
+            if (MessageUtils.particles()) {
+                victim.getWorld().spawnParticle(Particle.SOUL_FIRE_FLAME, victim.getLocation().add(0, 1, 0), 45, 0.4, 0.6, 0.4, 0.05);
+                victim.getWorld().spawnParticle(Particle.LAVA, victim.getLocation().add(0, 1, 0), 35, 0.3, 0.5, 0.3, 0.1);
+            }
 
             Vector launchDirection = victim.getLocation().toVector().subtract(attacker.getLocation().toVector());
             if (launchDirection.lengthSquared() == 0) {
@@ -577,12 +611,14 @@ public class DiceRollListener implements Listener, CommandExecutor {
                         Bukkit.getScheduler().cancelTasks(finalPlugin);
                         return;
                     }
-                    finalVictim.getWorld().spawnParticle(Particle.EXPLOSION, finalVictim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
+                    if (MessageUtils.particles()) {
+                        finalVictim.getWorld().spawnParticle(Particle.EXPLOSION, finalVictim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
+                    }
                     timer -= 2;
                 }
             }, 2L, 2L);
 
-            attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
+            MessageUtils.send(attacker, "d20.divine");
 
             event.setDamage(event.getDamage() * multiplier);
 
@@ -593,8 +629,12 @@ public class DiceRollListener implements Listener, CommandExecutor {
         }
 
         event.setDamage(event.getDamage() * multiplier);
-        attacker.getWorld().playSound(attacker.getLocation(), hitSound, 1f, 1.2f);
-        victim.getWorld().spawnParticle(particle, victim.getLocation().add(0, 1, 0), particleCount, 0.4, 0.5, 0.4, 0.05);
+        if (MessageUtils.sounds()) {
+            attacker.getWorld().playSound(attacker.getLocation(), hitSound, 1f, 1.2f);
+        }
+        if (MessageUtils.particles()) {
+            victim.getWorld().spawnParticle(particle, victim.getLocation().add(0, 1, 0), particleCount, 0.4, 0.5, 0.4, 0.05);
+        }
 
         if (roll >= 18) {
             victim.setFireTicks(60);

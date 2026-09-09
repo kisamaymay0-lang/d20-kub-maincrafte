@@ -1,7 +1,6 @@
 package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -18,29 +17,29 @@ public class FlaskCommand implements CommandExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!sender.hasPermission("flask.admin")) {
-            sender.sendMessage(ChatColor.RED + "У вас нет прав на использование этой команды!");
+            MessageUtils.send(sender, "flask.no-perm");
             return true;
         }
 
         if (args.length < 3) {
-            sender.sendMessage(ChatColor.RED + "Использование: /flask give <игрок> <water/poison> [количество]");
+            MessageUtils.send(sender, "flask.usage");
             return true;
         }
 
         if (!args[0].equalsIgnoreCase("give")) {
-            sender.sendMessage(ChatColor.RED + "Неизвестная подкоманда. Используйте: /flask give <игрок> <water/poison>");
+            MessageUtils.send(sender, "flask.unknown-sub");
             return true;
         }
 
         Player target = Bukkit.getPlayer(args[1]);
         if (target == null || !target.isOnline()) {
-            sender.sendMessage(ChatColor.RED + "Игрок не найден или оффлайн!");
+            MessageUtils.send(sender, "flask.player-not-found");
             return true;
         }
 
         String type = args[2].toLowerCase();
         if (!type.equals("water") && !type.equals("poison")) {
-            sender.sendMessage(ChatColor.RED + "Тип флакона должен быть 'water' или 'poison'!");
+            MessageUtils.send(sender, "flask.bad-type");
             return true;
         }
 
@@ -49,20 +48,23 @@ public class FlaskCommand implements CommandExecutor {
             try {
                 amount = Integer.parseInt(args[3]);
                 if (amount < 1 || amount > 64) {
-                    sender.sendMessage(ChatColor.RED + "Количество должно быть от 1 до 64!");
+                    MessageUtils.send(sender, "flask.bad-amount");
                     return true;
                 }
             } catch (NumberFormatException e) {
-                sender.sendMessage(ChatColor.RED + "Некорректное количество!");
+                MessageUtils.send(sender, "flask.bad-number");
                 return true;
             }
         }
 
         boolean success = flaskListener.giveFlask(target, type, amount);
         if (success) {
-            sender.sendMessage(ChatColor.GREEN + "Флакон " + type + " выдан игроку " + target.getName() + " в количестве " + amount);
+            MessageUtils.send(sender, "flask.given",
+                    "{type}", type,
+                    "{player}", target.getName(),
+                    "{amount}", String.valueOf(amount));
         } else {
-            sender.sendMessage(ChatColor.RED + "Не удалось выдать флакон!");
+            MessageUtils.send(sender, "flask.give-fail");
         }
 
         return true;

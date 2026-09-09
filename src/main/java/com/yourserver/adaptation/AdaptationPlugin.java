@@ -19,6 +19,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.ItemStack;
@@ -62,6 +63,8 @@ public class AdaptationPlugin extends JavaPlugin implements Listener, CommandExe
 @Override
 public void onEnable() {
     saveDefaultConfig();
+
+    MessageUtils.init(this);
 
     getServer().getPluginManager().registerEvents(
             this,
@@ -173,26 +176,30 @@ public void onEnable() {
                 System.currentTimeMillis() + cooldown * 1000L
         );
 
-        player.getWorld().playSound(
-                player.getLocation(),
-                Sound.BLOCK_GLASS_BREAK,
-                1.0f,
-                0.8f
-        );
+        if (MessageUtils.sounds()) {
+            player.getWorld().playSound(
+                    player.getLocation(),
+                    Sound.BLOCK_GLASS_BREAK,
+                    1.0f,
+                    0.8f
+            );
+        }
 
-        player.getWorld().spawnParticle(
-                Particle.SMOKE,
-                player.getLocation().add(0, 1, 0),
-                10,
-                0.2,
-                0.3,
-                0.2,
-                0.05
-        );
+        if (MessageUtils.particles()) {
+            player.getWorld().spawnParticle(
+                    Particle.SMOKE,
+                    player.getLocation().add(0, 1, 0),
+                    10,
+                    0.2,
+                    0.3,
+                    0.2,
+                    0.05
+            );
+        }
 
-        player.sendMessage(
-                ChatColor.RED +
-                "Бафф чара \"Адаптация\" был разбит критическим ударом врага!"
+        MessageUtils.send(
+                player,
+                "adaptation.broken"
         );
     }
 
@@ -771,15 +778,17 @@ public void onEnable() {
                     (1.0 + pieceCount * penalty)
             );
 
-            player.getWorld().spawnParticle(
-                    Particle.SMOKE,
-                    player.getLocation().add(0, 1, 0),
-                    5,
-                    0.2,
-                    0.3,
-                    0.2,
-                    0.05
-            );
+            if (MessageUtils.particles()) {
+                player.getWorld().spawnParticle(
+                        Particle.SMOKE,
+                        player.getLocation().add(0, 1, 0),
+                        5,
+                        0.2,
+                        0.3,
+                        0.2,
+                        0.05
+                );
+            }
         }
     }
 
@@ -787,6 +796,10 @@ public void onEnable() {
             Player player,
             String type
     ) {
+
+        if (!MessageUtils.particles()) {
+            return;
+        }
 
         Particle.DustOptions dust;
 
@@ -848,28 +861,11 @@ public void onEnable() {
                 20L
         );
 
-        String typeText =
-                type.equals("MELEE")
-                        ? "БЛИЖ. УРОН!"
-                        : type.equals("RANGED")
-                        ? "СНАРЯДАМ!"
-                        : "МАГИИ!";
-
-        ChatColor color =
-                type.equals("MELEE")
-                        ? ChatColor.RED
-                        : type.equals("RANGED")
-                        ? ChatColor.GREEN
-                        : ChatColor.LIGHT_PURPLE;
-
         String title =
-                ChatColor.WHITE +
-                "" +
-                ChatColor.BOLD +
-                "АДАПТАЦИЯ К: " +
-                color +
-                ChatColor.BOLD +
-                typeText;
+                buildAdaptationTitle(
+                        type,
+                        false
+                );
 
         BarColor barColor =
                 type.equals("MELEE")
@@ -945,30 +941,11 @@ public void onEnable() {
                 15L
         );
 
-        String typeText =
-                type.equals("MELEE")
-                        ? "БЛИЖ. УРОН!"
-                        : type.equals("RANGED")
-                        ? "СНАРЯДАМ!"
-                        : "МАГИИ!";
-
-        ChatColor color =
-                type.equals("MELEE")
-                        ? ChatColor.DARK_RED
-                        : type.equals("RANGED")
-                        ? ChatColor.DARK_GREEN
-                        : ChatColor.DARK_PURPLE;
-
         String title =
-                ChatColor.WHITE +
-                "" +
-                ChatColor.UNDERLINE +
-                ChatColor.BOLD +
-                "ПОВЫШ. АДАПТАЦИЯ К: " +
-                color +
-                ChatColor.UNDERLINE +
-                ChatColor.BOLD +
-                typeText;
+                buildAdaptationTitle(
+                        type,
+                        true
+                );
 
         BarColor barColor =
                 type.equals("MELEE")
@@ -992,6 +969,66 @@ public void onEnable() {
         );
     }
 
+    /* ===================== Визуал (только оформление) ===================== */
+
+    /**
+     * Название типа урона из gui.labels (например, "БЛИЖ. УРОН!").
+     */
+    private String typeLabel(String type) {
+        return getConfig().getString(
+                "gui.labels." + type.toLowerCase(),
+                type.equals("MELEE")
+                        ? "БЛИЖ. УРОН!"
+                        : type.equals("RANGED")
+                        ? "СНАРЯДАМ!"
+                        : "МАГИИ!"
+        );
+    }
+
+    /**
+     * HEX/legacy-цвет типа урона для заголовка босс-бара (gui.labels.*).
+     */
+    private String typeColor(String type, boolean superMode) {
+        String path = "gui.labels."
+                + type.toLowerCase()
+                + (superMode ? "-super-color" : "-color");
+        return getConfig().getString(
+                path,
+                superMode
+                        ? type.equals("MELEE")
+                        ? "&#AA0000"
+                        : type.equals("RANGED")
+                        ? "&#00AA00"
+                        : "&#AA00AA"
+                        : type.equals("MELEE")
+                        ? "&#FF5555"
+                        : type.equals("RANGED")
+                        ? "&#55FF55"
+                        : "&#FF55FF"
+        );
+    }
+
+    /**
+     * Готовый legacy-заголовок босс-бара адаптации (gui.bossbar.active-*).
+     * Метод используется только для отображения: механика таймера не меняется.
+     */
+    private String buildAdaptationTitle(String type, boolean superMode) {
+        String template = getConfig().getString(
+                superMode
+                        ? "gui.bossbar.active-super"
+                        : "gui.bossbar.active-normal",
+                superMode
+                        ? "&6&l&nПОВЫШ. АДАПТАЦИЯ К: {color}&l&n{label}"
+                        : "&f&lАДАПТАЦИЯ К: {color}&l{label}"
+        );
+
+        return MessageUtils.legacy(
+                template,
+                "{color}", typeColor(type, superMode),
+                "{label}", typeLabel(type)
+        );
+    }
+
     private void createBossBarTimer(
             Player player,
             String message,
@@ -1009,7 +1046,13 @@ public void onEnable() {
                         BarStyle.SOLID
                 );
 
-        bossBar.addPlayer(player);
+        /*
+         * effects.bossbar=false: бар создаётся, но не показывается игроку.
+         * Таймер и перезарядки продолжают работать как раньше.
+         */
+        if (MessageUtils.bossBars()) {
+            bossBar.addPlayer(player);
+        }
 
         activeBossBars.put(
                 uuid,
@@ -1095,34 +1138,39 @@ public void onEnable() {
 
                             cooldown = true;
 
-                            p.getWorld().playSound(
-                                    p.getLocation(),
-                                    Sound.BLOCK_GLASS_BREAK,
-                                    1.0f,
-                                    0.8f
-                            );
+                            if (MessageUtils.sounds()) {
+                                p.getWorld().playSound(
+                                        p.getLocation(),
+                                        Sound.BLOCK_GLASS_BREAK,
+                                        1.0f,
+                                        0.8f
+                                );
+                            }
 
-                            p.getWorld().spawnParticle(
-                                    Particle.SMOKE,
-                                    p.getLocation().add(0, 1, 0),
-                                    10,
-                                    0.2,
-                                    0.3,
-                                    0.2,
-                                    0.05
-                            );
+                            if (MessageUtils.particles()) {
+                                p.getWorld().spawnParticle(
+                                        Particle.SMOKE,
+                                        p.getLocation().add(0, 1, 0),
+                                        10,
+                                        0.2,
+                                        0.3,
+                                        0.2,
+                                        0.05
+                                );
+                            }
 
-                            p.sendMessage(
-                                    ChatColor.RED +
-                                    "Адаптация закончилась! Перезарядка " +
-                                    cooldownSeconds +
-                                    " секунд."
+                            MessageUtils.send(
+                                    p,
+                                    "adaptation.ended",
+                                    "{seconds}", String.valueOf(cooldownSeconds)
                             );
 
                             bossBar.setTitle(
-                                    "§c§lПЕРЕЗАРЯДКА: " +
-                                    cooldownSeconds +
-                                    "с"
+                                    MessageUtils.legacyKey(
+                                            "gui.bossbar.cooldown",
+                                            "&c&lПЕРЕЗАРЯДКА: &f{seconds}с",
+                                            "{seconds}", String.valueOf(cooldownSeconds)
+                                    )
                             );
 
                             bossBar.setColor(
@@ -1162,9 +1210,11 @@ public void onEnable() {
                                     );
 
                             bossBar.setTitle(
-                                    "§c§lПЕРЕЗАРЯДКА: " +
-                                    secondsLeft +
-                                    "с"
+                                    MessageUtils.legacyKey(
+                                            "gui.bossbar.cooldown",
+                                            "&c&lПЕРЕЗАРЯДКА: &f{seconds}с",
+                                            "{seconds}", String.valueOf(secondsLeft)
+                                    )
                             );
 
                             if (time <= 0) {
@@ -1176,9 +1226,9 @@ public void onEnable() {
                                 bossBar.removeAll();
                                 activeBossBars.remove(uuid);
 
-                                p.sendMessage(
-                                        ChatColor.GREEN +
-                                        "Перезарядка закончилась!"
+                                MessageUtils.send(
+                                        p,
+                                        "adaptation.ready"
                                 );
 
                                 cancel();
@@ -1229,25 +1279,19 @@ public void onEnable() {
                                         ) / 10.0
                                 );
 
-                        if (superMode) {
-
-                            bossBar.setTitle(
-                                    "§6§l" +
-                                    message +
-                                    " §7[§6" +
-                                    secondsLeft +
-                                    "с§7]"
-                            );
-
-                        } else {
-
-                            bossBar.setTitle(
-                                    message +
-                                    " §7[§f" +
-                                    secondsLeft +
-                                    "с§7]"
-                            );
-                        }
+                        bossBar.setTitle(
+                                message +
+                                " " +
+                                MessageUtils.legacyKey(
+                                        superMode
+                                                ? "gui.bossbar.time-super"
+                                                : "gui.bossbar.time-normal",
+                                        superMode
+                                                ? "&7[&6{seconds}с&7]"
+                                                : "&7[&f{seconds}с&7]",
+                                        "{seconds}", String.valueOf(secondsLeft)
+                                )
+                        );
                     }
 
                 }.runTaskTimer(
@@ -1267,6 +1311,10 @@ public void onEnable() {
             float pitch,
             long delay
     ) {
+
+        if (!MessageUtils.sounds()) {
+            return;
+        }
 
         for (int i = 0; i < 3; i++) {
 
@@ -1385,6 +1433,29 @@ public void onEnable() {
         if (diceRollListener != null) {
             diceRollListener.disable();
         }
+    }
+
+    /*
+     * Визуальный градиентный префикс игрока в табе (gui.playerlist).
+     * Влияет ТОЛЬКО на список игроков (клавиша Tab); никак не меняет
+     * механику и не трогает чат/наментеги (они управляются командами/тимами).
+     */
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        if (!MessageUtils.bool("gui.playerlist.enabled", true)) {
+            return;
+        }
+
+        Player player = event.getPlayer();
+        String format = getConfig().getString(
+                "gui.playerlist.format",
+                "<gradient:#9ec5fe:#e0aaff>F8</gradient> <white>»</white> {name}"
+        );
+
+        player.playerListName(MessageUtils.parse(
+                format,
+                "{name}", player.getName()
+        ));
     }
 
     @EventHandler

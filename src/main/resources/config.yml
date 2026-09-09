@@ -1,3 +1,18 @@
+# ============================================================
+#  F8 / Adaptation — конфигурация плагина
+# ------------------------------------------------------------
+#  settings — МЕХАНИКИ. Меняйте только если хотите изменить геймплей.
+#  messages — тексты в чате / action bar (формат MiniMessage:
+#             <red>, <gradient:#RRGGBB:#RRGGBB>, <rainbow>,
+#             <#RRGGBB>, <click:...>, <hover:...>).
+#             НЕ используйте символы < > внутри обычного текста —
+#             MiniMessage сочтёт их тегами.
+#  gui      — визуал интерфейсов: рамки, кнопки, цвета босс-баров.
+#             Здесь поддерживаются legacy-коды & и HEX вида &#RRGGBB.
+#  effects  — вкл/выкл партиклы, звуки, босс-бары и action bar.
+#             Это НЕ меняет механику: таймеры и расчёты работают как прежде.
+# ============================================================
+
 settings:
   normal-protection-per-piece: 0.075
   super-protection-per-piece: 0.125
@@ -29,3 +44,163 @@ rollback:
     slowness-duration: 60    # в тиках (60 = 3 секунды)
     slowness-level: 1
     confusion-duration: 60   # в тиках
+
+# ============================================================
+#  messages — все тексты плагина (MiniMessage)
+#  Палитра по умолчанию:
+#   ✔ Успех  = <#00FF00>    ✖ Ошибка  = <#FF4444>
+#   ⚠ Предупреждение = <#FFAA00>   Инфо = <#8ec5fc>
+# ============================================================
+messages:
+  adaptation:
+    # Адаптация разбита критическим ударом (d20, выпало 20)
+    broken: "<#FF4444>✖ Бафф чара «Адаптация» был разбит критическим ударом врага!</#FF4444>"
+    # Время адаптации истекло, началась перезарядка
+    ended: "<#FFAA00>⚠ Адаптация закончилась! Перезарядка <yellow>{seconds}</yellow> сек.</#FFAA00>"
+    # Перезарядка завершена
+    ready: "<#00FF00>✔ Перезарядка закончилась — адаптация снова доступна!</#00FF00>"
+
+  d20:
+    # Команду может использовать только игрок
+    players-only: "<#FF4444>✖ Эту команду может использовать только игрок.</#FF4444>"
+    # Полная подсказка по /d20 (примеры кликабельны)
+    usage: "<#FFAA00>⚠ Использование /d20:</#FFAA00>\n<white>•</white> <click:suggest_command:'/d20 give '><hover:show_text:'<gray>Нажмите, чтобы вставить команду</gray>'><#8ec5fc>/d20 give <gold>«игрок»</gold></#8ec5fc></hover></click> <gray>— выдать книгу «Бросок I»</gray>\n<white>•</white> <click:suggest_command:'/d20 cheat 20'><hover:show_text:'<gray>Нажмите, чтобы вставить команду</gray>'><#8ec5fc>/d20 cheat <gold>«1-20»</gold></#8ec5fc></hover></click> <gray>— гарантированный результат удара</gray>\n<white>•</white> <click:suggest_command:'/d20 enchant mace'><hover:show_text:'<gray>Нажмите, чтобы вставить команду</gray>'><#8ec5fc>/d20 enchant <gold>«ID»</gold></#8ec5fc></hover></click> <gray>— зачаровать предмет</gray>"
+    # Чит-режим на перезарядке
+    cheat-cooldown: "<#FF4444>✖ Подождите <yellow>{seconds}</yellow> сек. перед следующим использованием чита!</#FF4444>"
+    # Чит-режим выключен (повторный /d20 cheat без числа)
+    cheat-off: "<#FF4444>✖ Чит-режим отключен. Роллы снова случайны.</#FF4444>"
+    # Не указано число
+    cheat-need-number: "<#FF4444>✖ Укажите число! Пример: <click:suggest_command:'/d20 cheat 20'><gold>/d20 cheat 20</gold></click></#FF4444>"
+    # Число вне диапазона 1-20
+    cheat-range: "<#FF4444>✖ Число кубика должно быть строго от 1 до 20!</#FF4444>"
+    # Чит-режим активирован
+    cheat-on: "<#00FF00>✔ Чит-режим активирован! Следующий удар гарантированно выдаст: <yellow><bold>[{roll}]</bold></yellow></#00FF00>"
+    # Не удалось распарсить число
+    cheat-bad-number: "<#FF4444>✖ Некорректное число! Пример: <click:suggest_command:'/d20 cheat 7'><gold>/d20 cheat 7</gold></click></#FF4444>"
+    # /d20 enchant без ID
+    enchant-need-id: "<#FF4444>✖ Укажите ID предмета! Пример: <click:suggest_command:'/d20 enchant mace'><gold>/d20 enchant mace</gold></click></#FF4444>"
+    # Неизвестный материал
+    enchant-not-found: "<#FF4444>✖ Предмет с ID «{item}» не найден в базе Minecraft!</#FF4444>"
+    # Предмет выдан
+    enchant-given: "<#00FF00>✔ Вам успешно выдан предмет <yellow>{item}</yellow> с чаром «Бросок I»!</#00FF00>"
+    # Игрок не найден (give)
+    give-not-found: "<#FF4444>✖ Игрок не найден.</#FF4444>"
+    # Книга выдана
+    give-given: "<#00FF00>✔ Книга «Бросок I» выдана игроку <yellow>{player}</yellow></#00FF00>"
+    # Неизвестный аргумент
+    unknown: "<#FF4444>✖ Неизвестный аргумент. Используйте <gold>give</gold>, <gold>cheat</gold> или <gold>enchant</gold>.</#FF4444>"
+    # Смена предмета отменила бросок
+    buff-cancelled: "<#FFAA00>⚠ Бафф чара «Бросок I» был отменен, так как вы сменили предмет в руке!</#FFAA00>"
+    # Время на удар истекло
+    time-expired: "<#FF4444>✖ Время для удара истекло!</#FF4444>"
+    # Выпало 1
+    crit-fail: "<#FF4444><bold>✖ КРИТИЧЕСКИЙ ПРОВАЛ!</bold> Текущий удар нанес 0 урона.</#FF4444>"
+    # Выпало 20
+    divine: "<gradient:#FFD700:#FF8C00><bold>✦ БОЖЕСТВЕННОЕ ВЕЗЕНИЕ!</bold></gradient> <white>Мощная взрывная волна откинула врага: Скорость II и урон <yellow>×4.0</yellow>!</white>"
+
+  flask:
+    no-perm: "<#FF4444>✖ У вас нет прав на использование этой команды!</#FF4444>"
+    usage: "<#FFAA00>⚠ Использование: <click:suggest_command:'/flask give '><hover:show_text:'<gray>Нажмите, чтобы вставить команду</gray>'><#8ec5fc>/flask give «игрок» «water/poison» «количество»</#8ec5fc></hover></click></#FFAA00>"
+    unknown-sub: "<#FF4444>✖ Неизвестная подкоманда. Используйте: /flask give «игрок» «water/poison»</#FF4444>"
+    player-not-found: "<#FF4444>✖ Игрок не найден или оффлайн!</#FF4444>"
+    bad-type: "<#FF4444>✖ Тип флакона должен быть 'water' или 'poison'!</#FF4444>"
+    bad-amount: "<#FF4444>✖ Количество должно быть от 1 до 64!</#FF4444>"
+    bad-number: "<#FF4444>✖ Некорректное количество!</#FF4444>"
+    given: "<#00FF00>✔ Флакон <yellow>{type}</yellow> выдан игроку <yellow>{player}</yellow> в количестве <yellow>{amount}</yellow></#00FF00>"
+    give-fail: "<#FF4444>✖ Не удалось выдать флакон!</#FF4444>"
+    # Action bar таймера отравления на мече
+    poison-timer: "<gray>☠ Отравление: <white>{time}</white></gray>"
+
+  rollback:
+    no-perm: "<#FF4444>✖ У вас нет прав на использование этой команды!</#FF4444>"
+    usage: "<#FFAA00>⚠ Использование: <click:suggest_command:'/rollback give '><#8ec5fc>/rollback give «игрок»</#8ec5fc></click></#FFAA00>"
+    give-usage: "<#FFAA00>⚠ Укажите имя игрока! Пример: <click:suggest_command:'/rollback give '><gold>/rollback give PlayerName</gold></click></#FFAA00>"
+    player-not-found: "<#FF4444>✖ Игрок не найден или оффлайн!</#FF4444>"
+    given: "<#00FF00>✔ Тотем бессмертия выдан игроку <yellow>{player}</yellow></#00FF00>"
+    give-fail: "<#FF4444>✖ Не удалось выдать тотем!</#FF4444>"
+    unknown-sub: "<#FF4444>✖ Неизвестная подкоманда. Используйте: /rollback give «игрок»</#FF4444>"
+
+  # Уведомление при выдаче предмета из меню F8
+  menu:
+    given: "<#00FF00>✔ {item} — в вашем инвентаре!</#00FF00>"
+
+# ============================================================
+#  gui — оформление интерфейсов
+#  Формат строк: legacy (&c, &l, ...) + HEX-цвета &#RRGGBB.
+#  Заголовки окон НЕ вынесены в конфиг намеренно: по ним плагин
+#  определяет, в каком меню игрок (менять их = ломать клики).
+# ============================================================
+gui:
+  # --- Материалы рамок окон (стеклянные панели) ---
+  frames:
+    main: BLACK_STAINED_GLASS_PANE     # меню F8
+    enchant: BLACK_STAINED_GLASS_PANE  # «Новые чарки»
+    blocks: BLACK_STAINED_GLASS_PANE   # «Новые блоки»
+    items: BLACK_STAINED_GLASS_PANE    # «Новые предметы»
+    copper: BLACK_STAINED_GLASS_PANE   # хранилище медного нотного блока
+
+  # --- Кнопки навигации (единый стиль во всех меню) ---
+  buttons:
+    back-material: ARROW
+    close-material: BARRIER
+    back-name: "&#C8CFD8Назад"
+    close-name: "&#FF6B6BЗакрыть"
+    back-lore:
+      - "&7Назад в главное меню"
+    close-lore:
+      - "&7Закрыть меню"
+
+  # --- Цветовая палитра названий предметов в меню ---
+  colors:
+    enchant: "&#8AD4FF"   # книги и чары (небесно-голубой)
+    block: "&#FFB85C"     # блоки и медь (янтарный)
+    item: "&#B9F27B"      # флаконы и предметы (салатовый)
+    tag: "&#E883FF"       # лор зачарований (светло-фиолетовый)
+    category: "&#FFF3B0"  # названия разделов
+    flask-water: "&#6FD3FF"   # флакон с водой
+    flask-poison: "&#7BD88F"  # флакон с отравлением
+
+  # --- Подписи (для босс-баров и титулов) ---
+  labels:
+    melee: "БЛИЖ. УРОН!"
+    ranged: "СНАРЯДАМ!"
+    magic: "МАГИИ!"
+    # Цвета текста адаптации в босс-баре
+    melee-color: "&#FF5555"
+    ranged-color: "&#55FF55"
+    magic-color: "&#FF55FF"
+    # Повышенная (супер) адаптация — тёмные оттенки
+    melee-super-color: "&#AA0000"
+    ranged-super-color: "&#00AA00"
+    magic-super-color: "&#AA00AA"
+
+  # --- Босс-бары (шаблоны заголовков; legacy + &#HEX) ---
+  bossbar:
+    active-normal: "&f&lАДАПТАЦИЯ К: {color}&l{label}"
+    active-super: "&6&l&nПОВЫШ. АДАПТАЦИЯ К: {color}&l&n{label}"
+    time-normal: "&7[&f{seconds}с&7]"
+    time-super: "&7[&6{seconds}с&7]"
+    cooldown: "&c&lПЕРЕЗАРЯДКА: &f{seconds}с"
+    dice-rolling: "&f&lВыпало: {color}[{num}]"
+    dice-hit: "&f&lВыпало: &e&l[{roll}] &f&lВремя для &e&lУДАРА!"
+
+  # --- Партиклы при открытии меню F8 (поверх effects.particles) ---
+  open-effect: true
+
+  # --- Градиентный префикс в табе (клавиша Tab; только список игроков) ---
+  # Формат MiniMessage: поддерживает <gradient>, <rainbow>, <#RRGGBB>.
+  # Плейсхолдер {name} заменяется на ник игрока.
+  playerlist:
+    enabled: true
+    format: "<gradient:#9ec5fe:#e0aaff>F8</gradient> <white>»</white> {name}"
+
+# ============================================================
+#  effects — визуальные эффекты (НЕ влияют на механику!)
+#  Таймеры, урон, перезарядки и проверки работают как раньше,
+#  даже когда эффекты выключены.
+# ============================================================
+effects:
+  particles: true   # партиклы (пыль адаптации, дым, порталы, ноты и т.д.)
+  sounds: true      # звуки (колокол, стекло, клики, зелья и т.д.)
+  bossbar: true     # босс-бары (адаптация, d20) — при false игрок их не видит
+  actionbar: true   # action bar (таймер отравления флакона)

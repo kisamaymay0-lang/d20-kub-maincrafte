@@ -287,22 +287,26 @@ public class RollbackListener implements Listener {
         Location currentPos =
                 player.getLocation();
 
-        player.getWorld().spawnParticle(
-                Particle.PORTAL,
-                currentPos,
-                30,
-                0.5,
-                0.5,
-                0.5,
-                0.1
-        );
+        if (MessageUtils.particles()) {
+            player.getWorld().spawnParticle(
+                    Particle.PORTAL,
+                    currentPos,
+                    30,
+                    0.5,
+                    0.5,
+                    0.5,
+                    0.1
+            );
+        }
 
-        player.getWorld().playSound(
-                currentPos,
-                Sound.ENTITY_ENDERMAN_TELEPORT,
-                1f,
-                0.8f
-        );
+        if (MessageUtils.sounds()) {
+            player.getWorld().playSound(
+                    currentPos,
+                    Sound.ENTITY_ENDERMAN_TELEPORT,
+                    1f,
+                    0.8f
+            );
+        }
 
         Location finalPos =
                 rollbackPos.clone();
@@ -318,24 +322,28 @@ public class RollbackListener implements Listener {
                                     .PLUGIN
                     );
 
-                    player.getWorld()
-                            .spawnParticle(
-                                    Particle.PORTAL,
-                                    finalPos,
-                                    50,
-                                    0.5,
-                                    0.5,
-                                    0.5,
-                                    0.2
-                            );
+                    if (MessageUtils.particles()) {
+                        player.getWorld()
+                                .spawnParticle(
+                                        Particle.PORTAL,
+                                        finalPos,
+                                        50,
+                                        0.5,
+                                        0.5,
+                                        0.5,
+                                        0.2
+                                );
+                    }
 
-                    player.getWorld()
-                            .playSound(
-                                    finalPos,
-                                    Sound.ENTITY_ENDERMAN_TELEPORT,
-                                    1f,
-                                    1.2f
-                            );
+                    if (MessageUtils.sounds()) {
+                        player.getWorld()
+                                .playSound(
+                                        finalPos,
+                                        Sound.ENTITY_ENDERMAN_TELEPORT,
+                                        1f,
+                                        1.2f
+                                );
+                    }
 
                     player.addPotionEffect(
                             new PotionEffect(

@@ -13,6 +13,13 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!--
+            MiniMessage/Adventure поставляются самим Paper (runtime), поэтому
+            зависимости объявлены со scope=provided и НЕ попадают в jar.
+            Версия = adventure, которую тянет paper-api 1.21.11-R0.1-SNAPSHOT
+            (см. paper-api/build.gradle.kts ветки ver/1.21.11 Paper).
+        -->
+        <adventure.version>4.26.1</adventure.version>
     </properties>
 
     <repositories>
@@ -28,6 +35,25 @@
             <artifactId>paper-api</artifactId>
             <!-- Скорректированная стабильная релизная ветка для версии 1.21.1 -->
             <version>1.21.11-R0.1-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!--
+            MiniMessage: HEX-цвета, градиенты, rainbow, клик/ховер в чате.
+            Runtime предоставляет Paper, поэтому только compile-time.
+        -->
+        <dependency>
+            <groupId>net.kyori</groupId>
+            <artifactId>adventure-text-minimessage</artifactId>
+            <version>${adventure.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Adventure API для отправки Component-сообщений (Audience). -->
+        <dependency>
+            <groupId>net.kyori</groupId>
+            <artifactId>adventure-api</artifactId>
+            <version>${adventure.version}</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>

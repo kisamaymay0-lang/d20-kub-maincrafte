@@ -207,13 +207,20 @@ public class FlaskListener implements Listener {
             }
 
             // Таймер показывается в action bar и не меняет ItemStack каждую секунду.
-            player.sendActionBar("§7Отравление: " + formatTimeLeft(expire));
+            if (MessageUtils.actionBars()) {
+                MessageUtils.action(player, "flask.poison-timer",
+                        "{time}", formatTimeLeft(expire));
+            }
 
             spawnSwordPoisonParticles(player);
         }
     }
 
     private void spawnSwordPoisonParticles(Player player) {
+        if (!MessageUtils.particles()) {
+            return;
+        }
+
         /*
          * Частицы рассчитываются от положения игрока и направления его тела,
          * а не от направления взгляда. Поэтому движение камеры не двигает
@@ -312,7 +319,12 @@ public class FlaskListener implements Listener {
         PersistentDataContainer pdc = meta.getPersistentDataContainer();
 
         if (type.equalsIgnoreCase("water")) {
-            meta.setDisplayName("§fФлакон с водой");
+            meta.setDisplayName(MessageUtils.legacy(
+                    plugin.getConfig().getString(
+                            "gui.colors.flask-water",
+                            "&#6FD3FF"
+                    ) + "Флакон с водой"
+            ));
             pdc.set(
                     flaskTypeKey,
                     PersistentDataType.STRING,
@@ -322,7 +334,12 @@ public class FlaskListener implements Listener {
                     new NamespacedKey("f8resurs", "flask_water")
             );
         } else {
-            meta.setDisplayName("§fФлакон с отравлением");
+            meta.setDisplayName(MessageUtils.legacy(
+                    plugin.getConfig().getString(
+                            "gui.colors.flask-poison",
+                            "&#7BD88F"
+                    ) + "Флакон с отравлением"
+            ));
             pdc.set(
                     flaskTypeKey,
                     PersistentDataType.STRING,
@@ -404,22 +421,26 @@ public class FlaskListener implements Listener {
             removePoison(mainHand);
             consumeFlask(player);
 
-            player.getWorld().playSound(
-                    player.getLocation(),
-                    Sound.ENTITY_GENERIC_DRINK,
-                    0.7f,
-                    1.0f
-            );
+            if (MessageUtils.sounds()) {
+                player.getWorld().playSound(
+                        player.getLocation(),
+                        Sound.ENTITY_GENERIC_DRINK,
+                        0.7f,
+                        1.0f
+                );
+            }
 
-            player.getWorld().spawnParticle(
-                    Particle.SMOKE,
-                    player.getLocation().add(0, 1, 0),
-                    8,
-                    0.2,
-                    0.3,
-                    0.2,
-                    0.02
-            );
+            if (MessageUtils.particles()) {
+                player.getWorld().spawnParticle(
+                        Particle.SMOKE,
+                        player.getLocation().add(0, 1, 0),
+                        8,
+                        0.2,
+                        0.3,
+                        0.2,
+                        0.02
+                );
+            }
 
             return;
         }
@@ -432,22 +453,26 @@ public class FlaskListener implements Listener {
             applyPoison(mainHand);
             consumeFlask(player);
 
-            player.getWorld().playSound(
-                    player.getLocation(),
-                    Sound.ENTITY_EXPERIENCE_ORB_PICKUP,
-                    0.7f,
-                    1.0f
-            );
+            if (MessageUtils.sounds()) {
+                player.getWorld().playSound(
+                        player.getLocation(),
+                        Sound.ENTITY_EXPERIENCE_ORB_PICKUP,
+                        0.7f,
+                        1.0f
+                );
+            }
 
-            player.getWorld().spawnParticle(
-                    Particle.CRIT,
-                    player.getLocation().add(0, 1, 0),
-                    8,
-                    0.2,
-                    0.3,
-                    0.2,
-                    0.02
-            );
+            if (MessageUtils.particles()) {
+                player.getWorld().spawnParticle(
+                        Particle.CRIT,
+                        player.getLocation().add(0, 1, 0),
+                        8,
+                        0.2,
+                        0.3,
+                        0.2,
+                        0.02
+                );
+            }
         }
     }
 
@@ -489,15 +514,17 @@ public class FlaskListener implements Listener {
                 )
         );
 
-        victim.getWorld().spawnParticle(
-                Particle.CRIT,
-                victim.getLocation().add(0, 1, 0),
-                8,
-                0.2,
-                0.3,
-                0.2,
-                0.02
-        );
+        if (MessageUtils.particles()) {
+            victim.getWorld().spawnParticle(
+                    Particle.CRIT,
+                    victim.getLocation().add(0, 1, 0),
+                    8,
+                    0.2,
+                    0.3,
+                    0.2,
+                    0.02
+            );
+        }
     }
 
     @EventHandler

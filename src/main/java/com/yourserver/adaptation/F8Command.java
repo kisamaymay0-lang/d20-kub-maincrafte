@@ -1,8 +1,11 @@
 package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -20,6 +23,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * Меню F8.
+ *
+ * ВАЖНО: заголовки окон (MAIN_TITLE и т.д.) являются идентификаторами меню
+ * в обработчиках кликов — они НАМЕРЕННО не вынесены в config.yml.
+ * Всё остальное оформление (рамки, цвета, кнопки, лор) читается из gui.*.
+ */
 public class F8Command implements CommandExecutor, Listener {
 
     private static final String MAIN_TITLE = "§8F8";
@@ -69,6 +79,8 @@ public class F8Command implements CommandExecutor, Listener {
         return true;
     }
 
+    /* ===================== Окна ===================== */
+
     private void openMainMenu(Player player) {
         Inventory inventory = Bukkit.createInventory(
                 null,
@@ -76,14 +88,18 @@ public class F8Command implements CommandExecutor, Listener {
                 MAIN_TITLE
         );
 
-        fill(inventory);
+        drawFrame(inventory, "main");
 
         inventory.setItem(
                 10,
                 createMenuItem(
                         Material.ENCHANTED_BOOK,
-                        "§bНовые чарки",
-                        List.of("§7Новые зачарования"),
+                        style("gui.colors.enchant", "Новые чарки"),
+                        List.of(
+                                "&7Новые зачарования",
+                                "&8▸ &7Адаптация I-III — защита брони",
+                                "&8▸ &7Бросок I — кубик d20 в ударах"
+                        ),
                         "enchants"
                 )
         );
@@ -92,8 +108,12 @@ public class F8Command implements CommandExecutor, Listener {
                 13,
                 createMenuItem(
                         Material.WAXED_CHISELED_COPPER,
-                        "§6Новые блоки",
-                        List.of("§7Новые блоки"),
+                        style("gui.colors.block", "Новые блоки"),
+                        List.of(
+                                "&7Новые блоки",
+                                "&8▸ &7Медный нотный блок — своя мелодия",
+                                "&8▸ &7Свой инвентарь и редстоун-триггер"
+                        ),
                         "blocks"
                 )
         );
@@ -102,12 +122,23 @@ public class F8Command implements CommandExecutor, Listener {
                 16,
                 createMenuItem(
                         Material.POTION,
-                        "§bНовые предметы",
-                        List.of("§7Новые предметы"),
+                        style("gui.colors.item", "Новые предметы"),
+                        List.of(
+                                "&7Новые предметы",
+                                "&8▸ &7Флакон с водой — смывает отравление",
+                                "&8▸ &7Флакон с отравлением — яд на мече"
+                        ),
                         "items"
                 )
         );
 
+        // Единая кнопка «Закрыть» по центру нижней рамки
+        inventory.setItem(
+                22,
+                createCloseButton()
+        );
+
+        playOpenEffect(player);
         player.openInventory(inventory);
     }
 
@@ -118,7 +149,7 @@ public class F8Command implements CommandExecutor, Listener {
                 ENCHANT_TITLE
         );
 
-        fill(inventory);
+        drawFrame(inventory, "enchant");
 
         inventory.setItem(
                 10,
@@ -154,19 +185,29 @@ public class F8Command implements CommandExecutor, Listener {
 
         inventory.setItem(
                 22,
-                rollbackListener.createRollbackTotem()
-        );
-
-        inventory.setItem(
-                31,
                 createMenuItem(
-                        Material.ARROW,
-                        "§7Назад",
-                        Collections.emptyList(),
-                        "back"
+                        Material.TOTEM_OF_UNDYING,
+                        style("gui.colors.enchant", "Тотем «Откат I»"),
+                        List.of(
+                                "&7Тотем бессмертия с чаром Откат I",
+                                "&8▸ &7При смерти возвращает вас",
+                                "&8▸ &7на позицию 5 секунд назад"
+                        ),
+                        null
                 )
         );
 
+        inventory.setItem(
+                30,
+                createBackButton()
+        );
+
+        inventory.setItem(
+                32,
+                createCloseButton()
+        );
+
+        playOpenEffect(player);
         player.openInventory(inventory);
     }
 
@@ -177,28 +218,33 @@ public class F8Command implements CommandExecutor, Listener {
                 BLOCK_TITLE
         );
 
-        fill(inventory);
+        drawFrame(inventory, "blocks");
 
         inventory.setItem(
                 13,
                 createMenuItem(
                         Material.WAXED_CHISELED_COPPER,
-                        "§6Медный нотный блок",
-                        List.of("§7Нажмите, чтобы получить блок"),
+                        style("gui.colors.block", "Медный нотный блок"),
+                        List.of(
+                                "&7Нажмите, чтобы получить блок",
+                                "&8▸ &7ПКМ — открыть инвентарь блока",
+                                "&8▸ &7Сигнал редстоуна — проиграть мелодию"
+                        ),
                         "copper_note_block"
                 )
         );
 
         inventory.setItem(
-                22,
-                createMenuItem(
-                        Material.ARROW,
-                        "§7Назад",
-                        Collections.emptyList(),
-                        "back"
-                )
+                20,
+                createBackButton()
         );
 
+        inventory.setItem(
+                24,
+                createCloseButton()
+        );
+
+        playOpenEffect(player);
         player.openInventory(inventory);
     }
 
@@ -209,7 +255,7 @@ public class F8Command implements CommandExecutor, Listener {
                 ITEM_TITLE
         );
 
-        fill(inventory);
+        drawFrame(inventory, "items");
 
         inventory.setItem(
                 11,
@@ -228,19 +274,35 @@ public class F8Command implements CommandExecutor, Listener {
         );
 
         inventory.setItem(
-                22,
-                createMenuItem(
-                        Material.ARROW,
-                        "§7Назад",
-                        Collections.emptyList(),
-                        "back"
-                )
+                20,
+                createBackButton()
         );
 
+        inventory.setItem(
+                24,
+                createCloseButton()
+        );
+
+        playOpenEffect(player);
         player.openInventory(inventory);
     }
 
+    /* ===================== Создание предметов ===================== */
+
     private ItemStack createEnchantmentBook(
+            String enchantment,
+            String id
+    ) {
+        return createMagicBook(
+                "Чародейская книга",
+                enchantment,
+                id
+        );
+    }
+
+    /** Книга-обложка меню с чаром (ПДК f8_menu) и книга для выдачи. */
+    private ItemStack createMagicBook(
+            String displayName,
             String enchantment,
             String id
     ) {
@@ -252,19 +314,25 @@ public class F8Command implements CommandExecutor, Listener {
             return book;
         }
 
-        meta.setDisplayName("§bЧародейская книга");
+        meta.setDisplayName(MessageUtils.legacy(
+                style("gui.colors.enchant", displayName)
+        ));
         meta.setLore(
                 Collections.singletonList(
-                        "§d" + enchantment
+                        MessageUtils.legacy(
+                                style("gui.colors.tag", enchantment)
+                        )
                 )
         );
         meta.setEnchantmentGlintOverride(true);
 
-        meta.getPersistentDataContainer().set(
-                menuKey,
-                PersistentDataType.STRING,
-                id
-        );
+        if (id != null) {
+            meta.getPersistentDataContainer().set(
+                    menuKey,
+                    PersistentDataType.STRING,
+                    id
+            );
+        }
 
         book.setItemMeta(meta);
 
@@ -305,10 +373,14 @@ public class F8Command implements CommandExecutor, Listener {
             return item;
         }
 
-        meta.setDisplayName(name);
+        meta.setDisplayName(MessageUtils.legacy(name));
 
         if (lore != null && !lore.isEmpty()) {
-            meta.setLore(new ArrayList<>(lore));
+            List<String> styledLore = new ArrayList<>(lore.size());
+            for (String line : lore) {
+                styledLore.add(MessageUtils.legacy(line));
+            }
+            meta.setLore(styledLore);
         }
 
         if (id != null) {
@@ -324,39 +396,123 @@ public class F8Command implements CommandExecutor, Listener {
         return item;
     }
 
-    private String getId(ItemStack item) {
-        if (item == null || !item.hasItemMeta()) {
-            return null;
-        }
+    /* ===================== Рамки и кнопки (gui.*) ===================== */
 
-        ItemMeta meta = item.getItemMeta();
+    private ItemStack createBackButton() {
+        String materialName = plugin.getConfig().getString(
+                "gui.buttons.back-material",
+                "ARROW"
+        );
 
-        if (meta == null) {
-            return null;
-        }
-
-        return meta.getPersistentDataContainer().get(
-                menuKey,
-                PersistentDataType.STRING
+        return createMenuItem(
+                materialOr(materialName, Material.ARROW),
+                plugin.getConfig().getString(
+                        "gui.buttons.back-name",
+                        "&#C8CFD8Назад"
+                ),
+                plugin.getConfig().getStringList(
+                        "gui.buttons.back-lore"
+                ),
+                "back"
         );
     }
 
-    private void fill(Inventory inventory) {
-        ItemStack filler = new ItemStack(
-                Material.GRAY_STAINED_GLASS_PANE
+    private ItemStack createCloseButton() {
+        String materialName = plugin.getConfig().getString(
+                "gui.buttons.close-material",
+                "BARRIER"
         );
 
-        ItemMeta meta = filler.getItemMeta();
+        return createMenuItem(
+                materialOr(materialName, Material.BARRIER),
+                plugin.getConfig().getString(
+                        "gui.buttons.close-name",
+                        "&#FF6B6BЗакрыть"
+                ),
+                plugin.getConfig().getStringList(
+                        "gui.buttons.close-lore"
+                ),
+                "close"
+        );
+    }
+
+    /** Цвет + текст из gui.colors.* (поддержка & и &#RRGGBB). */
+    private String style(String colorPath, String text) {
+        String color = plugin.getConfig().getString(colorPath, "");
+        return color + text;
+    }
+
+    private Material materialOr(String name, Material fallback) {
+        Material material = Material.matchMaterial(name, false);
+        return material == null ? fallback : material;
+    }
+
+    /** Рамка окна из стеклянных панелей (материал: gui.frames.{key}). */
+    private void drawFrame(Inventory inventory, String frameKey) {
+        String materialName = plugin.getConfig().getString(
+                "gui.frames." + frameKey,
+                "BLACK_STAINED_GLASS_PANE"
+        );
+
+        Material frameMaterial =
+                materialOr(materialName, Material.BLACK_STAINED_GLASS_PANE);
+
+        ItemStack pane = new ItemStack(frameMaterial);
+
+        ItemMeta meta = pane.getItemMeta();
 
         if (meta != null) {
             meta.setDisplayName(" ");
-            filler.setItemMeta(meta);
+            pane.setItemMeta(meta);
         }
 
-        for (int i = 0; i < inventory.getSize(); i++) {
-            inventory.setItem(i, filler);
+        int size = inventory.getSize();
+        int rows = size / 9;
+
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < 9; col++) {
+                boolean border = row == 0
+                        || row == rows - 1
+                        || col == 0
+                        || col == 8;
+
+                if (border) {
+                    inventory.setItem(row * 9 + col, pane);
+                }
+            }
         }
     }
+
+    /** Небольшой визуальный эффект при открытии меню (gui.open-effect). */
+    private void playOpenEffect(Player player) {
+        if (!MessageUtils.bool("gui.open-effect", true)
+                || !MessageUtils.particles()) {
+            return;
+        }
+
+        Location center = player.getLocation().add(0, 1.1, 0);
+
+        player.getWorld().spawnParticle(
+                Particle.END_ROD,
+                center,
+                16,
+                0.4,
+                0.35,
+                0.4,
+                0.02
+        );
+
+        if (MessageUtils.sounds()) {
+            player.playSound(
+                    player.getLocation(),
+                    Sound.UI_BUTTON_CLICK,
+                    0.6f,
+                    1.4f
+            );
+        }
+    }
+
+    /* ===================== Выдача ===================== */
 
     private void giveItem(Player player, ItemStack item) {
         if (item == null) {
@@ -372,6 +528,28 @@ public class F8Command implements CommandExecutor, Listener {
             );
         }
     }
+
+    /** Человеческое название предмета для уведомления в чате. */
+    private String itemLabel(String id) {
+        return switch (id) {
+            case "adaptation_1" -> "Книга «Адаптация I»";
+            case "adaptation_2" -> "Книга «Адаптация II»";
+            case "adaptation_3" -> "Книга «Адаптация III»";
+            case "d20" -> "Книга «Бросок I»";
+            case "water_flask" -> "Флакон с водой";
+            case "poison_flask" -> "Флакон с отравлением";
+            case "copper_note_block" -> "Медный нотный блок";
+            default -> id;
+        };
+    }
+
+    private void giveAndNotify(Player player, ItemStack item, String id) {
+        giveItem(player, item);
+        player.closeInventory();
+        MessageUtils.send(player, "menu.given", "{item}", itemLabel(id));
+    }
+
+    /* ===================== Обработчики кликов ===================== */
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
@@ -411,61 +589,49 @@ public class F8Command implements CommandExecutor, Listener {
 
             case "back" -> openMainMenu(player);
 
-            case "adaptation_1" -> {
-                giveItem(
-                        player,
-                        createAdaptationBook(1)
-                );
-                player.closeInventory();
-            }
+            case "close" -> player.closeInventory();
 
-            case "adaptation_2" -> {
-                giveItem(
-                        player,
-                        createAdaptationBook(2)
-                );
-                player.closeInventory();
-            }
+            case "adaptation_1" -> giveAndNotify(
+                    player,
+                    createAdaptationBook(1),
+                    "adaptation_1"
+            );
 
-            case "adaptation_3" -> {
-                giveItem(
-                        player,
-                        createAdaptationBook(3)
-                );
-                player.closeInventory();
-            }
+            case "adaptation_2" -> giveAndNotify(
+                    player,
+                    createAdaptationBook(2),
+                    "adaptation_2"
+            );
 
-            case "d20" -> {
-                giveItem(
-                        player,
-                        createD20Book()
-                );
-                player.closeInventory();
-            }
+            case "adaptation_3" -> giveAndNotify(
+                    player,
+                    createAdaptationBook(3),
+                    "adaptation_3"
+            );
 
-            case "water_flask" -> {
-                giveItem(
-                        player,
-                        flaskListener.createWaterFlask()
-                );
-                player.closeInventory();
-            }
+            case "d20" -> giveAndNotify(
+                    player,
+                    createD20Book(),
+                    "d20"
+            );
 
-            case "poison_flask" -> {
-                giveItem(
-                        player,
-                        flaskListener.createPoisonFlask()
-                );
-                player.closeInventory();
-            }
+            case "water_flask" -> giveAndNotify(
+                    player,
+                    flaskListener.createWaterFlask(),
+                    "water_flask"
+            );
 
-            case "copper_note_block" -> {
-                giveItem(
-                        player,
-                        createCopperBlock()
-                );
-                player.closeInventory();
-            }
+            case "poison_flask" -> giveAndNotify(
+                    player,
+                    flaskListener.createPoisonFlask(),
+                    "poison_flask"
+            );
+
+            case "copper_note_block" -> giveAndNotify(
+                    player,
+                    createCopperBlock(),
+                    "copper_note_block"
+            );
         }
     }
 
@@ -481,67 +647,50 @@ public class F8Command implements CommandExecutor, Listener {
         }
     }
 
+    /* ===================== Книги и блоки (выдача) ===================== */
+
     private ItemStack createAdaptationBook(int level) {
-        ItemStack book = new ItemStack(
-                Material.ENCHANTED_BOOK
-        );
-
-        ItemMeta meta = book.getItemMeta();
-
-        if (meta == null) {
-            return book;
-        }
-
         String roman = switch (level) {
             case 1 -> "I";
             case 2 -> "II";
             default -> "III";
         };
 
-        meta.setDisplayName("§bЧародейская книга");
-
-        meta.setLore(
-                Collections.singletonList(
-                        "§dАдаптация " + roman
-                )
+        return createMagicBook(
+                "Чародейская книга",
+                "Адаптация " + roman,
+                null
         );
-
-        meta.setEnchantmentGlintOverride(true);
-
-        book.setItemMeta(meta);
-
-        return book;
     }
 
     private ItemStack createD20Book() {
-        ItemStack book = new ItemStack(
-                Material.ENCHANTED_BOOK
+        return createMagicBook(
+                "Чародейская книга",
+                "Бросок I",
+                null
         );
-
-        ItemMeta meta = book.getItemMeta();
-
-        if (meta == null) {
-            return book;
-        }
-
-        meta.setDisplayName("§bЧародейская книга");
-
-        meta.setLore(
-                Collections.singletonList(
-                        "§dБросок I"
-                )
-        );
-
-        meta.setEnchantmentGlintOverride(true);
-
-        book.setItemMeta(meta);
-
-        return book;
     }
 
     private ItemStack createCopperBlock() {
         return new ItemStack(
                 Material.WAXED_CHISELED_COPPER
+        );
+    }
+
+    private String getId(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) {
+            return null;
+        }
+
+        ItemMeta meta = item.getItemMeta();
+
+        if (meta == null) {
+            return null;
+        }
+
+        return meta.getPersistentDataContainer().get(
+                menuKey,
+                PersistentDataType.STRING
         );
     }
 }
