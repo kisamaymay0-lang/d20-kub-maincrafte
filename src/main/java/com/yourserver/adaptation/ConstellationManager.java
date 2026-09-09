@@ -5,6 +5,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.command.Command;
@@ -974,6 +975,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
             v.selectedKey = hitKey;
             action(p, "§eЗвезда выбрана.");
             playSound(p, Sound.UI_BUTTON_CLICK);
+            selectionSparkle(p);
             return;
         }
 
@@ -1035,6 +1037,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
 
         playSound(p, Sound.BLOCK_NOTE_BLOCK_PLING);
         action(p, "§aЛиния проведена.");
+        edgeSparkle(p);
 
         v.selectedKey = null;
         removePreview(p, v);
@@ -1089,6 +1092,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
 
     private void grantReward(Player p, Constellation c) {
         playSound(p, Sound.ENTITY_PLAYER_LEVELUP);
+        completionCelebration(p);
 
         if (!c.reward.title.isEmpty()) {
             p.sendTitle(
@@ -1126,6 +1130,55 @@ public class ConstellationManager implements Listener, CommandExecutor {
 
     private void playSound(Player p, Sound s) {
         p.playSound(p.getLocation(), s, 0.8f, 1.0f);
+    }
+
+    /**
+     * Сдержанный блеск при выборе звезды трубой.
+     * Чисто визуальный эффект: несколько звёздных частиц (END_ROD) чуть
+     * впереди линии взгляда — там, куда «защёлкнулась» труба. Не вылетает
+     * из тела игрока и не спамит: малое число, малый разброс.
+     */
+    private void selectionSparkle(Player p) {
+        Location eye = p.getEyeLocation();
+        Vector dir = eye.getDirection();
+        Location fx = eye.clone().add(
+                dir.getX() * 2.0,
+                dir.getY() * 2.0 - 0.2,
+                dir.getZ() * 2.0
+        );
+        p.getWorld().spawnParticle(Particle.END_ROD, fx, 6, 0.15, 0.15, 0.15, 0.02);
+    }
+
+    /**
+     * Сдержанный блеск при проведении линии между двумя звёздами.
+     * Горизонтальная «полоска» звёздной пыли чуть впереди взгляда —
+     * намёк на проведённое соединение. Малое число, без спама.
+     */
+    private void edgeSparkle(Player p) {
+        Location eye = p.getEyeLocation();
+        Vector dir = eye.getDirection();
+        Location fx = eye.clone().add(
+                dir.getX() * 2.0,
+                dir.getY() * 2.0 - 0.3,
+                dir.getZ() * 2.0
+        );
+        p.getWorld().spawnParticle(Particle.END_ROD, fx, 8, 0.6, 0.08, 0.6, 0.02);
+    }
+
+    /**
+     * Сдержанное празднование завершения созвездия.
+     * Ванильный «успех» (зелёные частицы жителя) вокруг игрока + немного
+     * звёздной пыли, медленно поднимающейся вверх. Без перегруза.
+     */
+    private void completionCelebration(Player p) {
+        Location loc = p.getLocation();
+        World world = loc.getWorld();
+        if (world == null) return;
+
+        // Классический ванильный маркер успеха вокруг игрока.
+        world.spawnParticle(Particle.HAPPY_VILLAGER, loc.clone().add(0, 1, 0), 16, 0.5, 0.9, 0.5, 0.05);
+        // Немного звёздной пыли, плавно поднимающейся вверх.
+        world.spawnParticle(Particle.END_ROD, loc.clone().add(0, 1.2, 0), 10, 0.4, 0.6, 0.4, 0.03);
     }
 
     private String starIdOf(String key) {
