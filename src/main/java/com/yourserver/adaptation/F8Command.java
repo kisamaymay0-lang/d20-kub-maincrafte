@@ -348,20 +348,30 @@ public class F8Command implements CommandExecutor, Listener {
     }
 
     private void fill(Inventory inventory) {
-        ItemStack filler = new ItemStack(
-                Material.GRAY_STAINED_GLASS_PANE
-        );
+        ItemStack inner = fillerPane(Material.GRAY_STAINED_GLASS_PANE);
+        ItemStack border = fillerPane(Material.BLACK_STAINED_GLASS_PANE);
 
-        ItemMeta meta = filler.getItemMeta();
+        int size = inventory.getSize();
+        int cols = 9;
+        int rows = size / cols;
 
+        for (int i = 0; i < size; i++) {
+            int row = i / cols;
+            int col = i % cols;
+            boolean isBorder = row == 0 || row == rows - 1 || col == 0 || col == cols - 1;
+            inventory.setItem(i, isBorder ? border : inner);
+        }
+    }
+
+    /** Фоновая стеклянная панель (рамка/заполнитель) без видимого имени. */
+    private ItemStack fillerPane(Material material) {
+        ItemStack pane = new ItemStack(material);
+        ItemMeta meta = pane.getItemMeta();
         if (meta != null) {
             meta.setDisplayName(" ");
-            filler.setItemMeta(meta);
+            pane.setItemMeta(meta);
         }
-
-        for (int i = 0; i < inventory.getSize(); i++) {
-            inventory.setItem(i, filler);
-        }
+        return pane;
     }
 
     private void giveItem(Player player, ItemStack item) {

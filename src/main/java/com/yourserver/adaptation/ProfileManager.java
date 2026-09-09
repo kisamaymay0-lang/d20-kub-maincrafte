@@ -161,7 +161,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         items = new ProfileItems(zone, medalSettings);
         subjects = new ProfileSubjects(plugin, this::profile);
         cards = new ProfileCards(plugin, subject -> profile(subject.profile(), subject.name()), items, subjects, voice, prefixes);
-        tags = new ProfileTags(plugin, player -> prefixes.get(equippedPrefixes.get(player.getUniqueId())));
+        // Тег префикса над головой — чисто визуальное. По умолчанию выключен
+        // (профили показываются в карточке/чате, над головой в игре ничего не висит).
+        boolean overheadTags = plugin.getConfig().getBoolean("profiles.overhead-tags", false);
+        tags = overheadTags ? new ProfileTags(plugin, player -> prefixes.get(equippedPrefixes.get(player.getUniqueId()))) : null;
         maintenance = Bukkit.getScheduler().runTaskTimer(plugin, this::maintenance, 20L, 20L);
         for (Player player : Bukkit.getOnlinePlayers()) join(player);
     }

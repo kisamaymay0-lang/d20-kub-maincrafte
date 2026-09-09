@@ -975,7 +975,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
             v.selectedKey = hitKey;
             action(p, "§eЗвезда выбрана.");
             playSound(p, Sound.UI_BUTTON_CLICK);
-            selectionSparkle(p);
+            selectionSparkle(p, hitKey);
             return;
         }
 
@@ -1037,7 +1037,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
 
         playSound(p, Sound.BLOCK_NOTE_BLOCK_PLING);
         action(p, "§aЛиния проведена.");
-        edgeSparkle(p);
+        edgeSparkle(p, v.selectedKey, hitKey);
 
         v.selectedKey = null;
         removePreview(p, v);
@@ -1092,7 +1092,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
 
     private void grantReward(Player p, Constellation c) {
         playSound(p, Sound.ENTITY_PLAYER_LEVELUP);
-        completionCelebration(p);
+        completionCelebration(p, c);
 
         if (!c.reward.title.isEmpty()) {
             p.sendTitle(
@@ -1133,52 +1133,50 @@ public class ConstellationManager implements Listener, CommandExecutor {
     }
 
     /**
-     * Сдержанный блеск при выборе звезды трубой.
-     * Чисто визуальный эффект: несколько звёздных частиц (END_ROD) чуть
-     * впереди линии взгляда — там, куда «защёлкнулась» труба. Не вылетает
-     * из тела игрока и не спамит: малое число, малый разброс.
+     * Фактические мировые координаты звезды — туда, где её рисует display-сущность:
+     * точка привязки (якорь) + орбитально повёрнутый вектор звезды, умноженный на
+     * масштаб глубины. Если вида/шаблона нет, возвращает null (партиклы просто пропускаются).
      */
-    private void selectionSparkle(Player p) {
-        Location eye = p.getEyeLocation();
-        Vector dir = eye.getDirection();
-        Location fx = eye.clone().add(
-                dir.getX() * 2.0,
-                dir.getY() * 2.0 - 0.2,
-                dir.getZ() * 2.0
-        );
-        p.getWorld().spawnParticle(Particle.END_ROD, fx, 6, 0.15, 0.15, 0.15, 0.02);
+    private Location starWorldLocation(Player p, String starKey) {
+        PlayerView view = views.get(p.getUniqueId());
+        StarTemplate template = starTemplates.get(starKey);
+        if (view == null || template == null || view.anchor == null) return null;
+        Vector3f off = new Vector3f(template.displayedOffset).mul(view.depthScale);
+        return new Location(p.getWorld(),
+                view.anchor.getX() + off.x,
+                view.anchor.getY() + off.y,
+                view.anchor.getZ() + off.z);
+    }
+
+    /** Небольшой всплеск звёздной пыли (END_ROD), вылетающий ИЗ звезды, а не от игрока. */
+    private void starBurst(Player p, String starKey, int count) {
+        Location at = starWorldLocation(p, starKey);
+        if (at == null) return;
+        // force=true — частица показывается даже при пониженных настройках частиц клиента.
+        at.getWorld().spawnParticle(Particle.END_ROD, at, count, 0.35, 0.35, 0.35, 0.18, null, true);
+    }
+
+    /** Выбор звезды трубой: сдержанный всплеск вылетает из самой выбранной звезды. */
+    private void selectionSparkle(Player p, String starKey) {
+        starBurst(p, starKey, 12);
+    }
+
+    /** Проведение линии: всплеск вылетает из обеих соединённых звёзд. */
+    private void edgeSparkle(Player p, String fromKey, String toKey) {
+        starBurst(p, fromKey, 8);
+        starBurst(p, toKey, 8);
     }
 
     /**
-     * Сдержанный блеск при проведении линии между двумя звёздами.
-     * Горизонтальная «полоска» звёздной пыли чуть впереди взгляда —
-     * намёк на проведённое соединение. Малое число, без спама.
+     * Завершение созвездия: «загораются» все его звёзды — всплески вылетают
+     * из звёзд созвездия, а не от игрока.
      */
-    private void edgeSparkle(Player p) {
-        Location eye = p.getEyeLocation();
-        Vector dir = eye.getDirection();
-        Location fx = eye.clone().add(
-                dir.getX() * 2.0,
-                dir.getY() * 2.0 - 0.3,
-                dir.getZ() * 2.0
-        );
-        p.getWorld().spawnParticle(Particle.END_ROD, fx, 8, 0.6, 0.08, 0.6, 0.02);
-    }
-
-    /**
-     * Сдержанное празднование завершения созвездия.
-     * Ванильный «успех» (зелёные частицы жителя) вокруг игрока + немного
-     * звёздной пыли, медленно поднимающейся вверх. Без перегруза.
-     */
-    private void completionCelebration(Player p) {
-        Location loc = p.getLocation();
-        World world = loc.getWorld();
-        if (world == null) return;
-
-        // Классический ванильный маркер успеха вокруг игрока.
-        world.spawnParticle(Particle.HAPPY_VILLAGER, loc.clone().add(0, 1, 0), 16, 0.5, 0.9, 0.5, 0.05);
-        // Немного звёздной пыли, плавно поднимающейся вверх.
-        world.spawnParticle(Particle.END_ROD, loc.clone().add(0, 1.2, 0), 10, 0.4, 0.6, 0.4, 0.03);
+    private void completionCelebration(Player p, Constellation c) {
+        String prefix = c.id + ":";
+        for (String key : starTemplates.keySet()) {
+            if (!key.startsWith(prefix)) continue;
+            starBurst(p, key, 10);
+        }
     }
 
     private String starIdOf(String key) {
