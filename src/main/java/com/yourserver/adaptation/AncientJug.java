@@ -15,10 +15,13 @@ import org.bukkit.Note;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.data.Ageable;
 import org.bukkit.block.data.type.NoteBlock;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Item;
@@ -38,6 +41,7 @@ import org.bukkit.event.block.NotePlayEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.event.player.PlayerFishEvent;
+import org.bukkit.event.player.PlayerHarvestBlockEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -84,8 +88,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * пьётся 1.6 секунды, как обычное зелье). Кувшин можно надеть как
  * нагрудник — тогда он не замедляет. Пока кувшин хотя бы с одной
  * бутылочкой лежит в инвентаре (не надет), игрок получает Замедление IV
- * без частиц, прыгает ниже, а на элитрах теряет их прочность в 4 раза
- * быстрее и медленно тянется вниз.
+ * без частиц, прыгает примерно в половину блока, а на элитрах теряет их
+ * прочность в 4 раза быстрее и медленно тянется вниз.
  */
 public class AncientJug implements Listener {
 
@@ -107,8 +111,18 @@ public class AncientJug implements Listener {
     private static final int DRINK_TICKS = 32;
     /** Как часто (в тиках) реестр кувшинов пересобирается целиком. */
     private static final int PIN_RESCAN_TICKS = 200;
-    /** Сколько живёт полив зельем: собрать и съесть надо успеть за это время. */
-    private static final long INFUSION_MS = 30_000L;
+    /** Сколько длится эффект зелья со съеденного пропитанного урожая. */
+    private static final int INFUSED_EFFECT_TICKS = 20 * 30;
+    /**
+     * Сила прыжка под весом кувшина: 0.27 даёт подъём примерно 0.58 блока
+     * (ванильные 0.42 — это 1.25 блока). Плиту и ступеньку игрок ещё берёт,
+     * на полный блок уже не забирается.
+     */
+    private static final double WEIGHTED_JUMP_STRENGTH = 0.27D;
+    /** Ванильная сила прыжка игрока: возвращаем её, когда вес снят. */
+    private static final double VANILLA_JUMP_STRENGTH = 0.42D;
+    /** Как часто (в тиках) проверяем, что пропитанные растения ещё стоят. */
+    private static final int INFUSION_SWEEP_TICKS = 100;
 
     private final JavaPlugin plugin;
     private final NamespacedKey jugKey;
@@ -119,17 +133,17 @@ public class AncientJug implements Listener {
     private final NamespacedKey castLuck;
     private final NamespacedKey rolled;
     private final NamespacedKey infuseKey;
-    private final NamespacedKey infuseUntilKey;
     private final File jugsFile;
     private final YamlConfiguration jugsData;
     private final BatchedYamlFile storage;
     /** Активные кувшины: ключ записи → блок и его каноническое состояние. */
     private final Map<String, JugPin> pins = new HashMap<>();
     private int guardTicks = PIN_RESCAN_TICKS;
+    private int infusionTicks = INFUSION_SWEEP_TICKS;
     /** Кто сейчас пьёт из кувшина. */
     private final Map<UUID, DrinkSession> drinking = new HashMap<>();
-    /** Политые зельем растения: ключ блока → зелье и срок, до которого оно действует. */
-    private final Map<String, Infusion> infusions = new HashMap<>();
+    /** Пропитанные зельем растения: ключ блока → зелье (живёт в jugs.yml). */
+    private final Map<String, String> infusions = new HashMap<>();
 
     public AncientJug(JavaPlugin plugin, AsyncTextWriter writer) {
         this.plugin = plugin;
@@ -141,10 +155,10 @@ public class AncientJug implements Listener {
         castLuck = new NamespacedKey(plugin, "jug_cast_luck");
         rolled = new NamespacedKey(plugin, "jug_catch_rolled");
         infuseKey = new NamespacedKey(plugin, "potion_infused");
-        infuseUntilKey = new NamespacedKey(plugin, "potion_until");
         jugsFile = new File(plugin.getDataFolder(), "jugs.yml");
         jugsData = YamlConfiguration.loadConfiguration(jugsFile);
         storage = new BatchedYamlFile(plugin, writer, jugsFile.toPath(), () -> jugsData.saveToString());
+        loadInfusions();
         // Раз в секунду — замедление/пониженный прыжок/износ элитр, каждый тик — утягивание вниз на элитрах.
         Bukkit.getScheduler().runTaskTimer(plugin, this::applyCarryEffects, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(plugin, this::applyFlightPull, 1L, 1L);
@@ -424,8 +438,25 @@ public class AncientJug implements Listener {
             rebuildPins();
         }
         for (JugPin pin : pins.values()) pin.enforce();
-        // Просроченный полив зельем больше не действует.
-        if (!infusions.isEmpty()) infusions.values().removeIf(infusion -> !infusion.alive());
+        if (++infusionTicks >= INFUSION_SWEEP_TICKS) {
+            infusionTicks = 0;
+            sweepInfusions();
+        }
+    }
+
+    /** Убираем записи о пропитанных растениях, которых в мире уже нет. */
+    private void sweepInfusions() {
+        if (infusions.isEmpty()) return;
+        List<String> gone = new ArrayList<>();
+        for (Map.Entry<String, String> entry : infusions.entrySet()) {
+            // Мир ещё не загружен (старт сервера) — запись не трогаем.
+            Location location = locationOf(entry.getKey());
+            if (location == null || location.getWorld() == null) continue;
+            World world = location.getWorld();
+            if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) continue;
+            if (!isPlant(world.getBlockAt(location))) gone.add(entry.getKey());
+        }
+        for (String key : gone) dropInfusion(key);
     }
 
     /** Восстановить блок, если это записанный кувшин; остальное не трогаем. */
@@ -775,25 +806,15 @@ public class AncientJug implements Listener {
         return null;
     }
 
-    // ===== ВЫЛИВАНИЕ НА ЗЕМЛЮ (SHIFT+ПКМ С НАПОЛНЕННЫМ КУВШИНОМ) =====
+    // ===== ВЫЛИВАНИЕ НА ЗЕМЛЮ И ПРОПИТКА РАСТЕНИЙ =====
 
-    /** Растение, политое зельем: пока срок не вышел, его урожай несёт эффект. */
-    private static final class Infusion {
-        final String potion;
-        final long expiresAt;
-
-        Infusion(String potion, long expiresAt) {
-            this.potion = potion;
-            this.expiresAt = expiresAt;
-        }
-
-        boolean alive() { return System.currentTimeMillis() < expiresAt; }
-    }
-
+    /**
+     * Шифт + ПКМ «в никуда» с наполненным кувшином — одна порция выливается на
+     * землю. По блокам не выливаем: там кувшин ведёт себя как обычный предмет.
+     */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onSpill(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
-        if (event.getHand() != EquipmentSlot.HAND) return;
+        if (event.getAction() != Action.RIGHT_CLICK_AIR || event.getHand() != EquipmentSlot.HAND) return;
         Player player = event.getPlayer();
         if (!player.isSneaking()) return;
         ItemStack main = player.getInventory().getItemInMainHand();
@@ -801,30 +822,72 @@ public class AncientJug implements Listener {
         Contents contents = contentsOf(main);
         if (contents.count <= 0) return;
         event.setCancelled(true);
-
-        Block target = event.getClickedBlock();
-        Block crop = cropAt(target);
-        if (crop != null && POTION_KIND.equals(contents.kind) && parseType(contents.potion) != null) {
-            // Политая грядка: урожай, собранный в течение получаса, при съедении
-            // даст эффект этого зелья.
-            infusions.put(blockKey(crop), new Infusion(contents.potion, System.currentTimeMillis() + INFUSION_MS));
-        }
-        spillFx(player, crop != null ? crop : target, contents);
+        spillFx(player, null, contents);
         player.sendActionBar("§cВы вылили жидкость из кувшина...");
         swapJugInHand(player, main, contents.count <= 1
                 ? new Contents(null, null, null, 0)
                 : new Contents(contents.kind, contents.potion, contents.custom, contents.count - 1));
     }
 
-    /** Растение, на которое попало зелье: сам куст или грядка под ним. */
-    private static Block cropAt(Block target) {
-        if (target == null) return null;
-        if (target.getBlockData() instanceof Ageable) return target;
-        if (target.getType() == Material.FARMLAND) {
-            Block above = target.getRelative(0, 1, 0);
-            if (above.getBlockData() instanceof Ageable) return above;
+    /**
+     * Шифт + ПКМ по растению с зельем в кувшине — растение пропитывается насовсем:
+     * собранный с него урожай при съедании даст эффект зелья. Пропитка не тает со
+     * временем, но после сбора урожая растение надо полить заново.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onInfusePlant(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getHand() != EquipmentSlot.HAND) return;
+        Player player = event.getPlayer();
+        if (!player.isSneaking()) return;
+        ItemStack main = player.getInventory().getItemInMainHand();
+        if (!isJug(main) || bottles(main) <= 0) return;
+        Contents contents = contentsOf(main);
+        if (contents.count <= 0) return;
+        if (!POTION_KIND.equals(contents.kind)) {
+            player.sendActionBar("§cПропитать растение можно только зельем.");
+            return;
+        }
+        PotionType type = parseType(contents.potion);
+        if (type == null) return;
+        if (type.getPotionEffects().isEmpty()) {
+            player.sendActionBar("§cУ этого зелья нет эффектов — пропитывать нечем.");
+            return;
+        }
+        Block plant = plantAt(event.getClickedBlock());
+        if (plant == null) return;
+        event.setCancelled(true);
+        putInfusion(blockKey(plant), contents.potion);
+        spillFx(player, plant, contents);
+        player.sendActionBar("§aРастение пропитано зельем — урожай запомнит эффект.");
+        swapJugInHand(player, main, contents.count <= 1
+                ? new Contents(null, null, null, 0)
+                : new Contents(contents.kind, contents.potion, contents.custom, contents.count - 1));
+    }
+
+    /** Растение под прицелом: сам куст/грядка или блок над вспаханной землёй. */
+    private static Block plantAt(Block clicked) {
+        if (clicked == null) return null;
+        if (isPlant(clicked)) return plantHead(clicked);
+        if (clicked.getType() == Material.FARMLAND) {
+            Block above = clicked.getRelative(0, 1, 0);
+            if (isPlant(above)) return plantHead(above);
         }
         return null;
+    }
+
+    /** Грядка, куст сладких ягод или лоза светящихся ягод. */
+    private static boolean isPlant(Block block) {
+        if (block.getType() == Material.CAVE_VINES || block.getType() == Material.CAVE_VINES_PLANT) return true;
+        return block.getBlockData() instanceof Ageable;
+    }
+
+    /** У лозы светящихся ягод плоды на верхушке: поднимаемся до неё. */
+    private static Block plantHead(Block block) {
+        Block current = block;
+        for (int i = 0; i < 40 && current.getType() == Material.CAVE_VINES_PLANT; i++) {
+            current = current.getRelative(0, 1, 0);
+        }
+        return current.getType() == Material.CAVE_VINES ? current : block;
     }
 
     private static void spillFx(Player player, Block target, Contents contents) {
@@ -862,40 +925,121 @@ public class AncientJug implements Listener {
         }
     }
 
-    /** Урожай с политого растения съедается с эффектом зелья, пока не вышел срок. */
+    // ===== ПРОПИТАННЫЙ УРОЖАЙ =====
+
+    /** Пропитка растений хранится рядом с кувшинами: infusions.<ключ> = зелье. */
+    private void loadInfusions() {
+        ConfigurationSection section = jugsData.getConfigurationSection("infusions");
+        if (section == null) return;
+        for (String key : section.getKeys(false)) {
+            String potion = section.getString(key);
+            if (potion != null && !potion.isEmpty()) infusions.put(key, potion);
+        }
+    }
+
+    private void putInfusion(String key, String potion) {
+        infusions.put(key, potion);
+        jugsData.set("infusions." + key, potion);
+        storage.markDirty();
+    }
+
+    private void dropInfusion(String key) {
+        if (infusions.remove(key) == null) return;
+        jugsData.set("infusions." + key, null);
+        storage.markDirty();
+    }
+
+    /** Ключ записи о пропитке для блока (у лозы светящихся ягод ягоды на верхушке). */
+    private String infusionKey(Block block) {
+        if (block == null) return null;
+        String key = blockKey(block);
+        if (infusions.containsKey(key)) return key;
+        if (block.getType() == Material.CAVE_VINES_PLANT) {
+            String headKey = blockKey(plantHead(block));
+            if (infusions.containsKey(headKey)) return headKey;
+        }
+        return null;
+    }
+
+    /** Снимает пропитку: урожай с растения можно снять только один раз. */
+    private String takeInfusion(Block block) {
+        String key = infusionKey(block);
+        if (key == null) return null;
+        String potion = infusions.get(key);
+        dropInfusion(key);
+        return potion;
+    }
+
+    /** Помечает еду меткой «пропитано зельем»; не еду не трогаем. */
+    private ItemStack infusedProduce(ItemStack stack, String potion) {
+        if (stack == null || stack.getType().isAir() || !isEdible(stack)) return null;
+        ItemStack marked = stack.clone();
+        ItemMeta meta = marked.getItemMeta();
+        meta.getPersistentDataContainer().set(infuseKey, PersistentDataType.STRING, potion);
+        List<Component> lore = meta.lore() == null ? new ArrayList<>() : new ArrayList<>(meta.lore());
+        lore.add(ProfileItems.text("Пропитано зельем", NamedTextColor.LIGHT_PURPLE));
+        meta.lore(lore);
+        marked.setItemMeta(meta);
+        return marked;
+    }
+
+    private static boolean isEdible(ItemStack stack) {
+        try {
+            return stack.getData(DataComponentTypes.FOOD) != null;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** Сломанное пропитанное растение: еда в дропе запоминает зелье. */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onInfusedHarvest(BlockDropItemEvent event) {
         if (infusions.isEmpty()) return;
         BlockState state = event.getBlockState();
-        Infusion infusion = infusions.remove(blockKey(state.getWorld(), state.getX(), state.getY(), state.getZ()));
-        if (infusion == null || !infusion.alive()) return;
+        String potion = takeInfusion(state.getWorld().getBlockAt(state.getX(), state.getY(), state.getZ()));
+        if (potion == null) return;
         for (Item drop : event.getItems()) {
-            ItemStack stack = drop.getItemStack();
-            boolean edible = false;
-            try { edible = stack.getData(DataComponentTypes.FOOD) != null; } catch (Throwable ignored) { }
-            if (!edible) continue;
-            ItemMeta meta = stack.getItemMeta();
-            meta.getPersistentDataContainer().set(infuseKey, PersistentDataType.STRING, infusion.potion);
-            meta.getPersistentDataContainer().set(infuseUntilKey, PersistentDataType.LONG, infusion.expiresAt);
-            meta.lore(List.of(ProfileItems.text("Пропитано зельем", NamedTextColor.LIGHT_PURPLE)));
-            stack.setItemMeta(meta);
-            drop.setItemStack(stack);
+            ItemStack marked = infusedProduce(drop.getItemStack(), potion);
+            if (marked != null) drop.setItemStack(marked);
         }
     }
 
-    /** Съеденное вовремя «пропитанное» растение даёт эффект зелья. */
+    /** Ягоды собирают и ПКМ (лоза светящихся ягод, куст сладких ягод) — это тоже урожай. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onInfusedPick(PlayerHarvestBlockEvent event) {
+        if (infusions.isEmpty()) return;
+        Block block = event.getHarvestedBlock();
+        String key = infusionKey(block);
+        if (key == null) return;
+        String potion = infusions.get(key);
+        List<ItemStack> harvested = event.getItemsHarvested();
+        try {
+            for (int i = 0; i < harvested.size(); i++) {
+                ItemStack marked = infusedProduce(harvested.get(i), potion);
+                if (marked != null) harvested.set(i, marked);
+            }
+        } catch (UnsupportedOperationException error) {
+            // Ядро отдало неизменяемый список: пропитку не тратим, ягоды пойдут как есть.
+            return;
+        }
+        dropInfusion(key);
+    }
+
+    /** Пропитанная еда при съедании даёт эффект зелья на 30 секунд. */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onInfusedEat(PlayerItemConsumeEvent event) {
         ItemStack item = event.getItem();
         if (item == null || !item.hasItemMeta()) return;
-        var pdc = item.getItemMeta().getPersistentDataContainer();
-        String potion = pdc.get(infuseKey, PersistentDataType.STRING);
-        Long until = pdc.get(infuseUntilKey, PersistentDataType.LONG);
-        if (potion == null || until == null || System.currentTimeMillis() > until) return;
+        String potion = item.getItemMeta().getPersistentDataContainer().get(infuseKey, PersistentDataType.STRING);
+        if (potion == null) return;
         PotionType type = parseType(potion);
         if (type == null) return;
-        for (PotionEffect effect : type.getPotionEffects()) event.getPlayer().addPotionEffect(effect);
-        event.getPlayer().playSound(event.getPlayer().getLocation(), Sound.ENTITY_GENERIC_DRINK, 0.5f, 1.3f);
+        Player player = event.getPlayer();
+        for (PotionEffect effect : type.getPotionEffects()) {
+            player.addPotionEffect(new PotionEffect(effect.getType(), INFUSED_EFFECT_TICKS,
+                    effect.getAmplifier(), effect.isAmbient(), effect.hasParticles(), effect.hasIcon()));
+        }
+        player.playSound(player.getLocation(), Sound.ENTITY_GENERIC_DRINK, 0.5f, 1.3f);
     }
 
     // ===== ПИТЬЁ ПРЯМО ИЗ ИНВЕНТАРЯ (ПКМ по воздуху с кувшином) =====
@@ -1002,29 +1146,39 @@ public class AncientJug implements Listener {
         return isJug(offhand) && bottles(offhand) > 0;
     }
 
-    /**
-     * Наполненный кувшин надет в слот нагрудника — только тогда он давит на
-     * игрока: замедление и низкий прыжок. Кувшин, лежащий в инвентаре, не
-     * мешает ходить и прыгать.
-     */
+    /** Наполненный кувшин надет в слот нагрудника: тогда вес не давит. */
     private boolean wearsFilledJug(Player player) {
         ItemStack chest = player.getInventory().getChestplate();
         return isJug(chest) && bottles(chest) > 0;
     }
 
+    /**
+     * Вес кувшина давит на игрока, пока тот в переноске (инвентарь, оффхенд).
+     * Надел кувшин в слот нагрудника — вес распределён, ограничения спадают.
+     */
+    private boolean feelsJugWeight(Player player) {
+        return carriesFilledJug(player) && !wearsFilledJug(player);
+    }
+
     private void applyCarryEffects() {
         for (Player player : Bukkit.getOnlinePlayers()) {
-            if (wearsFilledJug(player)) {
-                // Замедление IV без частиц.
-                player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 30, 3, true, false));
-                // Пониженный прыжок (примерно в полублок): отрицательный усилитель.
-                try {
-                    player.addPotionEffect(new PotionEffect(PotionEffectType.JUMP_BOOST, 30, -1, true, false));
-                } catch (Throwable ignored) {
-                    // Ядро не приняло отрицательный усилитель — остаётся только замедление.
-                }
-            }
-            if (player.isGliding() && carriesFilledJug(player)) damageElytra(player);
+            boolean heavy = feelsJugWeight(player);
+            applyWeight(player, heavy);
+            if (heavy && player.isGliding()) damageElytra(player);
+        }
+    }
+
+    /** Замедление IV без частиц и прыжок примерно в половину блока. */
+    private void applyWeight(Player player, boolean heavy) {
+        if (heavy) {
+            player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 30, 3, true, false, false));
+        }
+        AttributeInstance jump = player.getAttribute(Attribute.JUMP_STRENGTH);
+        if (jump == null) return;
+        if (heavy) {
+            if (jump.getBaseValue() != WEIGHTED_JUMP_STRENGTH) jump.setBaseValue(WEIGHTED_JUMP_STRENGTH);
+        } else if (jump.getBaseValue() == WEIGHTED_JUMP_STRENGTH) {
+            jump.setBaseValue(VANILLA_JUMP_STRENGTH);
         }
     }
 
