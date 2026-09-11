@@ -258,7 +258,7 @@ public class AncientJug implements Listener {
 
     private void pour(Player player, Block block, ItemStack potionItem) {
         if (!(potionItem.getItemMeta() instanceof PotionMeta meta)) return;
-        PotionType type = meta.getPotionType();
+        PotionType type = meta.getBasePotionType();
         if (type == null) return;
 
         String key = blockKey(block);
