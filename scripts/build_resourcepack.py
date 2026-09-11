@@ -69,29 +69,44 @@ def validate() -> dict[str, bytes]:
         if name.endswith(".json"):
             json.loads(contents)
 
-    # Резервная нота 24 делится по инструменту: медный блок (14 инструментов),
-    # пустой кувшин (флейта) и кувшин с зельями (банджо). Каждый блок-стейт
-    # нот-блока должен матчиться ровно одним мультипарт-кейсом без перекрытий.
+    # Медный блок — нота 24 (14 инструментов). Кувшин: пустой — нота 24 + флейта,
+    # наполненный — ноты 1..9 (нота = количество жидкости = сигнал компаратора)
+    # + банджо. Каждый блок-стейт нот-блока матчится ровно одним кейсом.
+    instruments = {"harp", "basedrum", "snare", "hat", "bass", "bell", "guitar", "chime",
+                   "xylophone", "iron_xylophone", "cow_bell", "didgeridoo", "bit", "pling", "flute", "banjo"}
+    vanilla = "minecraft:block/note_block"
     blockstates = json.loads(files["assets/minecraft/blockstates/note_block.json"])
     cases = blockstates["multipart"]
-    assert len(cases) == 4, "note_block multipart must define vanilla/copper/jug cases"
+    assert len(cases) == 14, "note_block multipart must define 14 non-overlapping cases"
 
-    vanilla, copper, jug_empty, jug_filled = cases
-    assert set(vanilla["when"]["note"].split("|")) == {str(note) for note in range(24)}, \
-        "Notes 0..23 must stay vanilla"
-    assert vanilla["apply"]["model"] == "minecraft:block/note_block"
+    bulk = cases[0]
+    assert set(bulk["when"]["note"].split("|")) == {"0"} | {str(note) for note in range(10, 24)}
+    assert "instrument" not in bulk["when"] and bulk["apply"]["model"] == vanilla
 
+    for index, note in enumerate(range(1, 10), start=1):
+        case = cases[index]
+        assert case["when"]["note"] == str(note), f"Case {index} must pin note={note}"
+        assert set(case["when"]["instrument"].split("|")) == instruments - {"banjo"}, \
+            f"Note {note} must stay vanilla for every instrument except banjo"
+        assert case["apply"]["model"] == vanilla
+
+    copper = cases[10]
     copper_instruments = set(copper["when"]["instrument"].split("|"))
-    assert copper["when"]["note"] == "24" and len(copper_instruments) == 14, \
+    assert copper["when"]["note"] == "24" and copper_instruments == instruments - {"flute", "banjo"}, \
         "Copper covers note=24 for all instruments except the jug's two"
-    assert copper_instruments.isdisjoint({"flute", "banjo"}), \
-        "Jug instruments (flute/banjo) must stay reserved for the ancient jug"
     assert copper["apply"]["model"] == "f8resurs:block/copper_note_block"
 
+    jug_empty = cases[11]
     assert jug_empty["when"] == {"note": "24", "instrument": "flute"}
     assert jug_empty["apply"]["model"] == "f8resurs:block/ancient_jug"
-    assert jug_filled["when"] == {"note": "24", "instrument": "banjo"}
+
+    jug_filled = cases[12]
+    assert jug_filled["when"] == {"note": "|".join(str(note) for note in range(1, 10)), "instrument": "banjo"}
     assert jug_filled["apply"]["model"] == "f8resurs:block/ancient_jug_filled"
+
+    banjo_marker = cases[13]
+    assert banjo_marker["when"] == {"note": "24", "instrument": "banjo"}
+    assert banjo_marker["apply"]["model"] == vanilla
 
     for name, contents in files.items():
         if name.startswith("assets/f8resurs/items/") and name.endswith(".json"):

@@ -233,7 +233,7 @@ public class F8Command implements CommandExecutor, Listener {
             case "depleted_rime" -> winterFishing.items.create(WinterItems.Kind.DEPLETED);
             case "ice_caviar" -> winterFishing.items.create(WinterItems.Kind.ROE);
             case "ice_caviar_sandwich" -> winterFishing.items.create(WinterItems.Kind.SANDWICH);
-            case "ancient_jug" -> ancientJug.create(0, null);
+            case "ancient_jug" -> ancientJug.createEmpty();
             default -> throw new IllegalArgumentException("Неизвестный предмет каталога");
         };
     }

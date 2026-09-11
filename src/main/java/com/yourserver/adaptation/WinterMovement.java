@@ -13,6 +13,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -63,6 +64,8 @@ final class WinterMovement implements Listener {
     private final BlockData ice;
     private final ItemStack rimeParticle;
     private final Map<UUID, State> states = new HashMap<>();
+    /** Кого ударили изморозью по льду: скользит по блокам, пока не остановится. */
+    private final Map<UUID, Long> slidingUntil = new HashMap<>();
     private final NamespacedKey walk, fly, gravity, coldLock, coldTicks;
     private final BukkitTask task;
     private long tick;
@@ -134,6 +137,18 @@ final class WinterMovement implements Listener {
         if (state == null) return;
         state.grip = Grip.NONE; state.wall = null;
         if (state.frozenUntil <= tick) restoreControl(player, state);
+    }
+
+    /** Разбить заморозку ударом изморози: лёд исчезает, управление возвращается,
+     *  «озноб» (замороженные тики) остаётся до своего обычного истечения. */
+    private void shatter(Player player) {
+        State state = states.get(player.getUniqueId());
+        if (state == null) return;
+        state.frozenUntil = 0;
+        state.grip = Grip.NONE;
+        state.wall = null;
+        clearIce(state);
+        restoreControl(player, state);
     }
 
     private Block wall(Player player) {
@@ -309,7 +324,30 @@ final class WinterMovement implements Listener {
             else clearIce(state);
             if (state.grip == Grip.NONE && state.frozenUntil <= tick && state.coldUntil == 0) states.remove(player.getUniqueId(), state);
         }
+        slide();
         autoGrab();
+    }
+
+    /** «Керлинг» изморозью: пока действует скольжение, гасим трение земли,
+     *  чтобы игрок катился по блокам, как по льду. */
+    private void slide() {
+        if (slidingUntil.isEmpty()) return;
+        var iterator = slidingUntil.entrySet().iterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            if (entry.getValue() <= tick) { iterator.remove(); continue; }
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null || player.isDead() || !player.isOnline()) { iterator.remove(); continue; }
+            if (!player.isOnGround() || player.isFlying() || player.isInsideVehicle()) continue;
+            Vector velocity = player.getVelocity();
+            double speed = Math.hypot(velocity.getX(), velocity.getZ());
+            if (speed < 0.03) { iterator.remove(); continue; }
+            // Обычное трение земли оставляет ~0.55 скорости за тик, лёд ~0.89.
+            double scale = Math.min(speed * 1.6, 1.25) / speed;
+            velocity.setX(velocity.getX() * scale);
+            velocity.setZ(velocity.getZ() * scale);
+            player.setVelocity(velocity);
+        }
     }
 
     private void holdFrozenPosition(Player player, State state) {
@@ -423,18 +461,41 @@ final class WinterMovement implements Listener {
 
     /** Пока действует заморозка изморозью, игрок не получает НИКАКОГО урона, кроме
      *  ванильного «мороза» (FREEZE), которым сама изморозь и бьёт: можно взорвать
-     *  динамит вплотную или упасть в лаву — урон придёт только от заморозки. */
+     *  динамит вплотную или упасть в лаву — урон придёт только от заморозки.
+     *  Исключение — удар изморозью по замороженному: урона нет, но лёд разбивается,
+     *  игрок отталкивается и скользит по блокам, как по льду. */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void damage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
         State state = states.get(player.getUniqueId());
         if (state == null || state.frozenUntil <= tick) return;
-        if (event.getCause() != DamageCause.FREEZE) event.setCancelled(true);
+        if (event.getCause() != DamageCause.FREEZE) {
+            event.setCancelled(true);
+            if (event instanceof EntityDamageByEntityEvent byEntity
+                    && byEntity.getDamager() instanceof Player attacker) {
+                WinterItems.Kind kind = items.kind(attacker.getInventory().getItemInMainHand());
+                if (kind == WinterItems.Kind.RAW || kind == WinterItems.Kind.DEPLETED) rimePush(attacker, player);
+            }
+        }
+    }
+
+    private void rimePush(Player attacker, Player victim) {
+        shatter(victim);
+        Vector direction = victim.getLocation().toVector().subtract(attacker.getLocation().toVector());
+        direction.setY(0);
+        if (direction.lengthSquared() < 1e-6) direction = attacker.getLocation().getDirection().setY(0);
+        if (direction.lengthSquared() < 1e-6) direction = new Vector(0, 0, 1);
+        direction.normalize();
+        victim.setVelocity(direction.multiply(0.7).setY(0.15));
+        slidingUntil.put(victim.getUniqueId(), tick + 80);
+        victim.getWorld().playSound(victim.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.6f, 1.4f);
+        victim.getWorld().spawnParticle(Particle.SNOWFLAKE, victim.getLocation().add(0, 1, 0), 25, 0.35, 0.6, 0.35, 0.05);
     }
 
     void disable() {
         task.cancel();
         for (UUID id : new ArrayList<>(states.keySet())) { Player player = Bukkit.getPlayer(id); if (player != null) cleanup(player); }
         states.clear();
+        slidingUntil.clear();
     }
 }
