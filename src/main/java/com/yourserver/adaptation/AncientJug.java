@@ -304,8 +304,12 @@ public class AncientJug implements Listener {
 
     // ===== ПОСТАВЛЕННЫЙ БЛОК =====
 
+    private String blockKey(World world, int x, int y, int z) {
+        return world.getName() + "_" + x + "_" + y + "_" + z;
+    }
+
     private String blockKey(Block block) {
-        return block.getWorld().getName() + "_" + block.getX() + "_" + block.getY() + "_" + block.getZ();
+        return blockKey(block.getWorld(), block.getX(), block.getY(), block.getZ());
     }
 
     private Contents readContents(String key) {
