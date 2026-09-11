@@ -53,6 +53,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private AncientJug ancientJug;
     private ConstellationManager constellationManager;
     private ProfileManager profileManager;
+    private ResourcePackPusher resourcePackPusher;
 
     private final Particle.DustOptions meleeDust =
             new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -120,7 +121,8 @@ public void onEnable() {
     getServer().getPluginManager().registerEvents(ancientJug, this);
 
     // Раздача актуального ресурспака клиентам при входе.
-    getServer().getPluginManager().registerEvents(new ResourcePackPusher(this), this);
+    resourcePackPusher = new ResourcePackPusher(this);
+    getServer().getPluginManager().registerEvents(resourcePackPusher, this);
 
     profileManager = new ProfileManager(this, dataWriter);
     getServer().getPluginManager().registerEvents(profileManager, this);
@@ -216,6 +218,9 @@ public void onEnable() {
         }
         if (ancientJug != null) {
             ancientJug.disable();
+        }
+        if (resourcePackPusher != null) {
+            resourcePackPusher.disable();
         }
         if (dataWriter != null) {
             dataWriter.close();
