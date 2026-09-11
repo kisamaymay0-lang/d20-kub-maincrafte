@@ -4,8 +4,12 @@ on:
   workflow_dispatch:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -24,6 +28,14 @@ jobs:
 
     - name: Validate resource pack
       run: python3 scripts/build_resourcepack.py --check
+
+    - name: Check jug, note block and pack delivery
+      run: |
+        python3 scripts/build_jug_texture.py
+        python3 scripts/build_jug_models.py
+        git diff --exit-code -- resourcepack scripts/jug_texture_source.png
+        python3 scripts/test_jug.py
+        python3 scripts/preview_models.py
 
     - name: Build with Maven
       id: maven
@@ -76,7 +88,18 @@ jobs:
       if: steps.maven.outputs.exit_code == '0'
       uses: actions/upload-artifact@v4
       with:
-        name: f8-plugin-10.1
+        name: f8-plugin-10.2
         path: |
+          target/*.jar
+          f8resurs-resourcepack.zip
+
+    # Тег v10.2 создаёт релиз с JAR и ресурспаком. Ссылка вида
+    # .../releases/latest/download/f8resurs-resourcepack.zip всегда указывает
+    # на пак из последнего релиза, и её можно оставить в config.yml.
+    - name: Publish release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
           target/*.jar
           f8resurs-resourcepack.zip

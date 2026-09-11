@@ -1,154 +1,218 @@
 package com.yourserver.adaptation;
 
-import com.sun.net.httpserver.HttpServer;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
 
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.UUID;
-import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Раздаёт актуальный ресурспак прямо с игрового сервера: встроенный в jar
- * архив отдаётся по HTTP на порту resource-pack-port, а при входе клиент
- * получает addResourcePack со ссылкой на тот адрес, которым он подключился.
+ * Предлагает игрокам скачать ресурспак F8 по обычной ссылке.
  *
- * Серверный пак применяется клиентом поверх локальных паков, поэтому старый
- * блокстейт note_block из личного пака игрока не перекрывает модели кувшина
- * и наполненный кувшин не выглядит нотным блоком.
+ * Свой HTTP-сервер не поднимается: ссылка на zip задаётся в config.yml
+ * (resource-pack.url) и должна отдавать сам файл, а не страницу просмотра.
+ * SHA-1 считается по этому файлу при запуске сервера, поэтому пак проверен
+ * и не скачивается заново на каждый вход.
+ *
+ * Если ссылка недоступна (например, релиз ещё не опубликован), пак просто не
+ * предлагается: игроки подключаются, сервер работает как обычно, а попытки
+ * получить файл повторяются в фоне.
  */
 public class ResourcePackPusher implements Listener {
 
-    private static final String PACK_PATH = "/f8resurs-resourcepack.zip";
+    /** Ссылка по умолчанию: zip из последнего релиза репозитория. */
+    public static final String DEFAULT_URL =
+            "https://github.com/kisamaymay0-lang/d20-kub-maincrafte/releases/latest/download/f8resurs-resourcepack.zip";
 
-    private static final UUID PACK_ID =
-            UUID.nameUUIDFromBytes(
-                    "f8resurs-resourcepack".getBytes(StandardCharsets.UTF_8)
-            );
+    private static final String DEFAULT_PROMPT = "Ресурспак F8: кувшины, изморозь и предметы";
+    private static final long RETRY_TICKS = 20L * 60L * 5L;   // повтор раз в 5 минут
+    private static final long JOIN_DELAY_TICKS = 20L;         // пауза после входа
+    private static final int MAX_PACK_BYTES = 16 * 1024 * 1024;
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
     private final JavaPlugin plugin;
-    private final byte[] packBytes;
-    private final byte[] sha1;
-    private final int port;
-    private HttpServer server;
+    private final String url;
+    private final String prompt;
+    private final UUID packId;
+    private final AtomicBoolean fetchRunning = new AtomicBoolean(false);
+
+    private volatile byte[] sha1;
+    private volatile boolean disabled;
+    private volatile int failures;
+    private BukkitTask retryTask;
 
     public ResourcePackPusher(JavaPlugin plugin) {
         this.plugin = plugin;
-        this.packBytes = readBundledPack();
-        this.sha1 = computeSha1(packBytes);
-        this.port = plugin.getConfig().getInt("resource-pack-port", 25566);
+        String configured = plugin.getConfig().getString("resource-pack.url", DEFAULT_URL);
+        this.url = configured == null ? "" : configured.trim();
+        String configuredPrompt = plugin.getConfig().getString("resource-pack.prompt", DEFAULT_PROMPT);
+        this.prompt = configuredPrompt == null ? "" : configuredPrompt;
+        this.packId = UUID.nameUUIDFromBytes(("f8resurs:" + url).getBytes(StandardCharsets.UTF_8));
 
-        if (packBytes == null || sha1 == null) {
-            plugin.getLogger().warning(
-                    "Ресурспак не встроен в jar — клиентам он раздаваться не будет."
-            );
-            return;
-        }
-
-        try {
-            server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
-            server.createContext(PACK_PATH, exchange -> {
-                exchange.getResponseHeaders().set("Content-Type", "application/zip");
-                exchange.sendResponseHeaders(200, packBytes.length);
-                try (OutputStream out = exchange.getResponseBody()) {
-                    out.write(packBytes);
-                }
-            });
-            server.setExecutor(Executors.newFixedThreadPool(2));
-            server.start();
+        if (url.isEmpty()) {
             plugin.getLogger().info(
-                    "Ресурспак раздаётся по HTTP на порту " + port +
-                    ", путь " + PACK_PATH
+                    "Раздача ресурспака выключена (resource-pack.url пуст). "
+                            + "Игроки ставят f8resurs-resourcepack.zip вручную."
             );
-        } catch (Exception e) {
-            server = null;
+            return;
+        }
+        if (!url.startsWith("https://")) {
             plugin.getLogger().warning(
-                    "Не удалось поднять HTTP-сервер ресурспака на порту " +
-                    port + ": " + e
+                    "resource-pack.url не начинается с https:// — клиенты Minecraft "
+                            + "часто отказываются скачивать такой пак."
             );
         }
+        fetchHash();
     }
 
-    private byte[] readBundledPack() {
-        try (InputStream in = plugin.getResource("f8resurs-resourcepack.zip")) {
-            if (in == null) {
-                return null;
-            }
-            return in.readAllBytes();
-        } catch (Exception e) {
-            plugin.getLogger().warning(
-                    "Не удалось прочитать встроенный ресурспак: " + e
-            );
-            return null;
-        }
-    }
-
-    private byte[] computeSha1(byte[] data) {
-        if (data == null) {
-            return null;
+    /** Загружает пак и считает SHA-1; при неудаче повторяет попытку позже. */
+    private void fetchHash() {
+        if (disabled || sha1 != null || !fetchRunning.compareAndSet(false, true)) {
+            return;
         }
         try {
-            return MessageDigest.getInstance("SHA-1").digest(data);
-        } catch (Exception e) {
-            plugin.getLogger().warning("Не удалось посчитать SHA-1: " + e);
-            return null;
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, this::downloadIntoHash);
+        } catch (Throwable error) {
+            fetchRunning.set(false);
         }
     }
 
-    @EventHandler
+    private void downloadIntoHash() {
+        byte[] digest = null;
+        try {
+            digest = downloadDigest();
+        } catch (Throwable error) {
+            reportFailure("Не удалось получить ресурспак по ссылке " + url, error);
+        } finally {
+            fetchRunning.set(false);
+            if (digest != null) {
+                sha1 = digest;
+                failures = 0;
+                plugin.getLogger().info(
+                        "Ресурспак готов к раздаче: " + url + " (SHA-1 " + hex(digest) + ")"
+                );
+            } else {
+                scheduleRetry();
+            }
+        }
+    }
+
+    private void scheduleRetry() {
+        if (disabled || sha1 != null) {
+            return;
+        }
+        try {
+            retryTask = Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+                retryTask = null;
+                fetchHash();
+            }, RETRY_TICKS);
+        } catch (Throwable ignored) {
+            // Плагин выключается — повтор больше не нужен.
+        }
+    }
+
+    private byte[] downloadDigest() throws Exception {
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(CONNECT_TIMEOUT)
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .timeout(REQUEST_TIMEOUT)
+                .GET()
+                .build();
+        HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        if (response.statusCode() != 200) {
+            reportFailure("Ссылка на ресурспак ответила кодом " + response.statusCode()
+                    + " (проверьте, что адрес отдаёт сам zip-файл)", null);
+            return null;
+        }
+        byte[] data = response.body();
+        if (data == null || data.length == 0) {
+            reportFailure("По ссылке на ресурспак пришёл пустой ответ", null);
+            return null;
+        }
+        if (data.length > MAX_PACK_BYTES) {
+            reportFailure("Файл по ссылке больше " + (MAX_PACK_BYTES / 1024 / 1024)
+                    + " МБ — это не ресурспак F8, раздача пропущена", null);
+            return null;
+        }
+        return MessageDigest.getInstance("SHA-1").digest(data);
+    }
+
+    /** Первая ошибка пишется целиком, дальше — редко, чтобы не засорять лог. */
+    private void reportFailure(String message, Throwable error) {
+        failures++;
+        if (failures != 1 && failures % 6 != 0) {
+            return;
+        }
+        if (error == null) {
+            plugin.getLogger().warning(message);
+        } else {
+            plugin.getLogger().warning(message + ": " + error);
+        }
+        plugin.getLogger().warning(
+                "Игроки смогут поставить пак вручную: f8resurs-resourcepack.zip "
+                        + "из релиза → .minecraft/resourcepacks."
+        );
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerJoin(PlayerJoinEvent event) {
-        if (server == null || sha1 == null) {
+        if (disabled || url.isEmpty()) {
             return;
         }
-
+        byte[] digest = sha1;
+        if (digest == null) {
+            return;   // пак ещё не получен — вход не задерживаем
+        }
         Player player = event.getPlayer();
-
-        if (player.getAddress() == null ||
-                player.getAddress().getAddress() == null) {
-            return;
-        }
-
-        // Тот адрес, которым клиент подключился к серверу, — им же он
-        // сможет скачать пак (локалка/LAN/белый адрес).
-        String host = player.getAddress().getAddress().getHostAddress();
-        String url = "http://" + host + ":" + port + PACK_PATH;
-
-        new BukkitRunnable() {
-            @Override
-            public void run() {
+        try {
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 if (!player.isOnline()) {
                     return;
                 }
                 try {
-                    player.addResourcePack(
-                            PACK_ID,
-                            url,
-                            sha1,
-                            "Ресурспак F8: кувшины, изморозь и предметы",
-                            false
-                    );
-                } catch (Throwable t) {
+                    player.addResourcePack(packId, url, digest, prompt, false);
+                } catch (Throwable error) {
                     plugin.getLogger().warning(
-                            "Не удалось предложить ресурспак игроку " +
-                            player.getName() + ": " + t
+                            "Не удалось предложить ресурспак игроку "
+                                    + player.getName() + ": " + error
                     );
                 }
-            }
-        }.runTaskLater(plugin, 20L);
+            }, JOIN_DELAY_TICKS);
+        } catch (Throwable ignored) {
+            // Плагин выключается — предлагать пак больше некому.
+        }
+    }
+
+    private static String hex(byte[] data) {
+        StringBuilder builder = new StringBuilder(data.length * 2);
+        for (byte value : data) {
+            builder.append(Character.forDigit((value >> 4) & 0xF, 16));
+            builder.append(Character.forDigit(value & 0xF, 16));
+        }
+        return builder.toString();
     }
 
     public void disable() {
-        if (server != null) {
-            server.stop(0);
-            server = null;
+        disabled = true;
+        if (retryTask != null) {
+            retryTask.cancel();
+            retryTask = null;
         }
     }
 }
