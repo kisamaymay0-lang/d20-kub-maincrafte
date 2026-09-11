@@ -226,31 +226,27 @@ public class AncientJug implements Listener {
     }
 
     private Component liquidName(String kind, String potion, byte[] custom) {
-        Component name;
+        // Имя берётся из ванильного отображения предмета-образца,
+        // чтобы клиент рисовал его как обычное зелье/мёд, без сырых ключей.
+        ItemStack sample;
         if (HONEY_KIND.equals(kind)) {
-            name = Component.translatable("item.minecraft.honey_bottle");
+            sample = new ItemStack(Material.HONEY_BOTTLE);
         } else if (CUSTOM_KIND.equals(kind)) {
-            name = customLiquidName(custom);
+            sample = null;
+            try {
+                if (custom != null) sample = ItemStack.deserializeBytes(custom);
+            } catch (Throwable ignored) {
+            }
+            if (sample == null) return Component.text("Неизвестная жидкость");
         } else {
             PotionType type = parseType(potion);
-            name = type != null
-                    ? Component.translatable("item.minecraft.potion.effect." + type.name().toLowerCase(Locale.ROOT))
-                    : Component.translatable("item.minecraft.potion.effect.water");
-        }
-        return name.color(NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false);
-    }
-
-    private Component customLiquidName(byte[] custom) {
-        try {
-            if (custom != null) {
-                ItemStack stored = ItemStack.deserializeBytes(custom);
-                ItemMeta meta = stored.hasItemMeta() ? stored.getItemMeta() : null;
-                Component displayName = meta == null ? null : meta.displayName();
-                if (displayName != null) return displayName;
+            sample = new ItemStack(Material.POTION);
+            if (type != null && sample.getItemMeta() instanceof PotionMeta meta) {
+                meta.setBasePotionType(type);
+                sample.setItemMeta(meta);
             }
-        } catch (Throwable ignored) {
         }
-        return Component.text("Неизвестная жидкость");
+        return sample.displayName().color(NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false);
     }
 
     private static PotionType parseType(String name) {
