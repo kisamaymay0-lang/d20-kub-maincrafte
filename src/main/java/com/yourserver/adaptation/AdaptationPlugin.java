@@ -119,6 +119,9 @@ public void onEnable() {
     ancientJug = new AncientJug(this, dataWriter);
     getServer().getPluginManager().registerEvents(ancientJug, this);
 
+    // Раздача актуального ресурспака клиентам при входе.
+    getServer().getPluginManager().registerEvents(new ResourcePackPusher(this), this);
+
     profileManager = new ProfileManager(this, dataWriter);
     getServer().getPluginManager().registerEvents(profileManager, this);
     if (getCommand("profile") != null) {

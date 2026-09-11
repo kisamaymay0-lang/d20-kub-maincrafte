@@ -2,6 +2,7 @@
 """Validate and reproducibly build the resource pack; --check checks the existing ZIP."""
 import argparse
 import json
+import shutil
 import struct
 import zlib
 from pathlib import Path
@@ -10,6 +11,7 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 ROOT = Path(__file__).resolve().parents[1]
 PACK = ROOT / "resourcepack"
 ARCHIVE = ROOT / "f8resurs-resourcepack.zip"
+BUNDLED = ROOT / "src" / "main" / "resources" / "f8resurs-resourcepack.zip"
 
 
 def rgba_rows(data: bytes) -> list[bytes]:
@@ -190,6 +192,11 @@ def main() -> None:
                 info.compress_type = ZIP_DEFLATED
                 info.external_attr = 0o644 << 16
                 archive.writestr(info, contents)
+        # Плагин раздаёт этот же архив клиентам при входе (SHA-1 считается
+        # из bundled-копии), поэтому копия в resources обязана совпадать.
+        BUNDLED.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ARCHIVE, BUNDLED)
+    assert BUNDLED.read_bytes() == ARCHIVE.read_bytes(), "Bundled resource pack is stale"
     with ZipFile(ARCHIVE) as archive:
         assert len(archive.namelist()) == len(files), "Duplicate or unexpected ZIP entries"
         assert set(archive.namelist()) == set(files), "Stale resource pack archive"
