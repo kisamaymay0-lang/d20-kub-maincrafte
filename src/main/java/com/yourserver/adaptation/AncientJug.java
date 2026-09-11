@@ -12,6 +12,7 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Note;
 import org.bukkit.Sound;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.type.NoteBlock;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -30,6 +31,7 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.block.NotePlayEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.event.player.PlayerFishEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -129,6 +131,9 @@ public class AncientJug implements Listener {
         // Раз в секунду — замедление/пониженный прыжок/износ элитр, каждый тик — утягивание вниз на элитрах.
         Bukkit.getScheduler().runTaskTimer(plugin, this::applyCarryEffects, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(plugin, this::applyFlightPull, 1L, 1L);
+        // Через пару секунд после запуска приводим в порядок кувшины в тех
+        // чанках, что уже загружены (остальные проверятся при загрузке чанка).
+        Bukkit.getScheduler().runTaskLater(plugin, this::restoreLoadedJugs, 60L);
     }
 
     // ===== СОДЕРЖИМОЕ =====
@@ -296,26 +301,55 @@ public class AncientJug implements Listener {
     }
 
     private void writeContents(String key, Contents contents) {
-        if (contents.count <= 0) {
-            jugsData.set(key, null);
-            return;
-        }
-        jugsData.set(key + ".kind", contents.kind);
+        // Пустой кувшин тоже запоминается: раньше запись удалялась (count = 0),
+        // и поставленный пустой кувшин считался обычным нот-блоком — в него
+        // нельзя было налить, он играл ноты и выпадал нот-блоком.
+        jugsData.set(key + ".count", contents.count);
+        jugsData.set(key + ".kind", contents.kind == null ? "" : contents.kind);
         jugsData.set(key + ".potion", POTION_KIND.equals(contents.kind) && contents.potion != null ? contents.potion : "");
         jugsData.set(key + ".custom", CUSTOM_KIND.equals(contents.kind) && contents.custom != null
                 ? Base64.getEncoder().encodeToString(contents.custom) : "");
-        jugsData.set(key + ".count", contents.count);
     }
 
-    /** Кувшин = (нота 24 + флейта) либо (нота 1..9 + банджо) + запись в jugs.yml. */
+    /** Координаты из ключа вида «мир_x_y_z» (имя мира может содержать «_»). */
+    private Location locationOf(String key) {
+        int last = key.lastIndexOf('_');
+        int second = key.lastIndexOf('_', last - 1);
+        int third = key.lastIndexOf('_', second - 1);
+        if (third <= 0) return null;
+        try {
+            int x = Integer.parseInt(key.substring(third + 1, second));
+            int y = Integer.parseInt(key.substring(second + 1, last));
+            int z = Integer.parseInt(key.substring(last + 1));
+            World world = Bukkit.getWorld(key.substring(0, third));
+            return world == null ? null : new Location(world, x, y, z);
+        } catch (NumberFormatException error) {
+            return null;
+        }
+    }
+
+    /** Возвращает кувшинам состояние в уже загруженных чанках (после перезапуска). */
+    private void restoreLoadedJugs() {
+        for (String key : jugsData.getKeys(false)) {
+            Location location = locationOf(key);
+            if (location == null) continue;
+            World world = location.getWorld();
+            if (world == null) continue;
+            if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) continue;
+            restoreIfDrifted(location, key);
+        }
+    }
+
+    /**
+     * Кувшин — это нот-блок, поставленный из предмета кувшина. Признак — запись
+     * в jugs.yml: её создаёт только установка кувшина, поэтому состояние блока
+     * (нота/инструмент) не обязательное условие. Так блок остаётся кувшином,
+     * даже если ваниль успела пересчитать ноту от соседних блоков, а
+     * {@link #restoreIfDrifted} вернёт состояние при первой возможности.
+     */
     private boolean isJugBlock(Block block) {
-        if (block == null || block.getType() != Material.NOTE_BLOCK) return false;
-        if (!(block.getBlockData() instanceof NoteBlock noteBlock)) return false;
-        int note = noteBlock.getNote().getId();
-        Instrument instrument = noteBlock.getInstrument();
-        boolean jugState = (note == MARKER_NOTE && instrument == EMPTY_INSTRUMENT)
-                || (instrument == FILLED_INSTRUMENT && note >= 1 && note <= MAX_BOTTLES);
-        return jugState && jugsData.contains(blockKey(block));
+        return block != null && block.getType() == Material.NOTE_BLOCK
+                && jugsData.contains(blockKey(block));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -444,6 +478,26 @@ public class AncientJug implements Listener {
         data.setNote(new Note(note));
         data.setInstrument(instrument);
         block.setBlockData(data, false);
+    }
+
+    /**
+     * Загрузился чанк — проверяем кувшины в нём: ваниль может пересчитать
+     * ноту/инструмент, пока чанк был выгружен (например, под кувшином сменился
+     * блок), а тогда вместо кувшина рисовался бы нот-блок.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onChunkLoad(ChunkLoadEvent event) {
+        if (jugsData.getKeys(false).isEmpty()) return;
+        String prefix = event.getWorld().getName() + "_";
+        int chunkX = event.getChunk().getX();
+        int chunkZ = event.getChunk().getZ();
+        for (String key : jugsData.getKeys(false)) {
+            if (!key.startsWith(prefix)) continue;
+            Location location = locationOf(key);
+            if (location == null) continue;
+            if ((location.getBlockX() >> 4) != chunkX || (location.getBlockZ() >> 4) != chunkZ) continue;
+            restoreIfDrifted(location, key);
+        }
     }
 
     // ===== ВЫЛИВАНИЕ ЖИДКОСТЕЙ (ПКМ по кувшину) =====

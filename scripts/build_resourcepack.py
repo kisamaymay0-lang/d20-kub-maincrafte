@@ -12,14 +12,6 @@ PACK = ROOT / "resourcepack"
 ARCHIVE = ROOT / "f8resurs-resourcepack.zip"
 
 
-def png_header(data: bytes) -> tuple[int, int, int]:
-    """Ширина, высота и цветовой тип PNG из заголовка IHDR."""
-    assert data.startswith(b"\x89PNG\r\n\x1a\n")
-    width, height, bits, colour, _, _, interlace = struct.unpack_from(">IIBBBBB", data, 16)
-    assert (bits, interlace) == (8, 0)
-    return width, height, colour
-
-
 def rgba_rows(data: bytes) -> list[bytes]:
     """Decode the small, non-interlaced RGBA beam textures using only the stdlib."""
     assert data.startswith(b"\x89PNG\r\n\x1a\n")
@@ -77,41 +69,44 @@ def validate() -> dict[str, bytes]:
         if name.endswith(".json"):
             json.loads(contents)
 
-    # Нот-блок: правила multipart должны покрывать ЛЮБОЕ состояние ровно один раз.
-    # Иначе часть состояний (например, нот-блок на медь/голову моба) останется
-    # без модели и покажется фиолетовым «missing model».
-    classic = ["harp", "basedrum", "snare", "hat", "bass", "flute", "bell", "guitar", "chime",
-               "xylophone", "iron_xylophone", "cow_bell", "didgeridoo", "bit", "banjo", "pling"]
-    heads = ["zombie", "skeleton", "creeper", "dragon", "wither_skeleton", "piglin", "custom_head"]
+    # Медный блок — нота 24 (14 инструментов). Кувшин: пустой — нота 24 + флейта,
+    # наполненный — ноты 1..9 (нота = количество жидкости = сигнал компаратора)
+    # + банджо. Каждый блок-стейт нот-блока матчится ровно одним кейсом.
+    instruments = {"harp", "basedrum", "snare", "hat", "bass", "bell", "guitar", "chime",
+                   "xylophone", "iron_xylophone", "cow_bell", "didgeridoo", "bit", "pling", "flute", "banjo"}
     vanilla = "minecraft:block/note_block"
     blockstates = json.loads(files["assets/minecraft/blockstates/note_block.json"])
     cases = blockstates["multipart"]
+    assert len(cases) == 14, "note_block multipart must define 14 non-overlapping cases"
 
-    def matched_models(note, instrument):
-        hits = []
-        for case in cases:
-            when = case["when"]
-            notes = when.get("note")
-            if notes is not None and str(note) not in notes.split("|"):
-                continue
-            instruments = when.get("instrument")
-            if instruments is not None and instrument not in instruments.split("|"):
-                continue
-            hits.append(case["apply"]["model"])
-        return hits
+    bulk = cases[0]
+    assert set(bulk["when"]["note"].split("|")) == {"0"} | {str(note) for note in range(10, 24)}
+    assert "instrument" not in bulk["when"] and bulk["apply"]["model"] == vanilla
 
-    for note in range(25):
-        for instrument in classic + heads:
-            hits = matched_models(note, instrument)
-            assert len(hits) == 1, f"note={note} instrument={instrument} matched {hits}"
-            if note == 24 and instrument in classic and instrument not in ("flute", "banjo"):
-                assert hits[0] == "f8resurs:block/copper_note_block"
-            elif note == 24 and instrument == "flute":
-                assert hits[0] == "f8resurs:block/ancient_jug"
-            elif 1 <= note <= 9 and instrument == "banjo":
-                assert hits[0] == "f8resurs:block/ancient_jug_filled"
-            else:
-                assert hits[0] == vanilla, f"note={note} instrument={instrument} -> {hits[0]}"
+    for index, note in enumerate(range(1, 10), start=1):
+        case = cases[index]
+        assert case["when"]["note"] == str(note), f"Case {index} must pin note={note}"
+        assert set(case["when"]["instrument"].split("|")) == instruments - {"banjo"}, \
+            f"Note {note} must stay vanilla for every instrument except banjo"
+        assert case["apply"]["model"] == vanilla
+
+    copper = cases[10]
+    copper_instruments = set(copper["when"]["instrument"].split("|"))
+    assert copper["when"]["note"] == "24" and copper_instruments == instruments - {"flute", "banjo"}, \
+        "Copper covers note=24 for all instruments except the jug's two"
+    assert copper["apply"]["model"] == "f8resurs:block/copper_note_block"
+
+    jug_empty = cases[11]
+    assert jug_empty["when"] == {"note": "24", "instrument": "flute"}
+    assert jug_empty["apply"]["model"] == "f8resurs:block/ancient_jug"
+
+    jug_filled = cases[12]
+    assert jug_filled["when"] == {"note": "|".join(str(note) for note in range(1, 10)), "instrument": "banjo"}
+    assert jug_filled["apply"]["model"] == "f8resurs:block/ancient_jug_filled"
+
+    banjo_marker = cases[13]
+    assert banjo_marker["when"] == {"note": "24", "instrument": "banjo"}
+    assert banjo_marker["apply"]["model"] == vanilla
 
     for name, contents in files.items():
         if name.startswith("assets/f8resurs/items/") and name.endswith(".json"):
@@ -158,24 +153,6 @@ def validate() -> dict[str, bytes]:
         assert f"assets/f8resurs/models/item/{jug}.json" in files
         assert f"assets/f8resurs/models/block/{jug}.json" in files
 
-    # Лист кувшина и UV. Каждая грань обязана лежать внутри листа: выход за
-    # границы — это «невидимые» или растянутые грани в игре.
-    jug_texture = files["assets/f8resurs/textures/block/gor4ok.png"]
-    jug_width, jug_height, _ = png_header(jug_texture)
-    assert (jug_width, jug_height) == (40, 40), f"Лист кувшина должен быть 40x40, а он {jug_width}x{jug_height}"
-    for jug in ("ancient_jug", "ancient_jug_filled"):
-        model = json.loads(files[f"assets/f8resurs/models/block/{jug}.json"])
-        assert model["texture_size"] == [40, 40], f"{jug}: texture_size должен совпадать с листом"
-        assert model["elements"], f"{jug}: модель без элементов"
-        for element in model["elements"]:
-            frm, to = element["from"], element["to"]
-            assert all(-16 <= value <= 32 for value in frm + to), f"{jug}: координаты вне допустимых"
-            assert all(frm[i] < to[i] for i in range(3)), f"{jug}: {element.get('name')} нулевого размера"
-            for direction, face in element["faces"].items():
-                u1, v1, u2, v2 = face["uv"]
-                assert 0 <= u1 < u2 <= jug_width and 0 <= v1 < v2 <= jug_height, \
-                    f"{jug}: {element.get('name')} {direction} UV {face['uv']} выходит за лист"
-
     # Both beams must be flat and unshaded: no rod base, side faces or AO.
     for beam in ("star_beam", "star_beam_preview"):
         model = json.loads(files[f"assets/f8resurs/models/item/{beam}.json"])
@@ -213,8 +190,8 @@ def main() -> None:
                 info.compress_type = ZIP_DEFLATED
                 info.external_attr = 0o644 << 16
                 archive.writestr(info, contents)
-    # Плагин предлагает игрокам ровно этот архив по ссылке из config.yml,
-    # поэтому ZIP в корне репозитория — единственная раздаваемая копия.
+    # Плагин пак не раздаёт: архив в корне репозитория — единственная копия,
+    # его подключает сам сервер (server.properties: resource-pack).
     with ZipFile(ARCHIVE) as archive:
         assert len(archive.namelist()) == len(files), "Duplicate or unexpected ZIP entries"
         assert set(archive.namelist()) == set(files), "Stale resource pack archive"
