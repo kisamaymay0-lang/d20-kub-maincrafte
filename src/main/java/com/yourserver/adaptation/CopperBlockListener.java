@@ -2,6 +2,7 @@ package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
+import org.bukkit.Instrument;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -214,7 +215,14 @@ public class CopperBlockListener implements Listener {
             return false;
         }
 
-        return noteBlock.getNote().getId() == MARKER_NOTE;
+        if (noteBlock.getNote().getId() != MARKER_NOTE) {
+            return false;
+        }
+
+        // Ноту 24 с инструментами флейта/банджо резервирует Древний кувшин.
+        Instrument instrument = noteBlock.getInstrument();
+        return instrument != AncientJug.EMPTY_INSTRUMENT
+                && instrument != AncientJug.FILLED_INSTRUMENT;
     }
 
     private String getBlockKey(Block block) {
@@ -263,8 +271,10 @@ public class CopperBlockListener implements Listener {
 
         NoteBlock data = (NoteBlock) block.getBlockData();
         data.setNote(new Note(MARKER_NOTE));
-        // Не вызываем лишнюю физику во время BlockPlaceEvent. Свойства
-        // powered/instrument сохраняются; ресурспак выбирает модель по note.
+        // Медный блок всегда играет арфой: инструменты флейта/банджо при
+        // ноте 24 зарезервированы Древним кувшином (модель выбирает ресурспак).
+        data.setInstrument(Instrument.PIANO);
+        data.setPowered(false);
         block.setBlockData(data, false);
     }
 

@@ -77,6 +77,7 @@ class ProfileIconsTest {
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("empty_cod", "empty_salmon", "red_caviar", "black_caviar",
                 "caviar_sandwich_red", "caviar_sandwich_black", "water_flask", "poison_flask")));
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich")));
-        assertEquals(13, F8Command.ITEM_CATALOG.stream().distinct().count());
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("ancient_jug")));
+        assertEquals(14, F8Command.ITEM_CATALOG.stream().distinct().count());
     }
 }

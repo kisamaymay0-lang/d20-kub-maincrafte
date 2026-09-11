@@ -34,6 +34,7 @@ public class F8Command implements CommandExecutor, Listener {
     private final CopperBlockListener copperBlockListener;
     private final CaviarListener caviarListener;
     private final WinterFishing winterFishing;
+    private final AncientJug ancientJug;
 
     private final NamespacedKey menuKey;
 
@@ -44,7 +45,8 @@ public class F8Command implements CommandExecutor, Listener {
             RollbackListener rollbackListener,
             CopperBlockListener copperBlockListener,
             CaviarListener caviarListener,
-            WinterFishing winterFishing
+            WinterFishing winterFishing,
+            AncientJug ancientJug
     ) {
         this.plugin = plugin;
         this.diceRollListener = diceRollListener;
@@ -53,6 +55,7 @@ public class F8Command implements CommandExecutor, Listener {
         this.copperBlockListener = copperBlockListener;
         this.caviarListener = caviarListener;
         this.winterFishing = winterFishing;
+        this.ancientJug = ancientJug;
         this.menuKey = new NamespacedKey(plugin, "f8_menu");
     }
 
@@ -213,7 +216,7 @@ public class F8Command implements CommandExecutor, Listener {
 
     static final List<String> ITEM_CATALOG = List.of("water_flask", "poison_flask", "red_caviar", "black_caviar",
             "empty_cod", "empty_salmon", "caviar_sandwich_red", "caviar_sandwich_black",
-            "icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich");
+            "icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich", "ancient_jug");
 
     private ItemStack catalogItem(String id) {
         return switch (id) {
@@ -230,6 +233,7 @@ public class F8Command implements CommandExecutor, Listener {
             case "depleted_rime" -> winterFishing.items.create(WinterItems.Kind.DEPLETED);
             case "ice_caviar" -> winterFishing.items.create(WinterItems.Kind.ROE);
             case "ice_caviar_sandwich" -> winterFishing.items.create(WinterItems.Kind.SANDWICH);
+            case "ancient_jug" -> ancientJug.create(0, null);
             default -> throw new IllegalArgumentException("Неизвестный предмет каталога");
         };
     }

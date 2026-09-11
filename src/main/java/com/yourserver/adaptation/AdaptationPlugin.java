@@ -50,6 +50,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private CopperBlockListener copperBlockListener;
     private CaviarListener caviarListener;
     private WinterFishing winterFishing;
+    private AncientJug ancientJug;
     private ConstellationManager constellationManager;
     private ProfileManager profileManager;
 
@@ -115,6 +116,9 @@ public void onEnable() {
     winterFishing = new WinterFishing(this);
     getServer().getPluginManager().registerEvents(winterFishing, this);
 
+    ancientJug = new AncientJug(this, dataWriter);
+    getServer().getPluginManager().registerEvents(ancientJug, this);
+
     profileManager = new ProfileManager(this, dataWriter);
     getServer().getPluginManager().registerEvents(profileManager, this);
     if (getCommand("profile") != null) {
@@ -150,7 +154,8 @@ public void onEnable() {
                     rollbackListener,
                     copperBlockListener,
                     caviarListener,
-                    winterFishing
+                    winterFishing,
+                    ancientJug
             );
 
     getServer().getPluginManager().registerEvents(
@@ -205,6 +210,9 @@ public void onEnable() {
         }
         if (winterFishing != null) {
             winterFishing.disable();
+        }
+        if (ancientJug != null) {
+            ancientJug.disable();
         }
         if (dataWriter != null) {
             dataWriter.close();

@@ -1,79 +1,20 @@
 {
-  "variants": {
-    "note=0": {
-      "model": "minecraft:block/note_block"
+  "multipart": [
+    {
+      "when": { "note": "0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23" },
+      "apply": { "model": "minecraft:block/note_block" }
     },
-    "note=1": {
-      "model": "minecraft:block/note_block"
+    {
+      "when": { "note": "24", "instrument": "harp|basedrum|snare|hat|bass|bell|guitar|chime|xylophone|iron_xylophone|cow_bell|didgeridoo|bit|pling" },
+      "apply": { "model": "f8resurs:block/copper_note_block" }
     },
-    "note=2": {
-      "model": "minecraft:block/note_block"
+    {
+      "when": { "note": "24", "instrument": "flute" },
+      "apply": { "model": "f8resurs:block/ancient_jug" }
     },
-    "note=3": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=4": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=5": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=6": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=7": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=8": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=9": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=10": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=11": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=12": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=13": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=14": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=15": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=16": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=17": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=18": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=19": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=20": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=21": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=22": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=23": {
-      "model": "minecraft:block/note_block"
-    },
-    "note=24": {
-      "model": "f8resurs:block/copper_note_block"
+    {
+      "when": { "note": "24", "instrument": "banjo" },
+      "apply": { "model": "f8resurs:block/ancient_jug_filled" }
     }
-  }
+  ]
 }

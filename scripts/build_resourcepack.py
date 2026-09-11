@@ -69,13 +69,29 @@ def validate() -> dict[str, bytes]:
         if name.endswith(".json"):
             json.loads(contents)
 
-    # Empty-string fallback overlaps note=24. Every note must match exactly
-    # one variant, regardless of instrument and powered=true/false.
-    variants = json.loads(files["assets/minecraft/blockstates/note_block.json"])["variants"]
-    assert set(variants) == {f"note={note}" for note in range(25)}, "Overlapping/missing note variants"
-    for note in range(25):
-        expected = "f8resurs:block/copper_note_block" if note == 24 else "minecraft:block/note_block"
-        assert variants[f"note={note}"]["model"] == expected
+    # Резервная нота 24 делится по инструменту: медный блок (14 инструментов),
+    # пустой кувшин (флейта) и кувшин с зельями (банджо). Каждый блок-стейт
+    # нот-блока должен матчиться ровно одним мультипарт-кейсом без перекрытий.
+    blockstates = json.loads(files["assets/minecraft/blockstates/note_block.json"])
+    cases = blockstates["multipart"]
+    assert len(cases) == 4, "note_block multipart must define vanilla/copper/jug cases"
+
+    vanilla, copper, jug_empty, jug_filled = cases
+    assert set(vanilla["when"]["note"].split("|")) == {str(note) for note in range(24)}, \
+        "Notes 0..23 must stay vanilla"
+    assert vanilla["apply"]["model"] == "minecraft:block/note_block"
+
+    copper_instruments = set(copper["when"]["instrument"].split("|"))
+    assert copper["when"]["note"] == "24" and len(copper_instruments) == 14, \
+        "Copper covers note=24 for all instruments except the jug's two"
+    assert copper_instruments.isdisjoint({"flute", "banjo"}), \
+        "Jug instruments (flute/banjo) must stay reserved for the ancient jug"
+    assert copper["apply"]["model"] == "f8resurs:block/copper_note_block"
+
+    assert jug_empty["when"] == {"note": "24", "instrument": "flute"}
+    assert jug_empty["apply"]["model"] == "f8resurs:block/ancient_jug"
+    assert jug_filled["when"] == {"note": "24", "instrument": "banjo"}
+    assert jug_filled["apply"]["model"] == "f8resurs:block/ancient_jug_filled"
 
     for name, contents in files.items():
         if name.startswith("assets/f8resurs/items/") and name.endswith(".json"):
@@ -115,6 +131,12 @@ def validate() -> dict[str, bytes]:
         assert f"assets/f8resurs/items/{item}.json" in files
         assert f"assets/f8resurs/models/item/{item}.json" in files
         assert f"assets/f8resurs/textures/item/{item}.png" in files
+
+    # Древний кувшин: предмет (пустой/наполненный) + блок-модели для поставки.
+    for jug in ("ancient_jug", "ancient_jug_filled"):
+        assert f"assets/f8resurs/items/{jug}.json" in files
+        assert f"assets/f8resurs/models/item/{jug}.json" in files
+        assert f"assets/f8resurs/models/block/{jug}.json" in files
 
     # Both beams must be flat and unshaded: no rod base, side faces or AO.
     for beam in ("star_beam", "star_beam_preview"):
@@ -158,7 +180,7 @@ def main() -> None:
         assert set(archive.namelist()) == set(files), "Stale resource pack archive"
         for name, contents in files.items():
             assert archive.read(name) == contents, f"Stale resource pack file: {name}"
-    print(f"OK: {len(files)} files, 25 non-overlapping block variants; ZIP matches resourcepack/")
+    print(f"OK: {len(files)} files, note_block multipart is non-overlapping; ZIP matches resourcepack/")
 
 
 if __name__ == "__main__":
