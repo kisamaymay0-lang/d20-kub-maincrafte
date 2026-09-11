@@ -32,6 +32,9 @@ public class F8Command implements CommandExecutor, Listener {
     private final FlaskListener flaskListener;
     private final RollbackListener rollbackListener;
     private final CopperBlockListener copperBlockListener;
+    private final CaviarListener caviarListener;
+    private final WinterFishing winterFishing;
+    private final AncientJug ancientJug;
 
     private final NamespacedKey menuKey;
 
@@ -40,13 +43,19 @@ public class F8Command implements CommandExecutor, Listener {
             DiceRollListener diceRollListener,
             FlaskListener flaskListener,
             RollbackListener rollbackListener,
-            CopperBlockListener copperBlockListener
+            CopperBlockListener copperBlockListener,
+            CaviarListener caviarListener,
+            WinterFishing winterFishing,
+            AncientJug ancientJug
     ) {
         this.plugin = plugin;
         this.diceRollListener = diceRollListener;
         this.flaskListener = flaskListener;
         this.rollbackListener = rollbackListener;
         this.copperBlockListener = copperBlockListener;
+        this.caviarListener = caviarListener;
+        this.winterFishing = winterFishing;
+        this.ancientJug = ancientJug;
         this.menuKey = new NamespacedKey(plugin, "f8_menu");
     }
 
@@ -91,7 +100,7 @@ public class F8Command implements CommandExecutor, Listener {
         inventory.setItem(
                 13,
                 createMenuItem(
-                        Material.WAXED_CHISELED_COPPER,
+                        Material.NOTE_BLOCK,
                         "§6Новые блоки",
                         List.of("§7Новые блоки"),
                         "blocks"
@@ -154,7 +163,10 @@ public class F8Command implements CommandExecutor, Listener {
 
         inventory.setItem(
                 22,
-                rollbackListener.createRollbackTotem()
+                createTaggedItem(
+                        rollbackListener.createRollbackTotem(),
+                        "rollback_totem"
+                )
         );
 
         inventory.setItem(
@@ -182,7 +194,7 @@ public class F8Command implements CommandExecutor, Listener {
         inventory.setItem(
                 13,
                 createMenuItem(
-                        Material.WAXED_CHISELED_COPPER,
+                        Material.NOTE_BLOCK,
                         "§6Медный нотный блок",
                         List.of("§7Нажмите, чтобы получить блок"),
                         "copper_note_block"
@@ -202,41 +214,39 @@ public class F8Command implements CommandExecutor, Listener {
         player.openInventory(inventory);
     }
 
+    static final List<String> ITEM_CATALOG = List.of("water_flask", "poison_flask", "red_caviar", "black_caviar",
+            "empty_cod", "empty_salmon", "caviar_sandwich_red", "caviar_sandwich_black",
+            "icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich", "ancient_jug");
+
+    private ItemStack catalogItem(String id) {
+        return switch (id) {
+            case "water_flask" -> flaskListener.createWaterFlask();
+            case "poison_flask" -> flaskListener.createPoisonFlask();
+            case "red_caviar" -> caviarListener.createRedCaviar();
+            case "black_caviar" -> caviarListener.createBlackCaviar();
+            case "empty_cod" -> caviarListener.createDepletedFish(Material.COD);
+            case "empty_salmon" -> caviarListener.createDepletedFish(Material.SALMON);
+            case "caviar_sandwich_red" -> caviarListener.createCaviarSandwich("red");
+            case "caviar_sandwich_black" -> caviarListener.createCaviarSandwich("black");
+            case "icy_rime" -> winterFishing.items.create(WinterItems.Kind.TOOL);
+            case "rime" -> winterFishing.items.create(WinterItems.Kind.RAW);
+            case "depleted_rime" -> winterFishing.items.create(WinterItems.Kind.DEPLETED);
+            case "ice_caviar" -> winterFishing.items.create(WinterItems.Kind.ROE);
+            case "ice_caviar_sandwich" -> winterFishing.items.create(WinterItems.Kind.SANDWICH);
+            case "ancient_jug" -> ancientJug.createEmpty();
+            default -> throw new IllegalArgumentException("Неизвестный предмет каталога");
+        };
+    }
+
     private void openItemMenu(Player player) {
-        Inventory inventory = Bukkit.createInventory(
-                null,
-                27,
-                ITEM_TITLE
-        );
-
+        Inventory inventory = Bukkit.createInventory(null, 36, ITEM_TITLE);
         fill(inventory);
-
-        inventory.setItem(
-                11,
-                createFlaskMenuItem(
-                        flaskListener.createWaterFlask(),
-                        "water_flask"
-                )
-        );
-
-        inventory.setItem(
-                15,
-                createFlaskMenuItem(
-                        flaskListener.createPoisonFlask(),
-                        "poison_flask"
-                )
-        );
-
-        inventory.setItem(
-                22,
-                createMenuItem(
-                        Material.ARROW,
-                        "§7Назад",
-                        Collections.emptyList(),
-                        "back"
-                )
-        );
-
+        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25};
+        for (int i = 0; i < ITEM_CATALOG.size(); i++) {
+            String id = ITEM_CATALOG.get(i);
+            inventory.setItem(slots[i], createTaggedItem(catalogItem(id), id));
+        }
+        inventory.setItem(31, createMenuItem(Material.ARROW, "§7Назад", Collections.emptyList(), "back"));
         player.openInventory(inventory);
     }
 
@@ -271,7 +281,7 @@ public class F8Command implements CommandExecutor, Listener {
         return book;
     }
 
-    private ItemStack createFlaskMenuItem(
+    private ItemStack createTaggedItem(
             ItemStack item,
             String id
     ) {
@@ -342,20 +352,30 @@ public class F8Command implements CommandExecutor, Listener {
     }
 
     private void fill(Inventory inventory) {
-        ItemStack filler = new ItemStack(
-                Material.GRAY_STAINED_GLASS_PANE
-        );
+        ItemStack inner = fillerPane(Material.GRAY_STAINED_GLASS_PANE);
+        ItemStack border = fillerPane(Material.BLACK_STAINED_GLASS_PANE);
 
-        ItemMeta meta = filler.getItemMeta();
+        int size = inventory.getSize();
+        int cols = 9;
+        int rows = size / cols;
 
+        for (int i = 0; i < size; i++) {
+            int row = i / cols;
+            int col = i % cols;
+            boolean isBorder = row == 0 || row == rows - 1 || col == 0 || col == cols - 1;
+            inventory.setItem(i, isBorder ? border : inner);
+        }
+    }
+
+    /** Фоновая стеклянная панель (рамка/заполнитель) без видимого имени. */
+    private ItemStack fillerPane(Material material) {
+        ItemStack pane = new ItemStack(material);
+        ItemMeta meta = pane.getItemMeta();
         if (meta != null) {
             meta.setDisplayName(" ");
-            filler.setItemMeta(meta);
+            pane.setItemMeta(meta);
         }
-
-        for (int i = 0; i < inventory.getSize(); i++) {
-            inventory.setItem(i, filler);
-        }
+        return pane;
     }
 
     private void giveItem(Player player, ItemStack item) {
@@ -402,6 +422,18 @@ public class F8Command implements CommandExecutor, Listener {
             return;
         }
 
+        if (!player.hasPermission("f8.admin")) return;
+        if (title.equals(ITEM_TITLE) && ITEM_CATALOG.contains(id)) {
+            Inventory source = event.getView().getTopInventory();
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (player.isOnline() && player.hasPermission("f8.admin") && player.getOpenInventory().getTopInventory() == source) {
+                    giveItem(player, catalogItem(id)); // Настоящий предмет с игровыми PDC/едой, без метки кнопки меню.
+                    player.closeInventory();
+                }
+            });
+            return;
+        }
+
         switch (id) {
             case "enchants" -> openEnchantMenu(player);
 
@@ -439,6 +471,14 @@ public class F8Command implements CommandExecutor, Listener {
                 giveItem(
                         player,
                         createD20Book()
+                );
+                player.closeInventory();
+            }
+
+            case "rollback_totem" -> {
+                giveItem(
+                        player,
+                        rollbackListener.createRollbackTotem()
                 );
                 player.closeInventory();
             }
@@ -540,8 +580,6 @@ public class F8Command implements CommandExecutor, Listener {
     }
 
     private ItemStack createCopperBlock() {
-        return new ItemStack(
-                Material.WAXED_CHISELED_COPPER
-        );
+        return copperBlockListener.createCopperBlockItem();
     }
 }

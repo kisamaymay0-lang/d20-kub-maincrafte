@@ -1,6 +1,7 @@
 package com.yourserver.adaptation;
 
 import org.bukkit.Color;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
@@ -13,6 +14,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
@@ -68,45 +70,23 @@ public class FlaskListener implements Listener {
     }
 
     private boolean isFlask(ItemStack item) {
-        if (item == null || item.getType() != Material.POTION || !item.hasItemMeta()) {
-            return false;
-        }
-
-        ItemMeta meta = item.getItemMeta();
-        if (meta == null) {
-            return false;
-        }
-
-        return meta.getPersistentDataContainer()
-                .has(flaskTypeKey, PersistentDataType.STRING);
+        return item != null && item.getType() == Material.POTION
+                && item.getPersistentDataContainer().has(flaskTypeKey, PersistentDataType.STRING);
     }
 
     private String getFlaskType(ItemStack item) {
         if (!isFlask(item)) {
             return null;
         }
-
-        ItemMeta meta = item.getItemMeta();
-        if (meta == null) {
-            return null;
-        }
-
-        return meta.getPersistentDataContainer()
-                .get(flaskTypeKey, PersistentDataType.STRING);
+        return item.getPersistentDataContainer().get(flaskTypeKey, PersistentDataType.STRING);
     }
 
     private Long getPoisonExpire(ItemStack sword) {
-        if (!isSword(sword) || !sword.hasItemMeta()) {
+        if (!isSword(sword)) {
             return null;
         }
-
-        ItemMeta meta = sword.getItemMeta();
-        if (meta == null) {
-            return null;
-        }
-
-        return meta.getPersistentDataContainer()
-                .get(poisonExpireKey, PersistentDataType.LONG);
+        // Paper даёт read-only PDC без глубокого копирования ItemMeta.
+        return sword.getPersistentDataContainer().get(poisonExpireKey, PersistentDataType.LONG);
     }
 
     private boolean hasPoison(ItemStack sword) {
@@ -178,16 +158,16 @@ public class FlaskListener implements Listener {
         }
     }
 
-    private String formatTimeLeft(long expire) {
+    private String formatTimeLeft(long expire, long now) {
         long seconds = Math.max(
                 0L,
-                (expire - System.currentTimeMillis() + 999L) / 1000L
+                (expire - now + 999L) / 1000L
         );
 
         long minutes = seconds / 60L;
         long remainingSeconds = seconds % 60L;
 
-        return String.format("%d:%02d", minutes, remainingSeconds);
+        return minutes + ":" + (remainingSeconds < 10 ? "0" : "") + remainingSeconds;
     }
 
     private void tickPoisonEffects() {
@@ -207,7 +187,7 @@ public class FlaskListener implements Listener {
             }
 
             // Таймер показывается в action bar и не меняет ItemStack каждую секунду.
-            player.sendActionBar("§7Отравление: " + formatTimeLeft(expire));
+            player.sendActionBar("§7Отравление: " + formatTimeLeft(expire, now));
 
             spawnSwordPoisonParticles(player);
         }
@@ -215,29 +195,68 @@ public class FlaskListener implements Listener {
 
     private void spawnSwordPoisonParticles(Player player) {
         /*
-         * Частицы рассчитываются от положения игрока и направления его тела,
-         * а не от направления взгляда. Поэтому движение камеры не двигает
-         * эффект по сторонам.
+         * Частицы считаются от ГЛАЗ игрока и направления ВЗГЛЯДА,
+         * поэтому зелёный эффект виден и от первого лица (перед камерой,
+         * там, где клинок), и от третьего (у правой руки).
          */
-        LocationData locationData = getSwordArea(player);
+        Location hand = getHandLocation(player);
 
-        int count = 1 + random.nextInt(2);
+        // Лёгкая зелёная аура у клинка.
+        spawnDust(player, hand, 3, 0.10);
 
+        // "Капли", стекающие вниз с клинка.
+        for (int i = 1; i <= 2; i++) {
+            spawnDust(
+                    player,
+                    hand.clone().add(0, -0.22 * i, 0),
+                    1,
+                    0.04
+            );
+        }
+    }
+
+    private Location getHandLocation(Player player) {
+        Location eye = player.getEyeLocation();
+        Vector dir = eye.getDirection().clone();
+
+        Vector right;
+
+        if (Math.abs(dir.getY()) > 0.9) {
+            // Смотрим почти вертикально — берём фиксированную "правую" ось.
+            right = new Vector(1, 0, 0);
+        } else {
+            right = new Vector(-dir.getZ(), 0, dir.getX());
+
+            if (right.lengthSquared() < 0.001) {
+                right = new Vector(1, 0, 0);
+            } else {
+                right.normalize();
+            }
+        }
+
+        // Немного вперёд, вправо и вниз от взгляда = область правой руки/меча.
+        return eye.clone()
+                .add(dir.clone().multiply(0.55))
+                .add(right.clone().multiply(0.5))
+                .add(0, -0.45, 0);
+    }
+
+    private void spawnDust(
+            Player player,
+            Location center,
+            int count,
+            double spread
+    ) {
         for (int i = 0; i < count; i++) {
-            double x = (random.nextDouble() - 0.5) * 0.22;
-            double y = random.nextDouble() * 0.32;
-            double z = (random.nextDouble() - 0.5) * 0.22;
-
-            Vector position = locationData.position.clone()
-                    .add(locationData.right.clone().multiply(x))
-                    .add(new Vector(0, y, 0))
-                    .add(locationData.forward.clone().multiply(z));
+            double x = (random.nextDouble() - 0.5) * spread;
+            double y = (random.nextDouble() - 0.5) * spread;
+            double z = (random.nextDouble() - 0.5) * spread;
 
             player.getWorld().spawnParticle(
                     Particle.DUST,
-                    position.getX(),
-                    position.getY(),
-                    position.getZ(),
+                    center.getX() + x,
+                    center.getY() + y,
+                    center.getZ() + z,
                     1,
                     0,
                     0,
@@ -245,52 +264,7 @@ public class FlaskListener implements Listener {
                     0,
                     poisonDust
             );
-
-            // Маленькая "осевшая" частица ниже меча.
-            if (random.nextDouble() < 0.35) {
-                double fall = 0.10 + random.nextDouble() * 0.18;
-
-              Vector falling = position.clone()
-        .add(new Vector(
-                (random.nextDouble() - 0.5) * 0.08,
-                -fall,
-                (random.nextDouble() - 0.5) * 0.08
-        ));
-
-                player.getWorld().spawnParticle(
-                        Particle.DUST,
-                        falling.getX(),
-                        falling.getY(),
-                        falling.getZ(),
-                        1,
-                        0,
-                        0,
-                        0,
-                        0,
-                        poisonDust
-                );
-            }
         }
-    }
-
-    private LocationData getSwordArea(Player player) {
-        Vector forward = player.getLocation().getDirection().setY(0);
-
-        if (forward.lengthSquared() < 0.001) {
-            forward = new Vector(0, 0, 1);
-        } else {
-            forward.normalize();
-        }
-
-        Vector right = new Vector(-forward.getZ(), 0, forward.getX()).normalize();
-
-        // Приближённое положение правой руки/меча.
-        Vector position = player.getLocation().toVector()
-                .add(new Vector(0, 1.05, 0))
-                .add(right.clone().multiply(0.38))
-                .add(forward.clone().multiply(0.22));
-
-        return new LocationData(position, forward, right);
     }
 
     public ItemStack createWaterFlask() {
@@ -372,6 +346,13 @@ public class FlaskListener implements Listener {
         }
 
         Player player = event.getPlayer();
+
+        // Флакон нельзя пить: если он в основной руке — отменяем глоток.
+        if (isFlask(player.getInventory().getItemInMainHand())) {
+            event.setCancelled(true);
+            return;
+        }
+
         ItemStack offHand = player.getInventory().getItemInOffHand();
 
         if (!isFlask(offHand)) {
@@ -404,10 +385,11 @@ public class FlaskListener implements Listener {
             removePoison(mainHand);
             consumeFlask(player);
 
+            // Звук разбивания бутылочки при нанесении на оружие.
             player.getWorld().playSound(
                     player.getLocation(),
-                    Sound.ENTITY_GENERIC_DRINK,
-                    0.7f,
+                    Sound.ENTITY_SPLASH_POTION_BREAK,
+                    1.0f,
                     1.0f
             );
 
@@ -432,10 +414,11 @@ public class FlaskListener implements Listener {
             applyPoison(mainHand);
             consumeFlask(player);
 
+            // Звук разбивания бутылочки при нанесении на оружие.
             player.getWorld().playSound(
                     player.getLocation(),
-                    Sound.ENTITY_EXPERIENCE_ORB_PICKUP,
-                    0.7f,
+                    Sound.ENTITY_SPLASH_POTION_BREAK,
+                    1.0f,
                     1.0f
             );
 
@@ -462,6 +445,14 @@ public class FlaskListener implements Listener {
             player.getInventory().setItemInOffHand(null);
         } else {
             flask.setAmount(flask.getAmount() - 1);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onItemConsume(PlayerItemConsumeEvent event) {
+        // Флакон нельзя пить — блокируем само поедание.
+        if (isFlask(event.getItem())) {
+            event.setCancelled(true);
         }
     }
 
@@ -511,18 +502,6 @@ public class FlaskListener implements Listener {
 
         if (instance == this) {
             instance = null;
-        }
-    }
-
-    private static class LocationData {
-        private final Vector position;
-        private final Vector forward;
-        private final Vector right;
-
-        private LocationData(Vector position, Vector forward, Vector right) {
-            this.position = position;
-            this.forward = forward;
-            this.right = right;
         }
     }
 }

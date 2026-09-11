@@ -54,19 +54,18 @@ public class DiceRollListener implements Listener, CommandExecutor {
 
     public DiceRollListener(JavaPlugin plugin) {
         this.plugin = plugin;
-        // Если AdaptationPlugin запущен в том же плагине
-        if (plugin instanceof AdaptationPlugin) {
-            this.adaptationPlugin = (AdaptationPlugin) plugin;
-        } else {
-            // Если классы в одном плагине, но plugin - это JavaPlugin
-            this.adaptationPlugin = (AdaptationPlugin) plugin;
-        }
+        // Один и тот же плагин, поэтому безопасно сохраняем ссылку.
+        // Если вдруг класс используется отдельно — просто не ломаем адаптацию.
+        this.adaptationPlugin =
+                plugin instanceof AdaptationPlugin
+                        ? (AdaptationPlugin) plugin
+                        : null;
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>, /d20 cheat <1-20> или /d20 enchant <ID>");
+            sender.sendMessage(ChatColor.RED + "Использование: /d20 give <игрок>, /d20 cheat <1…20> или /d20 enchant <ID>");
             return true;
         }
 
@@ -90,7 +89,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 if (activeCheaters.containsKey(uuid)) {
                     activeCheaters.remove(uuid);
                     cheatCooldowns.remove(uuid);
-                    player.sendMessage(ChatColor.RED + "Чит-режим отключен. Роллы снова случайны.");
+                    player.sendMessage(ChatColor.RED + "Режим фиксированного броска отключен. Роллы снова случайны.");
                 } else {
                     player.sendMessage(ChatColor.RED + "Укажите число! Пример: /d20 cheat 20");
                 }
@@ -105,7 +104,7 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
                 activeCheaters.put(uuid, targetRoll);
                 cheatCooldowns.put(uuid, System.currentTimeMillis());
-                player.sendMessage(ChatColor.GREEN + "Чит-режим активирован! Следующий удар гарантированно выдаст: §e§l[" + targetRoll + "]");
+                player.sendMessage(ChatColor.GREEN + "Режим фиксированного броска активирован! Следующий удар гарантированно выдаст: §e§l[" + targetRoll + "]");
             } catch (NumberFormatException e) {
                 player.sendMessage(ChatColor.RED + "Некорректное число! Пример: /d20 cheat 7");
             }
@@ -569,18 +568,21 @@ public class DiceRollListener implements Listener, CommandExecutor {
                 }
             }, 1L);
 
-            finalPlugin.getServer().getScheduler().runTaskTimer(finalPlugin, new Runnable() {
+            // ВАЖНО: отменяем ТОЛЬКО этот таймер, а не все задачи плагина.
+            // Раньше здесь был Bukkit.getScheduler().cancelTasks(...), который
+            // гасил вообще все таймеры (адаптацию, откат, отравление, нотные блоки).
+            new BukkitRunnable() {
                 int timer = 30;
                 @Override
                 public void run() {
                     if (finalVictim.isDead() || timer <= 0 || finalVictim.isOnGround()) {
-                        Bukkit.getScheduler().cancelTasks(finalPlugin);
+                        this.cancel();
                         return;
                     }
                     finalVictim.getWorld().spawnParticle(Particle.EXPLOSION, finalVictim.getLocation().add(0, 0.8, 0), 2, 0.1, 0.1, 0.1, 0.01);
                     timer -= 2;
                 }
-            }, 2L, 2L);
+            }.runTaskTimer(finalPlugin, 2L, 2L);
 
             attacker.sendMessage("§e§lБОЖЕСТВЕННОЕ ВЕЗЕНИЕ! Мощная взрывная волна откинула врага, Скорость II и х4.0 урон!");
 

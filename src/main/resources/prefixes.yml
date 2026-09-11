@@ -1,0 +1,63 @@
+# Префиксы профилей. Рабочий файл лежит в папке плагина:
+#   plugins/f8-plugin/prefixes.yml
+# (при первом запуске он копируется из jar; изменения применяются командой
+#   /profile prefix reload  — перезапуск не нужен).
+#
+# Префикс — это КАРТИНКА (иконка) перед ником. Ник всегда белый и не меняется.
+# Иконка видна в чате, в списке игроков (tab), над головой, в профиле и в кейсах.
+# На клиенте должен быть установлен ресурспак f8resurs (plugins/f8-plugin/f8resurs-resourcepack.zip):
+# без него иконка перед ником отображается как «сломанные» символы.
+#   id    — техническое имя записи (сохраняется в данных игрока);
+#   name  — название префикса (в меню и в кейсе);
+#   color — цвет названия и салюта префикса (сам ник не красится);
+#   file  — иконка из ресурспака: items/<file>.json и textures/item/<file>.png
+#           (комплект pref1.png … pref10.png; свои картинки кладите рядом и меняйте file).
+#
+# НОМЕР префикса = порядок записей здесь: первая запись — №1, вторая — №2 и т.д.
+# По номеру префикс выдают и забирают администраторы (all — сразу все префиксы):
+#   /profile prefix give|take <ник> <номер|all>
+#   /profile prefix list <ник>
+# Кейсы выдаёт: /profile case prefix give <ник>
+# Иконка перед ником и в меню — это картинка из поля file: файлу pref1 отвечает глиф
+# pref1.png, pref2 — pref2.png и т.д. (комплект pref1…pref10; свои файлы — без глифа).
+prefixes:
+  pref1:
+    name: 'Морозный'
+    color: '#8FE3F5'
+    file: pref1
+  pref2:
+    name: 'Закалённый'
+    color: '#B9C3CE'
+    file: pref2
+  pref3:
+    name: 'Звездочёт'
+    color: '#C0A6FF'
+    file: pref3
+  pref4:
+    name: 'Полярный'
+    color: '#6FB1FF'
+    file: pref4
+  pref5:
+    name: 'Зимний мастер'
+    color: '#E6B94B'
+    file: pref5
+  pref6:
+    name: 'Ледяной'
+    color: '#A9E2F2'
+    file: pref6
+  pref7:
+    name: 'Северный'
+    color: '#7BE0A0'
+    file: pref7
+  pref8:
+    name: 'Неуловимый'
+    color: '#C9CDD4'
+    file: pref8
+  pref9:
+    name: 'Аврора'
+    color: '#7FF0D2'
+    file: pref9
+  pref10:
+    name: 'Легенда'
+    color: '#FFB347'
+    file: pref10

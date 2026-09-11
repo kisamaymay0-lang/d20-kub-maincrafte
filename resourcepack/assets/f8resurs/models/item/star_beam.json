@@ -1,0 +1,44 @@
+{
+  "ambientocclusion": false,
+  "gui_light": "front",
+  "textures": {
+    "beam": "f8resurs:item/star_beam",
+    "particle": "f8resurs:item/star_beam"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        8
+      ],
+      "to": [
+        16,
+        16,
+        8
+      ],
+      "shade": false,
+      "light_emission": 15,
+      "faces": {
+        "north": {
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ],
+          "texture": "#beam"
+        },
+        "south": {
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ],
+          "texture": "#beam"
+        }
+      }
+    }
+  ]
+}

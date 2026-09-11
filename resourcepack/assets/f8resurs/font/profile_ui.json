@@ -1,0 +1,139 @@
+{
+  "providers": [
+    {
+      "type": "bitmap",
+      "file": "f8resurs:gui/profile_like.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue101"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:gui/profile_dislike.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue102"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/medal_copper.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue103"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/medal_silver.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue104"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/medal_gold.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue105"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/pref1.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue106"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/pref2.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue107"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/pref3.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue108"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/pref4.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue109"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/pref5.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue10a"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/pref6.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue10b"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/pref7.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue10c"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/pref8.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue10d"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/pref9.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue10e"
+      ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:item/pref10.png",
+      "height": 8,
+      "ascent": 7,
+      "chars": [
+        "\ue10f"
+      ]
+    }
+  ]
+}
