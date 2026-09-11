@@ -52,7 +52,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
-import java.util.HashSet;
+
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -99,6 +99,8 @@ public class AncientJug implements Listener {
     private static final Set<String> DESERT_BIOMES = Set.of("minecraft:desert");
     /** Длительность питья, как у ванильных зелий. */
     private static final int DRINK_TICKS = 32;
+    /** Как часто (в тиках) реестр кувшинов пересобирается целиком. */
+    private static final int PIN_RESCAN_TICKS = 200;
 
     private final JavaPlugin plugin;
     private final NamespacedKey jugKey;
@@ -111,8 +113,9 @@ public class AncientJug implements Listener {
     private final File jugsFile;
     private final YamlConfiguration jugsData;
     private final BatchedYamlFile storage;
-    /** Ключи блоков, которым на следующий тик вернут нату/инструмент кувшина. */
-    private final Set<String> pendingRestore = new HashSet<>();
+    /** Активные кувшины: ключ записи → блок и его каноническое состояние. */
+    private final Map<String, JugPin> pins = new HashMap<>();
+    private int guardTicks = PIN_RESCAN_TICKS;
     /** Кто сейчас пьёт из кувшина. */
     private final Map<UUID, DrinkSession> drinking = new HashMap<>();
 
@@ -131,6 +134,10 @@ public class AncientJug implements Listener {
         // Раз в секунду — замедление/пониженный прыжок/износ элитр, каждый тик — утягивание вниз на элитрах.
         Bukkit.getScheduler().runTaskTimer(plugin, this::applyCarryEffects, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(plugin, this::applyFlightPull, 1L, 1L);
+        // Каждый тик: пара «нота + инструмент» у кувшина должна быть строго
+        // канонической. Ваниль пересчитывает нот-блок от соседей, а ресурспак
+        // выбирает модель именно по этой паре — любой сдвиг рисует чужой блок.
+        Bukkit.getScheduler().runTaskTimer(plugin, this::guardTick, 1L, 1L);
         // Через пару секунд после запуска приводим в порядок кувшины в тех
         // чанках, что уже загружены (остальные проверятся при загрузке чанка).
         Bukkit.getScheduler().runTaskLater(plugin, this::restoreLoadedJugs, 60L);
@@ -328,24 +335,106 @@ public class AncientJug implements Listener {
         }
     }
 
+    // ===== СОСТОЯНИЕ БЛОКА: ЗАЩИТА ОТ ВАНИЛЬНОГО ПЕРЕСЧЁТА =====
+    // Ресурспак выбирает модель по паре «нота + инструмент», поэтому у кувшина
+    // она обязана совпадать с содержимым: пустой — нота 24 + флейта, с
+    // жидкостью — нота 1..9 (номер ноты = количество, компаратор) + банджо.
+    // Ваниль же пересчитывает нот-блок от соседних блоков, поэтому состояние
+    // держим сами: сразу в событии и контрольным проходом каждый тик.
+
+    /** Блок кувшина и его каноническая пара «нота + инструмент». */
+    private static final class JugPin {
+        private final Location location;
+        private final int note;
+        private final Instrument instrument;
+
+        JugPin(Location location, int note, Instrument instrument) {
+            this.location = location.clone();
+            this.note = note;
+            this.instrument = instrument;
+        }
+
+        /** Возвращает блоку каноническую пару; в незагруженном чанке молчит. */
+        void enforce() {
+            World world = location.getWorld();
+            if (world == null) return;
+            if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) return;
+            Block block = world.getBlockAt(location);
+            if (block.getType() != Material.NOTE_BLOCK) return;
+            if (!(block.getBlockData() instanceof NoteBlock data)) return;
+            if (data.getNote().getId() == note && data.getInstrument() == instrument) return;
+            data.setNote(new Note(note));
+            data.setInstrument(instrument);
+            block.setBlockData(data, false);
+        }
+    }
+
+    /** Номер ноты для содержимого кувшина: 1..9 = бутылочки, пустой = 24. */
+    private static int noteOf(Contents contents) {
+        return contents.count > 0 ? contents.count : MARKER_NOTE;
+    }
+
+    private static Instrument instrumentOf(Contents contents) {
+        return contents.count > 0 ? FILLED_INSTRUMENT : EMPTY_INSTRUMENT;
+    }
+
+    /** Запоминает кувшин по ключу записи; мир ещё не загружен — пропускаем. */
+    private void pin(String key, Contents contents) {
+        Location location = locationOf(key);
+        if (location == null || location.getWorld() == null) return;
+        pins.put(key, new JugPin(location, noteOf(contents), instrumentOf(contents)));
+    }
+
+    /** Перечитать запись из jugs.yml и сразу вернуть блоку канонический вид. */
+    private void refresh(String key) {
+        Contents contents = readContents(key);
+        pin(key, contents);
+        JugPin pin = pins.get(key);
+        if (pin != null) pin.enforce();
+    }
+
+    private void rebuildPins() {
+        pins.clear();
+        for (String key : jugsData.getKeys(false)) pin(key, readContents(key));
+    }
+
+    /** Раз в тик: у каждого активного кувшина состояние строго каноническое. */
+    private void guardTick() {
+        if (++guardTicks >= PIN_RESCAN_TICKS) {
+            guardTicks = 0;
+            rebuildPins();
+        }
+        for (JugPin pin : pins.values()) pin.enforce();
+    }
+
+    /** Восстановить блок, если это записанный кувшин; остальное не трогаем. */
+    private void enforceAt(Block block) {
+        JugPin pin = pins.get(blockKey(block));
+        if (pin != null) pin.enforce();
+    }
+
+    private void enforceAround(Block changed) {
+        enforceAt(changed);
+        enforceAt(changed.getRelative(0, 1, 0));
+        enforceAt(changed.getRelative(0, -1, 0));
+        enforceAt(changed.getRelative(1, 0, 0));
+        enforceAt(changed.getRelative(-1, 0, 0));
+        enforceAt(changed.getRelative(0, 0, 1));
+        enforceAt(changed.getRelative(0, 0, -1));
+    }
+
     /** Возвращает кувшинам состояние в уже загруженных чанках (после перезапуска). */
     private void restoreLoadedJugs() {
-        for (String key : jugsData.getKeys(false)) {
-            Location location = locationOf(key);
-            if (location == null) continue;
-            World world = location.getWorld();
-            if (world == null) continue;
-            if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) continue;
-            restoreIfDrifted(location, key);
-        }
+        rebuildPins();
+        for (JugPin pin : pins.values()) pin.enforce();
     }
 
     /**
      * Кувшин — это нот-блок, поставленный из предмета кувшина. Признак — запись
      * в jugs.yml: её создаёт только установка кувшина, поэтому состояние блока
      * (нота/инструмент) не обязательное условие. Так блок остаётся кувшином,
-     * даже если ваниль успела пересчитать ноту от соседних блоков, а
-     * {@link #restoreIfDrifted} вернёт состояние при первой возможности.
+     * даже если ваниль успела пересчитать ноту от соседних блоков: каноническая
+     * пара возвращается {@link #guardTick()} и событиями защиты.
      */
     private boolean isJugBlock(Block block) {
         return block != null && block.getType() == Material.NOTE_BLOCK
@@ -361,22 +450,42 @@ public class AncientJug implements Listener {
         Contents contents = contentsOf(hand);
 
         NoteBlock data = (NoteBlock) block.getBlockData();
-        data.setNote(new Note(contents.count > 0 ? contents.count : MARKER_NOTE));
-        data.setInstrument(contents.count > 0 ? FILLED_INSTRUMENT : EMPTY_INSTRUMENT);
+        data.setNote(new Note(noteOf(contents)));
+        data.setInstrument(instrumentOf(contents));
         data.setPowered(false);
         block.setBlockData(data, false);
 
         writeContents(blockKey(block), contents);
         storage.markDirty();
+        refresh(blockKey(block));
+    }
+
+    /**
+     * Кувшин, поставленный до 10.2: у пустого кувшина тогда не было записи в
+     * jugs.yml, и признаком остаётся только состояние (нота 24 + флейта).
+     * Ванильная флейта бывает лишь над глиной, поэтому без явного жеста
+     * (liquid) блок над глиной не «усыновляем» — там мог быть обычный
+     * нот-блок, который игрок настраивает.
+     */
+    private boolean isLegacyJug(Block block, boolean liquid) {
+        if (block == null || block.getType() != Material.NOTE_BLOCK) return false;
+        if (jugsData.contains(blockKey(block))) return false;
+        if (!(block.getBlockData() instanceof NoteBlock data)) return false;
+        if (data.getNote().getId() != MARKER_NOTE || data.getInstrument() != EMPTY_INSTRUMENT) return false;
+        return liquid || block.getRelative(0, -1, 0).getType() != Material.CLAY;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
-        if (!isJugBlock(block)) return;
         String key = blockKey(block);
+        if (!isJugBlock(block)) {
+            if (!isLegacyJug(block, false)) return;
+            writeContents(key, new Contents(null, null, null, 0));
+        }
         Contents contents = readContents(key);
         jugsData.set(key, null);
+        pins.remove(key);
         storage.markDirty();
         // Обычный нот-блок не выпадает: вместо него — кувшин с содержимым.
         event.setDropItems(false);
@@ -421,63 +530,35 @@ public class AncientJug implements Listener {
             block.getWorld().dropItemNaturally(block.getLocation(),
                     create(contents.count, contents.kind, contents.potion, contents.custom));
             jugsData.set(key, null);
+            pins.remove(key);
             changed = true;
         }
         if (changed) storage.markDirty();
     }
 
     // ===== ЗАЩИТА БЛОКСТЕЙТА КУВШИНА =====
-    // Нот-блок пересчитывает инструмент от соседних блоков; ваниль может
-    // «переписать» ноту/инструмент кувшина. Любое такое изменение
-    // откатывается на следующий тик к сохранённому состоянию кувшина.
+    // Нот-блок пересчитывает ноту/инструмент от соседних блоков, а ресурспак
+    // выбирает модель именно по этой паре. Поэтому сдвиг возвращается назад
+    // в том же тике: до отправки блок-апдейта клиент чужую модель не увидит.
+    // Контрольный проход каждый тик — страховка от сдвига без события.
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBlockPhysics(BlockPhysicsEvent event) {
-        scheduleRestore(event.getBlock());
+        Block block = event.getBlock();
+        if (!isJugBlock(block)) return;
+        // Отменяем ванильный пересчёт нот-блока: кувшину чужой инструмент не нужен.
+        event.setCancelled(true);
+        enforceAt(block);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onNeighborPlace(BlockPlaceEvent event) {
-        scheduleRestoreAround(event.getBlockPlaced());
+        enforceAround(event.getBlockPlaced());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onNeighborBreak(BlockBreakEvent event) {
-        scheduleRestoreAround(event.getBlock());
-    }
-
-    private void scheduleRestoreAround(Block changed) {
-        scheduleRestore(changed.getRelative(0, 1, 0));
-        scheduleRestore(changed.getRelative(0, -1, 0));
-        scheduleRestore(changed.getRelative(1, 0, 0));
-        scheduleRestore(changed.getRelative(-1, 0, 0));
-        scheduleRestore(changed.getRelative(0, 0, 1));
-        scheduleRestore(changed.getRelative(0, 0, -1));
-    }
-
-    private void scheduleRestore(Block block) {
-        if (block == null || block.getType() != Material.NOTE_BLOCK) return;
-        String key = blockKey(block);
-        if (!jugsData.contains(key)) return;
-        if (!pendingRestore.add(key)) return;
-        Location location = block.getLocation();
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            pendingRestore.remove(key);
-            restoreIfDrifted(location, key);
-        });
-    }
-
-    private void restoreIfDrifted(Location location, String key) {
-        if (!jugsData.contains(key)) return;
-        Block block = location.getBlock();
-        if (block.getType() != Material.NOTE_BLOCK || !(block.getBlockData() instanceof NoteBlock data)) return;
-        Contents contents = readContents(key);
-        int note = contents.count > 0 ? contents.count : MARKER_NOTE;
-        Instrument instrument = contents.count > 0 ? FILLED_INSTRUMENT : EMPTY_INSTRUMENT;
-        if (data.getNote().getId() == note && data.getInstrument() == instrument) return;
-        data.setNote(new Note(note));
-        data.setInstrument(instrument);
-        block.setBlockData(data, false);
+        enforceAround(event.getBlock());
     }
 
     /**
@@ -496,7 +577,7 @@ public class AncientJug implements Listener {
             Location location = locationOf(key);
             if (location == null) continue;
             if ((location.getBlockX() >> 4) != chunkX || (location.getBlockZ() >> 4) != chunkZ) continue;
-            restoreIfDrifted(location, key);
+            refresh(key);
         }
     }
 
@@ -544,12 +625,27 @@ public class AncientJug implements Listener {
         return null;
     }
 
+    /** В руке, которой кликнули, лежит жидкость для кувшина. */
+    private boolean carriesLiquid(Player player, EquipmentSlot hand) {
+        ItemStack item = hand == EquipmentSlot.OFF_HAND
+                ? player.getInventory().getItemInOffHand()
+                : player.getInventory().getItemInMainHand();
+        return classifyLiquid(item) != null;
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBlockInteract(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         Block block = event.getClickedBlock();
-        if (!isJugBlock(block)) return;
+        if (block == null || block.getType() != Material.NOTE_BLOCK) return;
         Player player = event.getPlayer();
+        if (!isJugBlock(block)) {
+            // Кувшин старого образца узнаём по состоянию и заводим ему запись.
+            if (!isLegacyJug(block, carriesLiquid(player, event.getHand()))) return;
+            writeContents(blockKey(block), new Contents(null, null, null, 0));
+            storage.markDirty();
+            refresh(blockKey(block));
+        }
         if (ContainerInteraction.bypassMenu(player.isSneaking(),
                 player.getInventory().getItemInMainHand().getType().isAir(),
                 player.getInventory().getItemInOffHand().getType().isAir())) {
@@ -587,6 +683,7 @@ public class AncientJug implements Listener {
             data.setNote(new Note(newCount));
             block.setBlockData(data, false);
         }
+        refresh(key);
 
         if (liquid.returnsBottle) {
             // Бутылочка возвращается пустой.
