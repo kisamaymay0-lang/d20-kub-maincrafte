@@ -91,7 +91,9 @@ class SkyMotionTest {
         // depth-fill отодвигает сферу к краю видимой дальности: звёзды прячутся
         // за деревьями и облаками, а не наоборот.
         assertTrue(SkyOrbit.depthScale(80, 16, 16, 8, 0.95) > SkyOrbit.depthScale(80, 16, 16, 8, 0.7));
-        assertEquals(1.0f, SkyOrbit.depthScale(80, 16, 16, 8, 2.0));
+        // fill больше 1.0 обрезается до 1.0, дальше сфера ограничена множителем:
+        // 16 чанков * 16 блоков / 80 = 3.2.
+        assertEquals(3.2f, SkyOrbit.depthScale(80, 16, 16, 8, 2.0), 0.0001f);
     }
     @Test
     void positiveOrbitSpeedNowMovesRightAndKeepsTargetingAligned() {
