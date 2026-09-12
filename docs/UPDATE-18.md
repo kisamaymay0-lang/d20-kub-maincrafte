@@ -35,9 +35,9 @@
 
 ```yaml
   special-items:
-    # Все пустынные биомы: пустыня и все пустоши.
-    "*:desert": ANCIENT_JUG
-    "*:badlands*": ANCIENT_JUG
+    # Все пустынные биомы: пустыня и все пустоши (badlands).
+    "*:*desert*": ANCIENT_JUG
+    "*:*badlands*": ANCIENT_JUG
     # Все зимние и ледяные: снежные, мёрзлые, ледяные шипы, роща, пики.
     "*:snowy*": ICY_RIME
     "*:*frozen*": ICY_RIME

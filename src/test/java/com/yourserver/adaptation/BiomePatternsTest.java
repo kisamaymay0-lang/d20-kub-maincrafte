@@ -17,7 +17,7 @@ class BiomePatternsTest {
             "minecraft:eroded_badlands", "minecraft:wooded_badlands"
     };
     /** Строки из config.yml → fishing.special-items. */
-    private static final String[] DESERT_PATTERNS = {"*:desert", "*:badlands*"};
+    private static final String[] DESERT_PATTERNS = {"*:*desert*", "*:*badlands*"};
     private static final String[] COLD_PATTERNS = {
             "*:snowy*", "*:*frozen*", "*:ice_spikes", "*:grove", "*:jagged_peaks"
     };
@@ -66,9 +66,11 @@ class BiomePatternsTest {
     void modNamespacesWork() {
         assertTrue(BiomePatterns.matches("*:snowy*", "minecraft:snowy_taiga"));
         assertTrue(BiomePatterns.matches("*:snowy*", "biomesoplenty:snowy_coniferous_forest"));
-        // «*:desert» — это ровно пустыня, а не «desert_oasis»: для таких биомов
-        // в конфиг добавляется своя строка.
-        assertFalse(BiomePatterns.matches("*:desert", "terralith:desert_oasis"));
-        assertTrue(BiomePatterns.matches("*:desert*", "terralith:desert_oasis"));
+        // «*:*desert*» ловит и обычную пустыню, и пустынные озёра модов,
+        // а «*:*badlands*» — все три вида пустошей.
+        assertTrue(BiomePatterns.matches("*:*desert*", "terralith:desert_oasis"));
+        assertTrue(BiomePatterns.matches("*:*badlands*", "minecraft:eroded_badlands"));
+        assertTrue(BiomePatterns.matches("*:*badlands*", "minecraft:wooded_badlands"));
+        assertFalse(BiomePatterns.matches("*:*badlands*", "minecraft:desert"));
     }
 }

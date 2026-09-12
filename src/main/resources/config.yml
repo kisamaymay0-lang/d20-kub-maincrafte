@@ -137,9 +137,10 @@ fishing:
   # Точное совпадение важнее шаблона; шаблоны проверяются по порядку сверху вниз.
   # Если биома в списке нет, миниигра в нём не запускается.
   special-items:
-    # Все пустынные биомы: пустыня и все пустоши (badlands).
-    "*:desert": ANCIENT_JUG
-    "*:badlands*": ANCIENT_JUG
+    # Все пустынные биомы: пустыня (в т.ч. пустынные озёра модов) и все
+    # пустоши — badlands, eroded_badlands, wooded_badlands.
+    "*:*desert*": ANCIENT_JUG
+    "*:*badlands*": ANCIENT_JUG
     # Все зимние и ледяные биомы: снежные, мёрзлые, ледяные шипы, роща, пики.
     "*:snowy*": ICY_RIME
     "*:*frozen*": ICY_RIME
