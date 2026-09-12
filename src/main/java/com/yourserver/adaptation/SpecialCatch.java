@@ -279,9 +279,8 @@ final class SpecialCatch implements Listener {
             if (hunt.ticks % Math.max(1, particleInterval()) == 0) particles(hunt);
             if (hunt.ticks % 4 == 0) {
                 int left = Math.max(1, (hunt.totalTicks - hunt.ticks) / 20);
-                player.sendActionBar("§6Поймай его! Осталось: §e" + left
-                        + "§6, удары §e" + Math.min(hunt.hits, hitsRequired()) + "/" + hitsRequired()
-                        + "§6, промахи §c" + hunt.misses + "/" + missesAllowed());
+                // 10.12: в полоске — только таймер, как раньше (ни ударов, ни промахов).
+                player.sendActionBar("§6Поймай его! Осталось: §e" + left);
             }
         }
     }
@@ -375,7 +374,7 @@ final class SpecialCatch implements Listener {
         else miss(hunt);
     }
 
-    /** Промах: неприятный громкий звук и счётчик. Много промахов — предмет уходит. */
+    /** Промах: неприятный громкий звук. Много промахов — предмет уходит. */
     private void miss(Hunt hunt) {
         Player player = hunt.player;
         World world = player.getWorld();
@@ -390,7 +389,7 @@ final class SpecialCatch implements Listener {
             cancel(hunt, "§cПромахов слишком много — предмет сорвался и ушел на дно...");
             return;
         }
-        player.sendActionBar("§cПромах! Осталось промахов: §e" + (missesAllowed() - hunt.misses));
+        player.sendActionBar("§cПромах!");
     }
 
     /** Игрок смотрит на предмет и стоит достаточно близко: удар засчитан. */
