@@ -26,9 +26,7 @@ import org.bukkit.block.data.Ageable;
 import org.bukkit.block.data.type.NoteBlock;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Item;
-import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -44,11 +42,9 @@ import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.block.NotePlayEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
-import org.bukkit.event.player.PlayerFishEvent;
 import org.bukkit.event.player.PlayerHarvestBlockEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
@@ -59,10 +55,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.potion.PotionType;
-import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -74,7 +67,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Древний кувшин — особый предмет рыбалки в пустынных биомах
@@ -138,12 +130,6 @@ public class AncientJug implements Listener {
     private static final float DRINK_SECONDS = 1.6f;
     /** Звук питья: как у ванильных бутылочек и зелий. */
     private static final Key DRINK_SOUND = Key.key("entity.generic.drink");
-    /** Масштаб кувшина, который висит на спине надетого нагрудника. */
-    private static final float WORN_JUG_SCALE = 0.65f;
-    /** Насколько кувшин на спине смещён назад от центра игрока (в блоках). */
-    private static final double WORN_JUG_BACK = 0.34D;
-    /** Высота кувшина на спине над ногами игрока (в блоках). */
-    private static final double WORN_JUG_HEIGHT = 1.02D;
     /** Как часто (в тиках) реестр кувшинов пересобирается целиком. */
     private static final int PIN_RESCAN_TICKS = 200;
     /** Сколько длится эффект зелья со съеденного пропитанного урожая. */
@@ -169,8 +155,6 @@ public class AncientJug implements Listener {
     private final NamespacedKey potionKey;
     private final NamespacedKey countKey;
     private final NamespacedKey customKey;
-    private final NamespacedKey castLuck;
-    private final NamespacedKey rolled;
     private final NamespacedKey infuseKey;
     private final File jugsFile;
     private final YamlConfiguration jugsData;
@@ -179,8 +163,6 @@ public class AncientJug implements Listener {
     private final Map<String, JugPin> pins = new HashMap<>();
     private int guardTicks = PIN_RESCAN_TICKS;
     private int infusionTicks = INFUSION_SWEEP_TICKS;
-    /** Витрина кувшина на спине у тех, кто надел его в слот нагрудника. */
-    private final Map<UUID, ItemDisplay> wornJugs = new HashMap<>();
     /** Пропитанные зельем растения: ключ блока → зелье (живёт в jugs.yml). */
     private final Map<String, String> infusions = new HashMap<>();
 
@@ -191,8 +173,6 @@ public class AncientJug implements Listener {
         potionKey = new NamespacedKey(plugin, "jug_potion");
         countKey = new NamespacedKey(plugin, "jug_count");
         customKey = new NamespacedKey(plugin, "jug_custom");
-        castLuck = new NamespacedKey(plugin, "jug_cast_luck");
-        rolled = new NamespacedKey(plugin, "jug_catch_rolled");
         infuseKey = new NamespacedKey(plugin, "potion_infused");
         jugsFile = new File(plugin.getDataFolder(), "jugs.yml");
         jugsData = YamlConfiguration.loadConfiguration(jugsFile);
@@ -205,8 +185,6 @@ public class AncientJug implements Listener {
         // канонической. Ваниль пересчитывает нот-блок от соседей, а ресурспак
         // выбирает модель именно по этой паре — любой сдвиг рисует чужой блок.
         Bukkit.getScheduler().runTaskTimer(plugin, this::guardTick, 1L, 1L);
-        // Каждый тик: кувшин, надетый в нагрудник, висит на спине игрока.
-        Bukkit.getScheduler().runTaskTimer(plugin, this::syncWornJugs, 1L, 1L);
         // Через пару секунд после запуска приводим в порядок кувшины в тех
         // чанках, что уже загружены (остальные проверятся при загрузке чанка).
         Bukkit.getScheduler().runTaskLater(plugin, this::restoreLoadedJugs, 60L);
@@ -275,10 +253,11 @@ public class AncientJug implements Listener {
         meta.getPersistentDataContainer().set(jugKey, PersistentDataType.BYTE, (byte) 1);
         item.setItemMeta(meta);
         try {
-            // Кувшин можно надеть в слот нагрудника, но только положив его туда
-            // руками: swappable = false убирает ванильное «надевание по ПКМ»,
-            // которое перехватывало жест выливания и питья.
-            item.setData(DataComponentTypes.EQUIPPABLE, Equippable.equippable(EquipmentSlot.CHEST)
+            // Кувшин надевается на голову, но только вручную, перетаскиванием в слот
+            // шлема: swappable = false убирает ванильное «надевание по ПКМ», которое
+            // перехватывало жест выливания и питья. Без asset_id ваниль рисует на
+            // голове сам предмет, поэтому кувшин видно как настоящую шапку.
+            item.setData(DataComponentTypes.EQUIPPABLE, Equippable.equippable(EquipmentSlot.HEAD)
                     .swappable(false)
                     .dispensable(false)
                     .build());
@@ -369,27 +348,6 @@ public class AncientJug implements Listener {
     private static PotionType parseType(String name) {
         if (name == null || name.isEmpty()) return null;
         try { return PotionType.valueOf(name); } catch (IllegalArgumentException ex) { return null; }
-    }
-
-    // ===== РЫБАЛКА В ПУСТЫНЕ (шансы как у изморози) =====
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onFish(PlayerFishEvent event) {
-        var hook = event.getHook();
-        if (event.getState() == PlayerFishEvent.State.FISHING) {
-            ItemStack rod = event.getHand() == EquipmentSlot.OFF_HAND ? event.getPlayer().getInventory().getItemInOffHand()
-                    : event.getPlayer().getInventory().getItemInMainHand();
-            if (event.getHand() == null && rod.getType() != Material.FISHING_ROD) rod = event.getPlayer().getInventory().getItemInOffHand();
-            hook.getPersistentDataContainer().set(castLuck, PersistentDataType.INTEGER, rod.getEnchantmentLevel(Enchantment.LUCK_OF_THE_SEA));
-            return;
-        }
-        if (event.getState() != PlayerFishEvent.State.CAUGHT_FISH || !(event.getCaught() instanceof Item caught)) return;
-        if (hook.getPersistentDataContainer().has(rolled, PersistentDataType.BYTE)) return;
-        hook.getPersistentDataContainer().set(rolled, PersistentDataType.BYTE, (byte) 1);
-        String biome = hook.getLocation().getBlock().getBiome().getKey().toString();
-        if (!DESERT_BIOMES.contains(biome)) return;
-        int luck = hook.getPersistentDataContainer().getOrDefault(castLuck, PersistentDataType.INTEGER, 0);
-        if (ThreadLocalRandom.current().nextDouble() < WinterRules.catchChance(luck)) caught.setItemStack(createEmpty());
     }
 
     // ===== ПОСТАВЛЕННЫЙ БЛОК =====
@@ -1288,11 +1246,6 @@ public class AncientJug implements Listener {
         player.sendActionBar("§cМолока меньше ведра — пить нечего. Нужно " + BUCKET_SLOTS + " порции.");
     }
 
-    @EventHandler
-    public void onQuit(PlayerQuitEvent event) {
-        removeWornDisplay(event.getPlayer().getUniqueId());
-    }
-
     private void finishDrink(Player player, ItemStack snapshot, EquipmentSlot hand) {
         ItemStack main = hand == EquipmentSlot.OFF_HAND
                 ? player.getInventory().getItemInOffHand()
@@ -1356,10 +1309,10 @@ public class AncientJug implements Listener {
         return isJug(offhand) && bottles(offhand) > 0;
     }
 
-    /** Наполненный кувшин надет в слот нагрудника: тогда вес не давит. */
+    /** Наполненный кувшин надет на голову: тогда вес не давит. */
     private boolean wearsFilledJug(Player player) {
-        ItemStack chest = player.getInventory().getChestplate();
-        return isJug(chest) && bottles(chest) > 0;
+        ItemStack head = player.getInventory().getHelmet();
+        return isJug(head) && bottles(head) > 0;
     }
 
     /**
@@ -1416,69 +1369,7 @@ public class AncientJug implements Listener {
         }
     }
 
-    // ===== КУВШИН НА СПИНЕ (надетый кувшин) =====
-    // Кувшин — обычный предмет, на модели игрока брони у него нет, поэтому рядом
-    // висит витрина-сущность (item display) с тем же предметом. Стоит она на
-    // спине: смещения ниже можно подкрутить, они в блоках.
-
-    /** Раз в тик: у кого кувшин в слоте нагрудника — тому витрину на спину. */
-    private void syncWornJugs() {
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            ItemStack chest = player.getInventory().getChestplate();
-            UUID id = player.getUniqueId();
-            if (!isJug(chest)) {
-                if (wornJugs.containsKey(id)) removeWornDisplay(id);
-                continue;
-            }
-            ItemDisplay display = wornJugs.get(id);
-            if (display == null || !display.isValid()) {
-                wornJugs.remove(id);
-                wornJugs.put(id, spawnWornDisplay(player, chest));
-                continue;
-            }
-            if (!chest.isSimilar(display.getItemStack())) display.setItemStack(chest.clone());
-            Location spot = backSpot(player);
-            display.teleport(spot);
-            display.setRotation(spot.getYaw(), 0f);
-        }
-    }
-
-    /** Витрина с кувшином: масштаб и поворот задаются преобразованием. */
-    private ItemDisplay spawnWornDisplay(Player player, ItemStack jug) {
-        return player.getWorld().spawn(backSpot(player), ItemDisplay.class, display -> {
-            display.setItemStack(jug.clone());
-            display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
-            display.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),
-                    new Vector3f(WORN_JUG_SCALE), new Quaternionf()));
-            display.setInterpolationDuration(0);
-            display.setTeleportDuration(1);
-            display.setShadowRadius(0f);
-            display.setShadowStrength(0f);
-            display.setPersistent(false);
-            display.setInvulnerable(true);
-            display.setGravity(false);
-            display.setSilent(true);
-        });
-    }
-
-    /** Точка на спине игрока: назад по взгляду и на высоту лопаток. */
-    private static Location backSpot(Player player) {
-        Location loc = player.getLocation();
-        double yaw = Math.toRadians(loc.getYaw());
-        return new Location(loc.getWorld(),
-                loc.getX() + Math.sin(yaw) * WORN_JUG_BACK,
-                loc.getY() + WORN_JUG_HEIGHT,
-                loc.getZ() - Math.cos(yaw) * WORN_JUG_BACK,
-                loc.getYaw(), 0f);
-    }
-
-    private void removeWornDisplay(UUID id) {
-        ItemDisplay display = wornJugs.remove(id);
-        if (display != null && display.isValid()) display.remove();
-    }
-
     void disable() {
-        for (UUID id : new ArrayList<>(wornJugs.keySet())) removeWornDisplay(id);
         storage.flushBlocking();
     }
 }

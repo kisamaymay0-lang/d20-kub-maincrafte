@@ -19,8 +19,13 @@ final class WinterRules {
             "minecraft:frozen_peaks", "minecraft:jagged_peaks");
 
     private WinterRules() { }
-    /** 2% без «Удачи моря», +1% за уровень (I–III) до максимума 5%. */
-    static double catchChance(int luck) { return 0.02 + 0.01 * Math.clamp(luck, 0, 3); }
+    /**
+     * Шанс зимнего улова: base (база) + perLuck за каждый уровень «Удачи моря»
+     * (I–III). Значения приходят из config.yml (fishing.winter-tool-*).
+     */
+    static double catchChance(int luck, double base, double perLuck) {
+        return Math.clamp(base, 0.0, 1.0) + Math.clamp(perLuck, 0.0, 1.0) * Math.clamp(luck, 0, 3);
+    }
     static boolean canGrab(boolean newlySneaking, boolean airborne, boolean tool, boolean frozen, boolean alreadyClimbing) {
         return newlySneaking && airborne && tool && !frozen && !alreadyClimbing;
     }

@@ -1,5 +1,5 @@
 name: f8-plugin
-version: '10.8'
+version: '10.9'
 main: com.yourserver.adaptation.AdaptationPlugin
 api-version: '1.21.11'
 softdepend: [PlasmoVoice]
@@ -17,7 +17,7 @@ commands:
   f8:
     description: Меню дополнительных возможностей F8
     permission: f8.admin
-    usage: /f8
+    usage: /f8 [reload]
 
   stars:
     description: Управление созвездиями

@@ -83,11 +83,15 @@ class SkyMotionTest {
 
     @Test
     void fartherSphereIsLimitedByClientAndServerViewDistance() {
-        assertEquals(1f, SkyOrbit.depthScale(100, 4, 10, 3));
-        float scale = SkyOrbit.depthScale(100, 16, 10, 3);
+        assertEquals(1f, SkyOrbit.depthScale(100, 4, 10, 3, 0.7));
+        float scale = SkyOrbit.depthScale(100, 16, 10, 3, 0.7);
         assertEquals(1.12f, scale, 0.0001);
         assertTrue(100 * scale <= 10 * 16 * 0.7 + 0.001);
-        assertEquals(3f, SkyOrbit.depthScale(80, 32, 32, 3));
+        assertEquals(3f, SkyOrbit.depthScale(80, 32, 32, 3, 0.7));
+        // depth-fill отодвигает сферу к краю видимой дальности: звёзды прячутся
+        // за деревьями и облаками, а не наоборот.
+        assertTrue(SkyOrbit.depthScale(80, 16, 16, 8, 0.95) > SkyOrbit.depthScale(80, 16, 16, 8, 0.7));
+        assertEquals(1.0f, SkyOrbit.depthScale(80, 16, 16, 8, 2.0));
     }
     @Test
     void positiveOrbitSpeedNowMovesRightAndKeepsTargetingAligned() {
