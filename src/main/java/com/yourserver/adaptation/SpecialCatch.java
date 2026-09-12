@@ -57,13 +57,15 @@ final class SpecialCatch implements Listener {
     private final NamespacedKey ourHook;
     private final JavaPlugin plugin;
     private final AncientJug jug;
+    private final WinterFishing winter;
 
     private final Map<UUID, Hunt> hunts = new HashMap<>();
     private BukkitTask task;
 
-    SpecialCatch(JavaPlugin plugin, AncientJug jug) {
+    SpecialCatch(JavaPlugin plugin, AncientJug jug, WinterFishing winter) {
         this.plugin = plugin;
         this.jug = jug;
+        this.winter = winter;
         this.ourHook = new NamespacedKey(plugin, "special_catch_hook");
     }
 
@@ -90,7 +92,32 @@ final class SpecialCatch implements Listener {
     }
 
     private double dashStrength() {
-        return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.dash-strength", 1.1), 0.2, 3.0);
+        return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.dash-strength", 1.4), 0.2, 4.0);
+    }
+
+    /** Сколько секунд предмет делает один оборот вокруг игрока (в начале охоты). */
+    private double revolutionSeconds() {
+        return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.revolution-seconds", 2.2), 0.4, 10.0);
+    }
+
+    /** Прибавка к скорости полёта за каждый удар (1.0 = +100 % скорости). */
+    private double speedPerHit() {
+        return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.speed-per-hit", 0.35), 0.0, 3.0);
+    }
+
+    /** Насколько предмет качается вверх-вниз. */
+    private double bobHeight() {
+        return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.bob-height", 0.5), 0.0, 2.0);
+    }
+
+    /** Прибавка к раскачиванию за каждый удар. */
+    private double bobPerHit() {
+        return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.bob-per-hit", 0.6), 0.0, 5.0);
+    }
+
+    /** Прибавка к силе рывка за каждый удар. */
+    private double dashPerHit() {
+        return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.dash-per-hit", 0.5), 0.0, 3.0);
     }
 
     private double hitRange() {
@@ -109,15 +136,48 @@ final class SpecialCatch implements Listener {
         return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.particle-radius", 1.5), 0.3, 4.0);
     }
 
-    /** Особый предмет биома: пока в конфиге отмечен только кувшин пустыни. */
+    /**
+     * Особый предмет биома. Ключ раздела — либо точный ID биома, либо шаблон,
+     * где «*» заменяет любые символы («*:desert», «*:snowy*»). Так одной строкой
+     * закрываются ВСЕ пустынные и ВСЕ зимние/ледяные биомы, включая биомы модов.
+     * Если раздела в конфиге нет, работает встроенный список.
+     */
     ItemStack specialItem(String biome) {
-        String value = plugin.getConfig().getString("fishing.special-items." + biome, "");
-        if (value == null || value.isBlank()) return null;
+        var section = plugin.getConfig().getConfigurationSection("fishing.special-items");
+        if (section != null) {
+            String exact = section.getString(biome);
+            if (exact != null && !exact.isBlank()) return itemOf(exact);
+            for (String key : section.getKeys(false)) {
+                if (!BiomePatterns.isPattern(key)) continue;
+                if (BiomePatterns.matches(key, biome)) {
+                    String value = section.getString(key);
+                    if (value != null && !value.isBlank()) return itemOf(value);
+                }
+            }
+        }
+        String lower = biome.toLowerCase(Locale.ROOT);
+        if (WinterRules.BIOMES.contains(lower)) return winterRime();
+        if (lower.endsWith(":desert") || lower.contains("badlands")) return jug.createEmpty();
+        return null;
+    }
+
+    /** Значение из конфига: имя нашего предмета или ID ванильного. */
+    private ItemStack itemOf(String value) {
         String token = value.trim().toUpperCase(Locale.ROOT);
         if (token.equals("ANCIENT_JUG") || token.equals("ДРЕВНИЙ_КУВШИН")) return jug.createEmpty();
+        if (token.equals("ICY_RIME") || token.equals("RIME") || token.equals("ИЗМОРОЗЬ")
+                || token.equals("ЛЕДЯНАЯ_ИЗМОРОЗЬ") || token.equals("ЗАЛЕДЕНЕВШАЯ_ИЗМОРОЗЬ")) {
+            return winterRime();
+        }
         Material material = Material.matchMaterial(token);
         return material == null || material.isAir() ? null : new ItemStack(material);
     }
+
+    /** Заледеневшая изморозь — зимний особый предмет биома. */
+    private ItemStack winterRime() {
+        return winter.items.create(WinterItems.Kind.TOOL);
+    }
+
 
     // ===== ЗАПУСК =====
 
@@ -217,15 +277,23 @@ final class SpecialCatch implements Listener {
     /** Кувшин летает по кругу в куполе вокруг игрока и по инерции доезжает после удара. */
     private void move(Hunt hunt) {
         if (hunt.display == null || !hunt.display.isValid()) return;
-        hunt.phase += hunt.speed;
+        hunt.phase += orbitSpeed(hunt);
         Location spot = orbitSpot(hunt);
         if (hunt.dashTicks > 0) {
             hunt.dashTicks--;
             spot.add(hunt.dash);
-            hunt.dash.multiply(0.82);
+            // Золотая дорожка за рывком: так бросок в сторону хорошо видно.
+            hunt.player.getWorld().spawnParticle(Particle.DUST, spot, 3, 0.06, 0.06, 0.06, 0.0, goldDust());
+            hunt.dash.multiply(hunt.dashTicks > 0 ? 0.84 : 0.5);
         }
         hunt.spot = spot;
         hunt.display.teleport(spot);
+    }
+
+    /** Скорость облёта: с каждым ударом предмет носится всё быстрее. */
+    private double orbitSpeed(Hunt hunt) {
+        double base = Math.PI * 2.0 / Math.max(6.0, revolutionSeconds() * 20.0);
+        return base * (1.0 + hunt.hits * speedPerHit());
     }
 
     private Location orbitSpot(Hunt hunt) {
@@ -233,8 +301,14 @@ final class SpecialCatch implements Listener {
         double phase = hunt.phase;
         double x = player.getX() + Math.cos(phase) * radius();
         double z = player.getZ() + Math.sin(phase) * radius();
-        double y = player.getY() + height() + Math.sin(phase * 1.7) * 0.5;
+        // Раскачивание вверх-вниз тоже растёт с каждым ударом (но не уходит под ноги).
+        double bob = bobHeight() * (1.0 + hunt.hits * bobPerHit());
+        double y = Math.max(player.getY() + 0.3, player.getY() + height() + Math.sin(phase * 1.7) * bob);
         return new Location(player.getWorld(), x, y, z);
+    }
+
+    private static Particle.DustOptions goldDust() {
+        return new Particle.DustOptions(Color.fromRGB(0xFFC61A), 1.1f);
     }
 
     /** Золотые частицы: круги по воде у поплавка и искры с конца удочки. */
@@ -245,7 +319,7 @@ final class SpecialCatch implements Listener {
                 ? hunt.hook.getLocation()
                 : player.getLocation();
         double radius = swirlRadius();
-        Particle.DustOptions gold = new Particle.DustOptions(Color.fromRGB(0xFFC61A), 1.1f);
+        Particle.DustOptions gold = goldDust();
         int points = 12;
         for (int i = 0; i < points; i++) {
             double angle = hunt.phase * 2.0 + i * (Math.PI * 2.0 / points);
@@ -295,12 +369,15 @@ final class SpecialCatch implements Listener {
             finish(hunt);
             return;
         }
-        // Рывок в случайную сторону, чтобы запутать игрока.
+        // Рывок в случайную сторону, чтобы запутать игрока: с каждым ударом сильнее.
         double angle = ThreadLocalRandom.current().nextDouble(0, Math.PI * 2);
-        hunt.dash = new Vector(Math.cos(angle), ThreadLocalRandom.current().nextDouble(-0.15, 0.35), Math.sin(angle))
-                .multiply(dashStrength() * 0.35);
-        hunt.dashTicks = 8;
+        double power = dashStrength() * (1.0 + hunt.hits * dashPerHit()) * 0.35;
+        hunt.dash = new Vector(Math.cos(angle), ThreadLocalRandom.current().nextDouble(-0.2, 0.4), Math.sin(angle))
+                .multiply(power);
+        hunt.dashTicks = 10;
+        world.spawnParticle(Particle.DUST, hunt.display.getLocation().add(0, 0.3, 0), 14, 0.25, 0.25, 0.25, 0.04, goldDust());
         player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.6f);
+        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.7f, 1.5f);
     }
 
     /** Последний удар: предмет падает на землю и превращается в вещь. */
@@ -315,9 +392,8 @@ final class SpecialCatch implements Listener {
         world.dropItem(drop, hunt.reward);
         world.playSound(drop, Sound.ENTITY_FISHING_BOBBER_SPLASH, 1.0f, 1.0f);
         world.playSound(drop, Sound.ENTITY_PLAYER_LEVELUP, 0.6f, 1.6f);
-        world.spawnParticle(Particle.DUST, drop, 20, 0.4, 0.4, 0.4, 0.0,
-                new Particle.DustOptions(Color.fromRGB(0xFFC61A), 1.2f));
-        player.sendActionBar("§aПоймал! Особый предмет биома упал на землю.");
+        world.spawnParticle(Particle.DUST, drop, 20, 0.4, 0.4, 0.4, 0.0, goldDust());
+        player.sendActionBar("§aПоймал!");
         release(hunt);
     }
 
@@ -370,6 +446,7 @@ final class SpecialCatch implements Listener {
         return "§7Миниигра особого улова: шанс §f" + Math.round(chance() * 100.0) + "%"
                 + "§7, ударов §f" + hitsRequired()
                 + "§7, таймер §f" + (durationTicks() / 20) + " с"
+                + "§7, разгон §f+" + Math.round(speedPerHit() * 100.0) + "%/удар"
                 + "§7, биомы с особым предметом: §f" + (biomes.isEmpty() ? "нет" : String.join(", ", biomes));
     }
 
@@ -390,7 +467,6 @@ final class SpecialCatch implements Listener {
         final Player player;
         final ItemStack reward;
         final int totalTicks = durationTicks();
-        final double speed = Math.PI * 2.0 / 44.0;
         ItemDisplay display;
         FishHook hook;
         double phase = ThreadLocalRandom.current().nextDouble(0, Math.PI * 2);

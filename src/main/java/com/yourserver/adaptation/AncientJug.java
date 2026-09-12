@@ -65,7 +65,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -124,8 +123,6 @@ public class AncientJug implements Listener {
      */
     static final String MILK_INFUSION = "#milk";
 
-    /** Биомы, в которых клюёт кувшин. */
-    private static final Set<String> DESERT_BIOMES = Set.of("minecraft:desert");
     /** Сколько секунд держать ПКМ, чтобы выпить одну порцию из кувшина. */
     private static final float DRINK_SECONDS = 1.6f;
     /** Звук питья: как у ванильных бутылочек и зелий. */

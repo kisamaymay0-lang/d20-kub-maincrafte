@@ -121,7 +121,7 @@ public void onEnable() {
     getServer().getPluginManager().registerEvents(ancientJug, this);
 
     // Миниигра особого предмета биома: вылавливается вместо обычной рыбы.
-    specialCatch = new SpecialCatch(this, ancientJug);
+    specialCatch = new SpecialCatch(this, ancientJug, winterFishing);
     getServer().getPluginManager().registerEvents(specialCatch, this);
 
     profileManager = new ProfileManager(this, dataWriter);
