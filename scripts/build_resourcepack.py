@@ -153,6 +153,21 @@ def validate() -> dict[str, bytes]:
         assert f"assets/f8resurs/models/item/{jug}.json" in files
         assert f"assets/f8resurs/models/block/{jug}.json" in files
 
+    # 10.11: носитель кувшина — техническая плита петрифайд-дуба. Она не сплошная,
+    # поэтому соседние блоки рядом с кувшином больше не «пропадают» (нет щелей).
+    # Проверка необязательная: файл появляется в паке после обновления до 10.11.
+    slab_host = "assets/minecraft/blockstates/petrified_oak_slab.json"
+    if slab_host in files:
+        host = json.loads(files[slab_host])["variants"]
+        assert set(host) == {"type=bottom", "type=top", "type=double"}, \
+            "Carrier slab must define exactly the three vanilla slab states"
+        assert host["type=bottom"]["model"] == "f8resurs:block/ancient_jug", \
+            "Empty jug (bottom slab) must use the empty jug model"
+        assert host["type=top"]["model"] == "f8resurs:block/ancient_jug_filled", \
+            "Filled jug (top slab) must use the filled jug model"
+        assert host["type=double"]["model"] == "minecraft:block/oak_planks", \
+            "A double slab keeps the vanilla model: it is solid and would hide neighbour faces"
+
     # Both beams must be flat and unshaded: no rod base, side faces or AO.
     for beam in ("star_beam", "star_beam_preview"):
         model = json.loads(files[f"assets/f8resurs/models/item/{beam}.json"])

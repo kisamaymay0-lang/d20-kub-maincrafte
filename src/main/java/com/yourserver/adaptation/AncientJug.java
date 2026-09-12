@@ -14,7 +14,6 @@ import org.bukkit.Instrument;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.Note;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
@@ -24,6 +23,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.data.Ageable;
 import org.bukkit.block.data.type.NoteBlock;
+import org.bukkit.block.data.type.Slab;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Item;
@@ -39,7 +39,6 @@ import org.bukkit.event.block.BlockPistonExtendEvent;
 import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
-import org.bukkit.event.block.NotePlayEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.event.player.PlayerHarvestBlockEvent;
@@ -71,11 +70,17 @@ import java.util.UUID;
  * Древний кувшин — особый предмет рыбалки в пустынных биомах
  * (шанс улова полностью повторяет заледеневшую изморозь).
  *
- * Кувшин ставится как блок: тот же маркер, что у медного нотного блока
- * (нота 24), но свои инструменты — пустой кувшин это нота 24 + флейта,
- * а наполненный — ноты 1..9 (номер ноты = количество жидкости, поэтому
- * компаратор выдаёт ровно столько сигнала, сколько жидкости внутри)
- * + банджо. По этим парам ресурспак выбирает модель.
+ * Кувшин ставится как блок: предмет — обычный нот-блок (его можно поставить
+ * на любую грань, хоть в воздухе), но на месте установки нот-блок сразу
+ * заменяется на плиту-носитель — техническую плиту петрифайд-дуба.
+ * Плита не считается сплошным блоком, поэтому соседние блоки больше не
+ * «пропадают» рядом с кувшином: щелей нет ни в полу, ни в стенах, ни в
+ * потолке. Модель выбирается состоянием плиты: пустой кувшин — нижняя
+ * плита, налитый — верхняя. Двойной плиту держать нельзя (она сплошная),
+ * поэтому состояние каждый тик возвращается каноническим.
+ * Кувшины из версии 10.10 и раньше стояли нот-блоками (нота 24 + флейта /
+ * ноты 1..9 + банджо) — при первой же проверке такие блоки переносятся
+ * на плиту, так что старые постройки не пропадают.
  *
  * В поставленный кувшин ПКМ выливаются жидкости: обычные зелья, бутылочки
  * мёда и любые предметы, помеченные другими плагинами как жидкость
@@ -103,12 +108,22 @@ import java.util.UUID;
 public class AncientJug implements Listener {
 
     static final String TITLE = "Древний кувшин";
-    /** Та же резервная нота, что у медного блока: модель выбирает ресурспак. */
+    /** Та же резервная нота, что у медного блока: нужна только для старых кувшинов. */
     static final int MARKER_NOTE = 24;
-    /** Пустой кувшин: нота 24 + флейта. */
+    /** Кувшин до 10.11 был нот-блоком: пустой — нота 24 + флейта. */
     static final Instrument EMPTY_INSTRUMENT = Instrument.FLUTE;
-    /** Кувшин с жидкостью: нота 1..9 (= количество) + банджо. */
+    /** Кувшин до 10.11 с жидкостью: нота 1..9 (= количество) + банджо. */
     static final Instrument FILLED_INSTRUMENT = Instrument.BANJO;
+    /**
+     * Блок-носитель кувшина: техническая плита петрифайд-дуба. Её нельзя
+     * получить в выживании (только командой), а главное — она не сплошная,
+     * поэтому не скрывает грани соседних блоков: щелей вокруг кувшина нет.
+     */
+    private static final Material JUG_BLOCK = Material.PETRIFIED_OAK_SLAB;
+    /** Пустой кувшин — нижняя плита. */
+    private static final Slab.Type EMPTY_SLAB = Slab.Type.BOTTOM;
+    /** Налитый кувшин — верхняя плита: пара состояний выбирает модель в паке. */
+    private static final Slab.Type FILLED_SLAB = Slab.Type.TOP;
     static final int MAX_BOTTLES = 9;
     static final String POTION_KIND = "POTION";
     static final String HONEY_KIND = "HONEY";
@@ -178,9 +193,10 @@ public class AncientJug implements Listener {
         // Раз в секунду — замедление/пониженный прыжок/износ элитр, каждый тик — утягивание вниз на элитрах.
         Bukkit.getScheduler().runTaskTimer(plugin, this::applyCarryEffects, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(plugin, this::applyFlightPull, 1L, 1L);
-        // Каждый тик: пара «нота + инструмент» у кувшина должна быть строго
-        // канонической. Ваниль пересчитывает нот-блок от соседей, а ресурспак
-        // выбирает модель именно по этой паре — любой сдвиг рисует чужой блок.
+        // Каждый тик: состояние плиты-носителя должно быть строго каноническим
+        // (нижняя плита у пустого, верхняя у налитого) — по нему ресурспак
+        // выбирает модель, а двойная плита вернула бы щели. Здесь же старые
+        // кувшины-нот-блоки переносятся на плиту.
         Bukkit.getScheduler().runTaskTimer(plugin, this::guardTick, 1L, 1L);
         // Через пару секунд после запуска приводим в порядок кувшины в тех
         // чанках, что уже загружены (остальные проверятся при загрузке чанка).
@@ -373,8 +389,8 @@ public class AncientJug implements Listener {
 
     private void writeContents(String key, Contents contents) {
         // Пустой кувшин тоже запоминается: раньше запись удалялась (count = 0),
-        // и поставленный пустой кувшин считался обычным нот-блоком — в него
-        // нельзя было налить, он играл ноты и выпадал нот-блоком.
+        // и поставленный пустой кувшин считался обычным блоком — в него нельзя
+        // было налить, он вёл себя как чужой блок и выпадал не кувшином.
         jugsData.set(key + ".count", contents.count);
         jugsData.set(key + ".kind", contents.kind == null ? "" : contents.kind);
         jugsData.set(key + ".potion", POTION_KIND.equals(contents.kind) && contents.potion != null ? contents.potion : "");
@@ -399,54 +415,79 @@ public class AncientJug implements Listener {
         }
     }
 
-    // ===== СОСТОЯНИЕ БЛОКА: ЗАЩИТА ОТ ВАНИЛЬНОГО ПЕРЕСЧЁТА =====
-    // Ресурспак выбирает модель по паре «нота + инструмент», поэтому у кувшина
-    // она обязана совпадать с содержимым: пустой — нота 24 + флейта, с
-    // жидкостью — нота 1..9 (номер ноты = количество, компаратор) + банджо.
-    // Ваниль же пересчитывает нот-блок от соседних блоков, поэтому состояние
-    // держим сами: сразу в событии и контрольным проходом каждый тик.
+    // ===== СОСТОЯНИЕ БЛОКА: ЗАЩИТА ОТ СБОЯ =====
+    // Ресурспак выбирает модель по состоянию плиты-носителя, поэтому у кувшина
+    // оно обязано совпадать с содержимым: пустой — нижняя плита, с жидкостью —
+    // верхняя. Двойная плита сплошная (вернула бы щели), а игрок может сбить
+    // состояние отладкой, поэтому держим его сами: сразу в событии и
+    // контрольным проходом каждый тик. Здесь же — перенос старых кувшинов
+    // (нот-блоков) на плиту.
 
-    /** Блок кувшина и его каноническая пара «нота + инструмент». */
-    private static final class JugPin {
+    /** Блок кувшина и его каноническое состояние плиты. */
+    private final class JugPin {
         private final Location location;
-        private final int note;
-        private final Instrument instrument;
+        private final Slab.Type type;
 
-        JugPin(Location location, int note, Instrument instrument) {
+        JugPin(Location location, Slab.Type type) {
             this.location = location.clone();
-            this.note = note;
-            this.instrument = instrument;
+            this.type = type;
         }
 
-        /** Возвращает блоку каноническую пару; в незагруженном чанке молчит. */
+        /** Возвращает блоку каноническое состояние; в незагруженном чанке молчит. */
         void enforce() {
             World world = location.getWorld();
             if (world == null) return;
             if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) return;
             Block block = world.getBlockAt(location);
-            if (block.getType() != Material.NOTE_BLOCK) return;
-            if (!(block.getBlockData() instanceof NoteBlock data)) return;
-            if (data.getNote().getId() == note && data.getInstrument() == instrument) return;
-            data.setNote(new Note(note));
-            data.setInstrument(instrument);
+            if (block.getType() == JUG_BLOCK) {
+                if (!(block.getBlockData() instanceof Slab data)) return;
+                if (data.getType() == type) return;
+                data.setType(type);
+                block.setBlockData(data, false);
+                return;
+            }
+            // Кувшин версии 10.10 и раньше стоял нот-блоком: переносим на плиту.
+            if (isOldJugState(block)) {
+                setJugBlock(block, type);
+                plugin.getLogger().info("Старый кувшин (" + world.getName() + " "
+                        + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
+                        + ") перенесён на плиту-носитель 10.11");
+            }
+        }
+    }
+
+    /**
+     * Кувшин версии 10.10 и раньше: нот-блок с канонической парой
+     * «нота + инструмент». Такие блоки переносятся на новый носитель,
+     * чтобы старые кувшины не остались обычными нот-блоками.
+     */
+    private static boolean isOldJugState(Block block) {
+        if (block.getType() != Material.NOTE_BLOCK) return false;
+        if (!(block.getBlockData() instanceof NoteBlock data)) return false;
+        int note = data.getNote().getId();
+        if (data.getInstrument() == EMPTY_INSTRUMENT) return note == MARKER_NOTE;
+        return data.getInstrument() == FILLED_INSTRUMENT && note >= 1 && note <= MAX_BOTTLES;
+    }
+
+    /** Ставит блок-носитель кувшина в нужном состоянии: нижняя или верхняя плита. */
+    private static void setJugBlock(Block block, Slab.Type type) {
+        block.setType(JUG_BLOCK, false);
+        if (block.getBlockData() instanceof Slab data) {
+            data.setType(type);
             block.setBlockData(data, false);
         }
     }
 
-    /** Номер ноты для содержимого кувшина: 1..9 = бутылочки, пустой = 24. */
-    private static int noteOf(Contents contents) {
-        return contents.count > 0 ? contents.count : MARKER_NOTE;
-    }
-
-    private static Instrument instrumentOf(Contents contents) {
-        return contents.count > 0 ? FILLED_INSTRUMENT : EMPTY_INSTRUMENT;
+    /** Состояние плиты для содержимого: пустой кувшин — нижняя, налитый — верхняя. */
+    private static Slab.Type typeOf(Contents contents) {
+        return contents.count > 0 ? FILLED_SLAB : EMPTY_SLAB;
     }
 
     /** Запоминает кувшин по ключу записи; мир ещё не загружен — пропускаем. */
     private void pin(String key, Contents contents) {
         Location location = locationOf(key);
         if (location == null || location.getWorld() == null) return;
-        pins.put(key, new JugPin(location, noteOf(contents), instrumentOf(contents)));
+        pins.put(key, new JugPin(location, typeOf(contents)));
     }
 
     /** Перечитать запись из jugs.yml и сразу вернуть блоку канонический вид. */
@@ -513,14 +554,14 @@ public class AncientJug implements Listener {
     }
 
     /**
-     * Кувшин — это нот-блок, поставленный из предмета кувшина. Признак — запись
-     * в jugs.yml: её создаёт только установка кувшина, поэтому состояние блока
-     * (нота/инструмент) не обязательное условие. Так блок остаётся кувшином,
-     * даже если ваниль успела пересчитать ноту от соседних блоков: каноническая
-     * пара возвращается {@link #guardTick()} и событиями защиты.
+     * Кувшин — это плита-носитель, поставленная из предмета кувшина. Признак —
+     * запись в jugs.yml: её создаёт только установка кувшина, поэтому состояние
+     * блока (нижняя/верхняя плита) не обязательное условие. Так блок остаётся
+     * кувшином, даже если состояние сбили отладкой или поршнем: каноническое
+     * возвращается {@link #guardTick()} и событиями защиты.
      */
     private boolean isJugBlock(Block block) {
-        return block != null && block.getType() == Material.NOTE_BLOCK
+        return block != null && block.getType() == JUG_BLOCK
                 && jugsData.contains(blockKey(block));
     }
 
@@ -548,11 +589,9 @@ public class AncientJug implements Listener {
         if (block.getType() != Material.NOTE_BLOCK) return;
         Contents contents = contentsOf(hand);
 
-        NoteBlock data = (NoteBlock) block.getBlockData();
-        data.setNote(new Note(noteOf(contents)));
-        data.setInstrument(instrumentOf(contents));
-        data.setPowered(false);
-        block.setBlockData(data, false);
+        // Предмет — нот-блок (ставится на любую грань), а кувшином становится
+        // плита-носитель: она не сплошная, поэтому соседние блоки не «пропадают».
+        setJugBlock(block, typeOf(contents));
 
         writeContents(blockKey(block), contents);
         storage.markDirty();
@@ -578,15 +617,14 @@ public class AncientJug implements Listener {
     public void onBlockBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
         String key = blockKey(block);
-        if (!isJugBlock(block)) {
-            if (!isLegacyJug(block, false)) return;
-            writeContents(key, new Contents(null, null, null, 0));
-        }
+        // Кувшин старого образца (нот-блок без записи) тоже забирается: считаем
+        // его пустым — записи о содержимом у таких кувшинов нет.
+        if (!isJugBlock(block) && !isLegacyJug(block, false)) return;
         Contents contents = readContents(key);
         jugsData.set(key, null);
         pins.remove(key);
         storage.markDirty();
-        // Обычный нот-блок не выпадает: вместо него — кувшин с содержимым.
+        // Сам блок-носитель не выпадает: вместо него — кувшин с содержимым.
         event.setDropItems(false);
         block.getWorld().dropItemNaturally(block.getLocation(),
                 create(contents.count, contents.kind, contents.potion, contents.custom));
@@ -601,12 +639,6 @@ public class AncientJug implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPistonRetract(BlockPistonRetractEvent event) {
         for (Block block : event.getBlocks()) if (isJugBlock(block)) { event.setCancelled(true); return; }
-    }
-
-    /** Красный камень не играет ноты кувшина. */
-    @EventHandler(priority = EventPriority.HIGHEST)
-    public void onNotePlay(NotePlayEvent event) {
-        if (isJugBlock(event.getBlock())) event.setCancelled(true);
     }
 
     /** Взрыв уничтожает кувшин с выпадением содержимого, запись не должна оставаться. */
@@ -635,17 +667,17 @@ public class AncientJug implements Listener {
         if (changed) storage.markDirty();
     }
 
-    // ===== ЗАЩИТА БЛОКСТЕЙТА КУВШИНА =====
-    // Нот-блок пересчитывает ноту/инструмент от соседних блоков, а ресурспак
-    // выбирает модель именно по этой паре. Поэтому сдвиг возвращается назад
-    // в том же тике: до отправки блок-апдейта клиент чужую модель не увидит.
-    // Контрольный проход каждый тик — страховка от сдвига без события.
+    // ===== ЗАЩИТА КУВШИНА =====
+    // Плита-носитель должна оставаться одиночной: двойная плита — сплошной
+    // блок, а сплошные блоки снова скрывали бы грани соседей (вернулись бы
+    // щели). Состояние и физика возвращаются в том же тике: до отправки
+    // блок-апдейта клиент чужой плиты не увидит.
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBlockPhysics(BlockPhysicsEvent event) {
         Block block = event.getBlock();
         if (!isJugBlock(block)) return;
-        // Отменяем ванильный пересчёт нот-блока: кувшину чужой инструмент не нужен.
+        // Кувшин стоит сам по себе: ни опоры, ни срастания в двойную плиту.
         event.setCancelled(true);
         enforceAt(block);
     }
@@ -661,9 +693,10 @@ public class AncientJug implements Listener {
     }
 
     /**
-     * Загрузился чанк — проверяем кувшины в нём: ваниль может пересчитать
-     * ноту/инструмент, пока чанк был выгружен (например, под кувшином сменился
-     * блок), а тогда вместо кувшина рисовался бы нот-блок.
+     * Загрузился чанк — проверяем кувшины в нём: состояние плиты могло
+     * сбиться, пока чанк был выгружен (например, кто-то поставил второй
+     * полублок), а кувшины из версии 10.10 и раньше вообще стоят нот-блоками
+     * и как раз здесь переносятся на плиту.
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onChunkLoad(ChunkLoadEvent event) {
@@ -745,7 +778,8 @@ public class AncientJug implements Listener {
     public void onBlockInteract(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         Block block = event.getClickedBlock();
-        if (block == null || block.getType() != Material.NOTE_BLOCK) return;
+        if (block == null
+                || (block.getType() != JUG_BLOCK && block.getType() != Material.NOTE_BLOCK)) return;
         Player player = event.getPlayer();
         if (!isJugBlock(block)) {
             // Кувшин старого образца узнаём по состоянию и заводим ему запись.
@@ -797,12 +831,7 @@ public class AncientJug implements Listener {
         int newCount = stored.count + liquid.amount;
         writeContents(key, new Contents(liquid.kind, liquid.potion, liquid.custom, newCount));
         storage.markDirty();
-
-        if (block.getBlockData() instanceof NoteBlock data) {
-            data.setInstrument(FILLED_INSTRUMENT);
-            data.setNote(new Note(newCount));
-            block.setBlockData(data, false);
-        }
+        // Модель выбирает состояние плиты — его выставляет refresh().
         refresh(key);
 
         if (liquid.leftover != null) {

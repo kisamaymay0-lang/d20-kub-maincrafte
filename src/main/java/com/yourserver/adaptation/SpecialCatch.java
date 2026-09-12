@@ -47,6 +47,11 @@ import java.util.concurrent.ThreadLocalRandom;
  * делает рывок в случайную сторону. После последнего удара он падает на землю
  * и превращается в настоящий предмет.
  *
+ * Ударить можно и мимо: каждый взмах рукой во время охоты — это либо удар по
+ * предмету, либо промах. Промах звучит неприятно и приближает провал: когда
+ * промахов набирается столько же, сколько разрешено (по умолчанию 4),
+ * предмет срывается и уходит на дно сам.
+ *
  * Миниигра живёт только пока удочка в руке игрока и заброшена в водоём.
  * Если у биома нет особого предмета (fishing/special-items в конфиге),
  * миниигра не запускается.
@@ -118,6 +123,11 @@ final class SpecialCatch implements Listener {
     /** Прибавка к силе рывка за каждый удар. */
     private double dashPerHit() {
         return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.dash-per-hit", 0.5), 0.0, 3.0);
+    }
+
+    /** Сколько промахов игрок может допустить, прежде чем предмет уйдёт сам. */
+    private int missesAllowed() {
+        return Math.clamp(plugin.getConfig().getInt("fishing.special-minigame.misses-allowed", 4), 1, 20);
     }
 
     private double hitRange() {
@@ -262,14 +272,16 @@ final class SpecialCatch implements Listener {
             }
             hunt.ticks++;
             if (hunt.ticks >= hunt.totalTicks) {
-                cancel(hunt, "§cОсобый предмет сорвался и ушёл в глубину...");
+                cancel(hunt, "§cПредмет сорвался и ушел на дно...");
                 continue;
             }
             move(hunt);
             if (hunt.ticks % Math.max(1, particleInterval()) == 0) particles(hunt);
             if (hunt.ticks % 4 == 0) {
                 int left = Math.max(1, (hunt.totalTicks - hunt.ticks) / 20);
-                player.sendActionBar("§6Поймай его! Осталось: §e" + left);
+                player.sendActionBar("§6Поймай его! Осталось: §e" + left
+                        + "§6, удары §e" + Math.min(hunt.hits, hitsRequired()) + "/" + hitsRequired()
+                        + "§6, промахи §c" + hunt.misses + "/" + missesAllowed());
             }
         }
     }
@@ -285,6 +297,11 @@ final class SpecialCatch implements Listener {
             // Золотая дорожка за рывком: так бросок в сторону хорошо видно.
             hunt.player.getWorld().spawnParticle(Particle.DUST, spot, 3, 0.06, 0.06, 0.06, 0.0, goldDust());
             hunt.dash.multiply(hunt.dashTicks > 0 ? 0.84 : 0.5);
+        }
+        // Направление полёта: по нему частицы-искры вытягиваются позади предмета.
+        if (hunt.spot != null) {
+            Vector step = spot.toVector().subtract(hunt.spot.toVector());
+            if (step.lengthSquared() > 1.0E-6) hunt.trail = step.normalize();
         }
         hunt.spot = spot;
         hunt.display.teleport(spot);
@@ -311,7 +328,11 @@ final class SpecialCatch implements Listener {
         return new Particle.DustOptions(Color.fromRGB(0xFFC61A), 1.1f);
     }
 
-    /** Золотые частицы: круги по воде у поплавка и искры с конца удочки. */
+    /**
+     * Золотые частицы: круги по воде у поплавка и след искр за самим летающим
+     * предметом (раньше искры сыпались от конца удочки, то есть за взглядом
+     * игрока — след уезжал за курсором, а не за предметом).
+     */
     private void particles(Hunt hunt) {
         Player player = hunt.player;
         World world = player.getWorld();
@@ -326,15 +347,20 @@ final class SpecialCatch implements Listener {
             Location point = water.clone().add(Math.cos(angle) * radius, 0.15 + 0.1 * Math.sin(angle * 2), Math.sin(angle) * radius);
             world.spawnParticle(Particle.DUST, point, 1, 0.02, 0.02, 0.02, 0.0, gold);
         }
-        // Короткая дорожка от конца удочки к воде: видно, что частицы идут «из удочки».
-        Location tip = player.getEyeLocation().add(player.getEyeLocation().getDirection().multiply(1.3)).subtract(0, 0.2, 0);
+        Location flying = hunt.spot != null
+                ? hunt.spot.clone()
+                : (hunt.display != null && hunt.display.isValid() ? hunt.display.getLocation() : null);
+        if (flying == null) return;
+        // Искры тянутся хвостом назад по направлению полёта.
+        Vector back = hunt.trail.clone().multiply(-0.16);
         for (int i = 0; i < 3; i++) {
-            Location spark = tip.clone().add(ThreadLocalRandom.current().nextDouble(-0.15, 0.15),
-                    ThreadLocalRandom.current().nextDouble(-0.15, 0.15),
-                    ThreadLocalRandom.current().nextDouble(-0.15, 0.15));
+            Location spark = flying.clone().add(back.clone().multiply(i))
+                    .add(ThreadLocalRandom.current().nextDouble(-0.15, 0.15),
+                            ThreadLocalRandom.current().nextDouble(-0.15, 0.15),
+                            ThreadLocalRandom.current().nextDouble(-0.15, 0.15));
             world.spawnParticle(Particle.DUST, spark, 1, 0.0, 0.0, 0.0, 0.0, gold);
         }
-        world.spawnParticle(Particle.END_ROD, tip, 1, 0.05, 0.05, 0.05, 0.0);
+        world.spawnParticle(Particle.END_ROD, flying, 1, 0.05, 0.05, 0.05, 0.0);
     }
 
     // ===== УДАРЫ =====
@@ -344,8 +370,27 @@ final class SpecialCatch implements Listener {
         if (event.getAnimationType() != PlayerAnimationType.ARM_SWING) return;
         Hunt hunt = hunts.get(event.getPlayer().getUniqueId());
         if (hunt == null || hunt.display == null || !hunt.display.isValid()) return;
-        if (!aimedAt(event.getPlayer(), hunt)) return;
-        hit(hunt);
+        // Любой взмах во время охоты — попытка: либо удар, либо промах.
+        if (aimedAt(event.getPlayer(), hunt)) hit(hunt);
+        else miss(hunt);
+    }
+
+    /** Промах: неприятный громкий звук и счётчик. Много промахов — предмет уходит. */
+    private void miss(Hunt hunt) {
+        Player player = hunt.player;
+        World world = player.getWorld();
+        hunt.misses++;
+        world.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 1.3f, 0.6f);
+        world.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.1f, 0.7f);
+        Location where = hunt.display != null && hunt.display.isValid()
+                ? hunt.display.getLocation().add(0, 0.3, 0)
+                : player.getLocation();
+        world.spawnParticle(Particle.SMOKE, where, 8, 0.2, 0.2, 0.2, 0.02);
+        if (hunt.misses >= missesAllowed()) {
+            cancel(hunt, "§cПромахов слишком много — предмет сорвался и ушел на дно...");
+            return;
+        }
+        player.sendActionBar("§cПромах! Осталось промахов: §e" + (missesAllowed() - hunt.misses));
     }
 
     /** Игрок смотрит на предмет и стоит достаточно близко: удар засчитан. */
@@ -446,6 +491,7 @@ final class SpecialCatch implements Listener {
         return "§7Миниигра особого улова: шанс §f" + Math.round(chance() * 100.0) + "%"
                 + "§7, ударов §f" + hitsRequired()
                 + "§7, таймер §f" + (durationTicks() / 20) + " с"
+                + "§7, промахов до провала §f" + missesAllowed()
                 + "§7, разгон §f+" + Math.round(speedPerHit() * 100.0) + "%/удар"
                 + "§7, биомы с особым предметом: §f" + (biomes.isEmpty() ? "нет" : String.join(", ", biomes));
     }
@@ -473,8 +519,11 @@ final class SpecialCatch implements Listener {
         Vector dash = new Vector();
         int dashTicks;
         int hits;
+        int misses;
         int ticks;
         Location spot;
+        /** Направление полёта: за ним тянутся искры следа. */
+        Vector trail = new Vector();
 
         Hunt(Player player, ItemStack reward) {
             this.player = player;
