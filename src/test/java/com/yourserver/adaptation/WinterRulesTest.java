@@ -10,7 +10,7 @@ class WinterRulesTest {
     @ParameterizedTest
     @CsvSource({"0,0.02", "1,0.03", "2,0.04", "3,0.05", "-1,0.02", "100,0.05"})
     void fishingOddsMatchLuckOfTheSea(int luck, double expected) {
-        assertEquals(expected, WinterRules.catchChance(luck), 1e-9);
+        assertEquals(expected, WinterRules.catchChance(luck, 0.02, 0.01), 1e-9);
     }
 
     @Test

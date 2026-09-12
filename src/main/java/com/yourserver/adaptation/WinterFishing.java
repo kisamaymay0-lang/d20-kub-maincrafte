@@ -94,7 +94,11 @@ final class WinterFishing implements Listener {
         String biome = hook.getLocation().getBlock().getBiome().getKey().toString();
         if (!WinterRules.BIOMES.contains(biome)) return;
         int luck = hook.getPersistentDataContainer().getOrDefault(castLuck, PersistentDataType.INTEGER, 0);
-        if (ThreadLocalRandom.current().nextDouble() < WinterRules.catchChance(luck)) caught.setItemStack(items.create(WinterItems.Kind.TOOL));
+        double base = plugin.getConfig().getDouble("fishing.winter-tool-chance-percent", 2.0) / 100.0;
+        double perLuck = plugin.getConfig().getDouble("fishing.winter-tool-luck-bonus-percent", 1.0) / 100.0;
+        if (ThreadLocalRandom.current().nextDouble() < WinterRules.catchChance(luck, base, perLuck)) {
+            caught.setItemStack(items.create(WinterItems.Kind.TOOL));
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)

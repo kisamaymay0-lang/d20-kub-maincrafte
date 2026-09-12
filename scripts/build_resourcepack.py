@@ -2,7 +2,6 @@
 """Validate and reproducibly build the resource pack; --check checks the existing ZIP."""
 import argparse
 import json
-import shutil
 import struct
 import zlib
 from pathlib import Path
@@ -11,7 +10,6 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 ROOT = Path(__file__).resolve().parents[1]
 PACK = ROOT / "resourcepack"
 ARCHIVE = ROOT / "f8resurs-resourcepack.zip"
-BUNDLED = ROOT / "src" / "main" / "resources" / "f8resurs-resourcepack.zip"
 
 
 def rgba_rows(data: bytes) -> list[bytes]:
@@ -155,6 +153,21 @@ def validate() -> dict[str, bytes]:
         assert f"assets/f8resurs/models/item/{jug}.json" in files
         assert f"assets/f8resurs/models/block/{jug}.json" in files
 
+    # 10.11: носитель кувшина — техническая плита петрифайд-дуба. Она не сплошная,
+    # поэтому соседние блоки рядом с кувшином больше не «пропадают» (нет щелей).
+    # Проверка необязательная: файл появляется в паке после обновления до 10.11.
+    slab_host = "assets/minecraft/blockstates/petrified_oak_slab.json"
+    if slab_host in files:
+        host = json.loads(files[slab_host])["variants"]
+        assert set(host) == {"type=bottom", "type=top", "type=double"}, \
+            "Carrier slab must define exactly the three vanilla slab states"
+        assert host["type=bottom"]["model"] == "f8resurs:block/ancient_jug", \
+            "Empty jug (bottom slab) must use the empty jug model"
+        assert host["type=top"]["model"] == "f8resurs:block/ancient_jug_filled", \
+            "Filled jug (top slab) must use the filled jug model"
+        assert host["type=double"]["model"] == "minecraft:block/oak_planks", \
+            "A double slab keeps the vanilla model: it is solid and would hide neighbour faces"
+
     # Both beams must be flat and unshaded: no rod base, side faces or AO.
     for beam in ("star_beam", "star_beam_preview"):
         model = json.loads(files[f"assets/f8resurs/models/item/{beam}.json"])
@@ -192,11 +205,8 @@ def main() -> None:
                 info.compress_type = ZIP_DEFLATED
                 info.external_attr = 0o644 << 16
                 archive.writestr(info, contents)
-        # Плагин раздаёт этот же архив клиентам при входе (SHA-1 считается
-        # из bundled-копии), поэтому копия в resources обязана совпадать.
-        BUNDLED.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ARCHIVE, BUNDLED)
-    assert BUNDLED.read_bytes() == ARCHIVE.read_bytes(), "Bundled resource pack is stale"
+    # Плагин пак не раздаёт: архив в корне репозитория — единственная копия,
+    # его подключает сам сервер (server.properties: resource-pack).
     with ZipFile(ARCHIVE) as archive:
         assert len(archive.namelist()) == len(files), "Duplicate or unexpected ZIP entries"
         assert set(archive.namelist()) == set(files), "Stale resource pack archive"
