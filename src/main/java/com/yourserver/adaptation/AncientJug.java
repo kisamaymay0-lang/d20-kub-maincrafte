@@ -571,6 +571,22 @@ public class AncientJug implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockPlace(BlockPlaceEvent event) {
+        // Шифт с наполненным кувшином — это всегда выливание. Даже если клик
+        // дошёл до постановки блока (событие взаимодействия не пришло), блок не
+        // ставим: выливаем порцию на место клика.
+        Player placing = event.getPlayer();
+        if (placing.isSneaking()) {
+            EquipmentSlot jugSlot = filledJugHand(placing, event.getHand());
+            if (jugSlot != null) {
+                ItemStack jug = handItem(placing, jugSlot);
+                Contents contents = contentsOf(jug);
+                if (contents.count > 0) {
+                    event.setCancelled(true);
+                    spillPortion(placing, jugSlot, jug, contents, event.getBlockPlaced());
+                    return;
+                }
+            }
+        }
         ItemStack hand = event.getItemInHand();
         if (!isJug(hand)) return;
         Block block = event.getBlockPlaced();
@@ -783,15 +799,16 @@ public class AncientJug implements Listener {
             storage.markDirty();
             refresh(blockKey(block));
         }
-        ItemStack hand = player.getInventory().getItemInMainHand();
-        if (event.getHand() == EquipmentSlot.HAND && hand.getType() == Material.GLASS_BOTTLE) {
+        EquipmentSlot slot = event.getHand() == null ? EquipmentSlot.HAND : event.getHand();
+        ItemStack hand = handItem(player, slot);
+        if (hand.getType() == Material.GLASS_BOTTLE) {
             // Пустой бутылочкой жидкость забирается из кувшина обратно.
-            if (takeBottle(player, block, hand)) event.setCancelled(true);
+            if (takeBottle(player, block, hand, slot)) event.setCancelled(true);
             return;
         }
-        if (event.getHand() == EquipmentSlot.HAND && hand.getType() == Material.BUCKET) {
+        if (hand.getType() == Material.BUCKET) {
             // Ведро черпает воду или молоко: одна порция ведра — три порции кувшина.
-            if (takeBucket(player, block, hand)) event.setCancelled(true);
+            if (takeBucket(player, block, hand, slot)) event.setCancelled(true);
             return;
         }
         if (ContainerInteraction.bypassMenu(player.isSneaking(),
@@ -802,13 +819,12 @@ public class AncientJug implements Listener {
             return;
         }
         event.setCancelled(true);
-        if (event.getHand() != EquipmentSlot.HAND) return;
         Liquid liquid = classifyLiquid(hand);
         if (liquid == null) return;
-        pour(player, block, hand, liquid);
+        pour(player, block, hand, slot, liquid);
     }
 
-    private void pour(Player player, Block block, ItemStack source, Liquid liquid) {
+    private void pour(Player player, Block block, ItemStack source, EquipmentSlot slot, Liquid liquid) {
         String key = blockKey(block);
         Contents stored = readContents(key);
 
@@ -836,25 +852,25 @@ public class AncientJug implements Listener {
 
         if (liquid.leftover != null) {
             // Тара возвращается пустой: бутылочка или ведро.
-            replaceOne(player, source, new ItemStack(liquid.leftover));
+            replaceOne(player, source, new ItemStack(liquid.leftover), slot);
         } else if (source.getAmount() > 1) {
             source.setAmount(source.getAmount() - 1);
         } else {
-            player.getInventory().setItemInMainHand(new ItemStack(Material.AIR));
+            setHandItem(player, slot, new ItemStack(Material.AIR));
         }
         player.updateInventory();
         player.playSound(player.getLocation(),
                 liquid.amount > 1 ? Sound.ITEM_BUCKET_EMPTY : Sound.ITEM_BOTTLE_EMPTY, 0.8f, 1.0f);
     }
 
-    /** Заменяет один предмет в руке на другой, не затирая остальной стек. */
-    private static void replaceOne(Player player, ItemStack source, ItemStack reward) {
+    /** Заменяет один предмет в указанной руке на другой, не затирая остальной стек. */
+    private static void replaceOne(Player player, ItemStack source, ItemStack reward, EquipmentSlot slot) {
         if (source.getAmount() > 1) {
             source.setAmount(source.getAmount() - 1);
             player.getInventory().addItem(reward).values()
                     .forEach(leftover -> player.getWorld().dropItemNaturally(player.getLocation(), leftover));
         } else {
-            player.getInventory().setItemInMainHand(reward);
+            setHandItem(player, slot, reward);
         }
     }
 
@@ -863,7 +879,7 @@ public class AncientJug implements Listener {
      * сторонняя жидкость возвращаются тем же предметом, каким их наливали.
      * Молоко в бутылочку не наливается — его черпают ведром.
      */
-    private boolean takeBottle(Player player, Block block, ItemStack bottle) {
+    private boolean takeBottle(Player player, Block block, ItemStack bottle, EquipmentSlot slot) {
         String key = blockKey(block);
         Contents stored = readContents(key);
         if (stored.count <= 0) return false;
@@ -880,7 +896,7 @@ public class AncientJug implements Listener {
         storage.markDirty();
         refresh(key);
 
-        replaceOne(player, bottle, filled);
+        replaceOne(player, bottle, filled, slot);
         player.updateInventory();
         player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_FILL, 0.8f, 1.0f);
         return true;
@@ -889,7 +905,7 @@ public class AncientJug implements Listener {
     /**
      * Пустое ведро черпает из кувшина воду или молоко: одно ведро — три порции.
      */
-    private boolean takeBucket(Player player, Block block, ItemStack bucket) {
+    private boolean takeBucket(Player player, Block block, ItemStack bucket, EquipmentSlot slot) {
         String key = blockKey(block);
         Contents stored = readContents(key);
         if (stored.count <= 0) return false;
@@ -908,7 +924,7 @@ public class AncientJug implements Listener {
         storage.markDirty();
         refresh(key);
 
-        replaceOne(player, bucket, filled);
+        replaceOne(player, bucket, filled, slot);
         player.updateInventory();
         player.playSound(player.getLocation(), Sound.ITEM_BUCKET_FILL, 0.8f, 1.0f);
         return true;
@@ -951,34 +967,69 @@ public class AncientJug implements Listener {
     // ===== ВЫЛИВАНИЕ НА ЗЕМЛЮ И ПРОПИТКА РАСТЕНИЙ =====
 
     /**
-     * Шифт + ПКМ с наполненным кувшином — одна порция выливается. Вылить можно
-     * в любом месте: и в воздух, и по любому блоку; сообщение всегда одно и то же.
+     * Шифт + ПКМ с наполненным кувшином — выливается одна порция. Вылить можно
+     * ХОТЬ КУДА: в воздух, в любой блок, во что угодно — кувшин при шифте никогда
+     * не ставится и ничего не открывает, всегда только выливается. Сообщение
+     * всегда одно и то же. Слушаем самым ранним приоритетом и без фильтра
+     * «отменено», чтобы жест не мог перехватить никто другой.
      * Пропитка растения — побочный эффект выливания: если порция попала на
      * грядку или куст, растение запоминает зелье (или молоко).
      */
-    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = false)
     public void onSpill(PlayerInteractEvent event) {
         Action action = event.getAction();
         if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) return;
-        if (event.getHand() != EquipmentSlot.HAND) return;
         Player player = event.getPlayer();
         if (!player.isSneaking()) return;
-        ItemStack main = player.getInventory().getItemInMainHand();
-        if (!isJug(main) || bottles(main) <= 0) return;
-        Contents contents = contentsOf(main);
+        // Кувшин может быть в любой руке: сначала смотрим ту, которой кликнули,
+        // потом вторую — выливание не должно зависеть от того, куда он положен.
+        EquipmentSlot slot = filledJugHand(player, event.getHand());
+        if (slot == null) return;
+        ItemStack jug = handItem(player, slot);
+        Contents contents = contentsOf(jug);
         if (contents.count <= 0) return;
         event.setCancelled(true);
+        spillPortion(player, slot, jug, contents,
+                action == Action.RIGHT_CLICK_BLOCK ? event.getClickedBlock() : null);
+    }
 
+    /**
+     * Выливает одну порцию из кувшина: брызги, красное сообщение, если под
+     * прицелом растение — оно попутно пропитывается.
+     */
+    private void spillPortion(Player player, EquipmentSlot slot, ItemStack jug, Contents contents, Block clicked) {
         String infusion = infusionOf(contents);
-        if (infusion != null && action == Action.RIGHT_CLICK_BLOCK) {
-            Block plant = plantAt(event.getClickedBlock());
+        if (infusion != null && clicked != null) {
+            Block plant = plantAt(clicked);
             if (plant != null) putInfusion(blockKey(plant), infusion);
         }
-        spillFx(player, action == Action.RIGHT_CLICK_BLOCK ? event.getClickedBlock() : null, contents);
+        spillFx(player, clicked, contents);
         player.sendActionBar("§cВы вылили жидкость из кувшина...");
-        swapJugInHand(player, main, contents.count <= 1
+        swapJugInHand(player, jug, slot, contents.count <= 1
                 ? new Contents(null, null, null, 0)
                 : new Contents(contents.kind, contents.potion, contents.custom, contents.count - 1));
+    }
+
+    /** Предмет в указанной руке игрока (null-рука считается главной). */
+    private static ItemStack handItem(Player player, EquipmentSlot slot) {
+        return slot == EquipmentSlot.OFF_HAND
+                ? player.getInventory().getItemInOffHand()
+                : player.getInventory().getItemInMainHand();
+    }
+
+    /**
+     * В какой руке наполненный кувшин для этого клика: сначала рука клика, затем
+     * вторая (клик по воздуху всегда приходит главной рукой, даже если кувшин в
+     * оффхенде). Возвращает null, если выливать нечего.
+     */
+    private EquipmentSlot filledJugHand(Player player, EquipmentSlot clicked) {
+        EquipmentSlot first = clicked == EquipmentSlot.OFF_HAND ? EquipmentSlot.OFF_HAND : EquipmentSlot.HAND;
+        EquipmentSlot second = first == EquipmentSlot.HAND ? EquipmentSlot.OFF_HAND : EquipmentSlot.HAND;
+        for (EquipmentSlot slot : new EquipmentSlot[]{first, second}) {
+            ItemStack item = handItem(player, slot);
+            if (isJug(item) && bottles(item) > 0) return slot;
+        }
+        return null;
     }
 
     /**
@@ -1036,24 +1087,33 @@ public class AncientJug implements Listener {
         world.playSound(spot, Sound.ENTITY_GENERIC_SPLASH, 0.6f, 1.2f);
     }
 
-    /** Меняет кувшин в руке на такой же, но с другим количеством порций. */
-    private void swapJugInHand(Player player, ItemStack main, Contents next) {
-        Component customName = main.getItemMeta() == null ? null : main.getItemMeta().displayName();
+    /** Меняет кувшин в указанной руке на такой же, но с другим количеством порций. */
+    private void swapJugInHand(Player player, ItemStack jug, EquipmentSlot slot, Contents next) {
+        Component customName = jug.getItemMeta() == null ? null : jug.getItemMeta().displayName();
         ItemStack updated = create(next.count, next.kind, next.potion, next.custom);
         if (customName != null && !customName.equals(ProfileItems.text(TITLE, NamedTextColor.GOLD))) {
             ItemMeta meta = updated.getItemMeta();
             meta.displayName(customName);
             updated.setItemMeta(meta);
         }
-        if (main.getAmount() > 1) {
-            main.setAmount(main.getAmount() - 1);
+        if (jug.getAmount() > 1) {
+            jug.setAmount(jug.getAmount() - 1);
             player.getInventory().addItem(updated).values()
                     .forEach(leftover -> player.getWorld().dropItemNaturally(player.getLocation(), leftover));
         } else {
-            player.getInventory().setItemInMainHand(updated);
+            setHandItem(player, slot, updated);
         }
         // Кувшин сменил вид (открытый/закрытый): заставляем клиент перерисовать предмет.
         player.updateInventory();
+    }
+
+    /** Кладёт предмет в указанную руку игрока. */
+    private static void setHandItem(Player player, EquipmentSlot slot, ItemStack item) {
+        if (slot == EquipmentSlot.OFF_HAND) {
+            player.getInventory().setItemInOffHand(item);
+        } else {
+            player.getInventory().setItemInMainHand(item);
+        }
     }
 
     // ===== ПРОПИТАННЫЙ УРОЖАЙ =====
@@ -1220,9 +1280,10 @@ public class AncientJug implements Listener {
         if (event.getAction() != Action.RIGHT_CLICK_AIR || event.getHand() != EquipmentSlot.HAND) return;
         Player player = event.getPlayer();
         if (player.isSneaking()) return;
-        ItemStack main = player.getInventory().getItemInMainHand();
-        if (!isJug(main) || bottles(main) <= 0) return;
-        Contents contents = contentsOf(main);
+        EquipmentSlot slot = filledJugHand(player, event.getHand());
+        if (slot == null) return;
+        ItemStack jug = handItem(player, slot);
+        Contents contents = contentsOf(jug);
         if (!MILK_KIND.equals(contents.kind) || contents.count >= BUCKET_SLOTS) return;
         player.sendActionBar("§cМолока меньше ведра — пить нечего. Нужно " + BUCKET_SLOTS + " порции.");
     }
