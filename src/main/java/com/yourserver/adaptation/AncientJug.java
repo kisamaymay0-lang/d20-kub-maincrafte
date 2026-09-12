@@ -1,7 +1,10 @@
 package com.yourserver.adaptation;
 
 import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.Consumable;
 import io.papermc.paper.datacomponent.item.Equippable;
+import io.papermc.paper.datacomponent.item.consumable.ItemUseAnimation;
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -25,6 +28,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Item;
+import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -55,8 +59,10 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.potion.PotionType;
-import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -94,9 +100,14 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * Вода и молоко наливаются и забираются вёдрами: одно ведро — три порции
  * («слота»). Молоко из кувшина пьют только при трёх и более порциях.
- * Растение можно пропитать зельем или молоком: урожай с него даёт эффект
- * зелья на 8 секунд, а молочный урожай срезает по 8 секунд со всех
- * активных эффектов.
+ *
+ * Питьё устроено как у ванильных зелий: ПКМ надо держать, игрок подносит
+ * кувшин ко рту, звучат глотки — за это отвечает компонент consumable.
+ * Выливание — это шифт + ПКМ в любом месте: порция уходит на землю, всегда
+ * с сообщением «Вы вылили жидкость из кувшина...». Если вылили на растение,
+ * оно попутно пропитывается (зельем с эффектами или молоком): урожай с него
+ * даёт эффект зелья на 4 секунды, а молочный урожай срезает по 8 секунд
+ * со всех активных эффектов.
  */
 public class AncientJug implements Listener {
 
@@ -123,12 +134,20 @@ public class AncientJug implements Listener {
 
     /** Биомы, в которых клюёт кувшин. */
     private static final Set<String> DESERT_BIOMES = Set.of("minecraft:desert");
-    /** Длительность питья, как у ванильных зелий. */
-    private static final int DRINK_TICKS = 32;
+    /** Сколько секунд держать ПКМ, чтобы выпить одну порцию из кувшина. */
+    private static final float DRINK_SECONDS = 1.6f;
+    /** Звук питья: как у ванильных бутылочек и зелий. */
+    private static final Key DRINK_SOUND = Key.key("entity.generic.drink");
+    /** Масштаб кувшина, который висит на спине надетого нагрудника. */
+    private static final float WORN_JUG_SCALE = 0.65f;
+    /** Насколько кувшин на спине смещён назад от центра игрока (в блоках). */
+    private static final double WORN_JUG_BACK = 0.34D;
+    /** Высота кувшина на спине над ногами игрока (в блоках). */
+    private static final double WORN_JUG_HEIGHT = 1.02D;
     /** Как часто (в тиках) реестр кувшинов пересобирается целиком. */
     private static final int PIN_RESCAN_TICKS = 200;
     /** Сколько длится эффект зелья со съеденного пропитанного урожая. */
-    private static final int INFUSED_EFFECT_TICKS = 20 * 8;
+    private static final int INFUSED_EFFECT_TICKS = 20 * 4;
     /** На сколько молочная пропитка срезает таймеры всех активных эффектов. */
     private static final int MILK_CUT_TICKS = 20 * 8;
     /** Сколько «слотов жидкости» наливает/забирает один предмет: бутылочка — 1, ведро — 3. */
@@ -160,8 +179,8 @@ public class AncientJug implements Listener {
     private final Map<String, JugPin> pins = new HashMap<>();
     private int guardTicks = PIN_RESCAN_TICKS;
     private int infusionTicks = INFUSION_SWEEP_TICKS;
-    /** Кто сейчас пьёт из кувшина. */
-    private final Map<UUID, DrinkSession> drinking = new HashMap<>();
+    /** Витрина кувшина на спине у тех, кто надел его в слот нагрудника. */
+    private final Map<UUID, ItemDisplay> wornJugs = new HashMap<>();
     /** Пропитанные зельем растения: ключ блока → зелье (живёт в jugs.yml). */
     private final Map<String, String> infusions = new HashMap<>();
 
@@ -186,6 +205,8 @@ public class AncientJug implements Listener {
         // канонической. Ваниль пересчитывает нот-блок от соседей, а ресурспак
         // выбирает модель именно по этой паре — любой сдвиг рисует чужой блок.
         Bukkit.getScheduler().runTaskTimer(plugin, this::guardTick, 1L, 1L);
+        // Каждый тик: кувшин, надетый в нагрудник, висит на спине игрока.
+        Bukkit.getScheduler().runTaskTimer(plugin, this::syncWornJugs, 1L, 1L);
         // Через пару секунд после запуска приводим в порядок кувшины в тех
         // чанках, что уже загружены (остальные проверятся при загрузке чанка).
         Bukkit.getScheduler().runTaskLater(plugin, this::restoreLoadedJugs, 60L);
@@ -264,7 +285,28 @@ public class AncientJug implements Listener {
         } catch (Throwable ignored) {
             // Старое ядро без компонента: предмет остаётся рабочим, просто не надевается.
         }
+        applyConsumable(item, bottles, kind);
         return item;
+    }
+
+    /**
+     * Делает кувшин «питьевым»: ПКМ надо держать, как с зельем, игрок подносит
+     * кувшин ко рту, звучат глотки. Молоко из неполной порции не пьётся, поэтому
+     * компонент ставим только когда порций хватает на глоток-ведро.
+     */
+    private void applyConsumable(ItemStack item, int bottles, String kind) {
+        if (bottles <= 0) return;
+        if (MILK_KIND.equals(kind) && bottles < BUCKET_SLOTS) return;
+        try {
+            item.setData(DataComponentTypes.CONSUMABLE, Consumable.consumable()
+                    .consumeSeconds(DRINK_SECONDS)
+                    .animation(ItemUseAnimation.DRINK)
+                    .sound(DRINK_SOUND)
+                    .hasConsumeParticles(false)
+                    .build());
+        } catch (Throwable ignored) {
+            // Старое ядро без компонента: остаётся прежнее разовое питьё по клику.
+        }
     }
 
     public boolean isJug(ItemStack item) {
@@ -909,12 +951,16 @@ public class AncientJug implements Listener {
     // ===== ВЫЛИВАНИЕ НА ЗЕМЛЮ И ПРОПИТКА РАСТЕНИЙ =====
 
     /**
-     * Шифт + ПКМ «в никуда» с наполненным кувшином — одна порция выливается на
-     * землю. По блокам не выливаем: там кувшин ведёт себя как обычный предмет.
+     * Шифт + ПКМ с наполненным кувшином — одна порция выливается. Вылить можно
+     * в любом месте: и в воздух, и по любому блоку; сообщение всегда одно и то же.
+     * Пропитка растения — побочный эффект выливания: если порция попала на
+     * грядку или куст, растение запоминает зелье (или молоко).
      */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onSpill(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_AIR || event.getHand() != EquipmentSlot.HAND) return;
+        Action action = event.getAction();
+        if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) return;
+        if (event.getHand() != EquipmentSlot.HAND) return;
         Player player = event.getPlayer();
         if (!player.isSneaking()) return;
         ItemStack main = player.getInventory().getItemInMainHand();
@@ -922,7 +968,13 @@ public class AncientJug implements Listener {
         Contents contents = contentsOf(main);
         if (contents.count <= 0) return;
         event.setCancelled(true);
-        spillFx(player, null, contents);
+
+        String infusion = infusionOf(contents);
+        if (infusion != null && action == Action.RIGHT_CLICK_BLOCK) {
+            Block plant = plantAt(event.getClickedBlock());
+            if (plant != null) putInfusion(blockKey(plant), infusion);
+        }
+        spillFx(player, action == Action.RIGHT_CLICK_BLOCK ? event.getClickedBlock() : null, contents);
         player.sendActionBar("§cВы вылили жидкость из кувшина...");
         swapJugInHand(player, main, contents.count <= 1
                 ? new Contents(null, null, null, 0)
@@ -930,45 +982,15 @@ public class AncientJug implements Listener {
     }
 
     /**
-     * Шифт + ПКМ по растению с зельем или молоком в кувшине — растение
-     * пропитывается насовсем: собранный с него урожай при съедании даст эффект
-     * зелья на 8 секунд, а молочный — срежет по 8 секунд со всех активных
-     * эффектов. Пропитка не тает со временем, но после сбора урожая растение
-     * надо полить заново.
+     * Чем пропитается растение, если вылить на него эту жидкость: молоко —
+     * молочной пропиткой, зелье — только если у него есть эффекты. Мёд, вода и
+     * чужие жидкости просто впитываются в землю (без пропитки и без ругани).
      */
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    public void onInfusePlant(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getHand() != EquipmentSlot.HAND) return;
-        Player player = event.getPlayer();
-        if (!player.isSneaking()) return;
-        ItemStack main = player.getInventory().getItemInMainHand();
-        if (!isJug(main) || bottles(main) <= 0) return;
-        Contents contents = contentsOf(main);
-        if (contents.count <= 0) return;
-        boolean milk = MILK_KIND.equals(contents.kind);
-        if (!milk && !POTION_KIND.equals(contents.kind)) {
-            player.sendActionBar("§cПропитать растение можно зельем или молоком.");
-            return;
-        }
-        String infusion = MILK_INFUSION;
-        if (!milk) {
-            PotionType type = parseType(contents.potion);
-            if (type == null) return;
-            if (type.getPotionEffects().isEmpty()) {
-                player.sendActionBar("§cУ этого зелья нет эффектов — пропитывать нечем.");
-                return;
-            }
-            infusion = contents.potion;
-        }
-        Block plant = plantAt(event.getClickedBlock());
-        if (plant == null) return;
-        event.setCancelled(true);
-        putInfusion(blockKey(plant), infusion);
-        spillFx(player, plant, contents);
-        player.sendActionBar("§cВы вылили жидкость из кувшина...");
-        swapJugInHand(player, main, contents.count <= 1
-                ? new Contents(null, null, null, 0)
-                : new Contents(contents.kind, contents.potion, contents.custom, contents.count - 1));
+    private static String infusionOf(Contents contents) {
+        if (MILK_KIND.equals(contents.kind)) return MILK_INFUSION;
+        if (!POTION_KIND.equals(contents.kind)) return null;
+        PotionType type = parseType(contents.potion);
+        return type != null && !type.getPotionEffects().isEmpty() ? contents.potion : null;
     }
 
     /** Растение под прицелом: сам куст/грядка или блок над вспаханной землёй. */
@@ -1173,68 +1195,47 @@ public class AncientJug implements Listener {
         }
     }
 
-    // ===== ПИТЬЁ ПРЯМО ИЗ ИНВЕНТАРЯ (ПКМ по воздуху с кувшином) =====
+    // ===== ПИТЬЁ ПРЯМО ИЗ ИНВЕНТАРЯ =====
+    // Держим ПКМ — ваниль сама крутит анимацию «поднести ко рту», играет глотки
+    // и доводит использование до конца; на финише порцию считаем мы.
 
-    private static final class DrinkSession {
-        final ItemStack snapshot;
-        BukkitTask task;
-        int ticks;
-
-        DrinkSession(ItemStack snapshot) {
-            this.snapshot = snapshot;
-        }
+    /**
+     * Ваниль закончила использование кувшина: предмет не отдаём — сами вычитаем
+     * порции (молоко — сразу ведро) и накладываем эффекты жидкости.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onJugDrink(PlayerItemConsumeEvent event) {
+        ItemStack item = event.getItem();
+        if (!isJug(item)) return;
+        event.setCancelled(true);
+        Player player = event.getPlayer();
+        // Шифт с кувшином в руке — это выливание, а не питьё.
+        if (player.isSneaking()) return;
+        finishDrink(player, item, event.getHand());
     }
 
-    @EventHandler(priority = EventPriority.HIGH)
-    public void onDrink(PlayerInteractEvent event) {
+    /** Молоко из кувшина пьют только «ведром»: подсказываем, если порций мало. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onMilkSipHint(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_AIR || event.getHand() != EquipmentSlot.HAND) return;
         Player player = event.getPlayer();
-        // Шифт с кувшином в руке — это выливание на землю, а не питьё.
         if (player.isSneaking()) return;
         ItemStack main = player.getInventory().getItemInMainHand();
         if (!isJug(main) || bottles(main) <= 0) return;
-        if (drinking.containsKey(player.getUniqueId())) return;
         Contents contents = contentsOf(main);
-        if (MILK_KIND.equals(contents.kind) && contents.count < BUCKET_SLOTS) {
-            // Молоко пьётся «ведром»: из неполной порции глоток не сделать.
-            event.setCancelled(true);
-            player.sendActionBar("§cМолока меньше ведра — пить нечего. Нужно " + BUCKET_SLOTS + " порции.");
-            return;
-        }
-        event.setCancelled(true);
-        DrinkSession session = new DrinkSession(main.clone());
-        session.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> drinkTick(player, session), 4L, 4L);
-        drinking.put(player.getUniqueId(), session);
-    }
-
-    private void drinkTick(Player player, DrinkSession session) {
-        UUID id = player.getUniqueId();
-        ItemStack main = player.getInventory().getItemInMainHand();
-        if (!player.isOnline() || player.isDead() || !main.isSimilar(session.snapshot)) {
-            stopDrinking(id);
-            return;
-        }
-        session.ticks += 4;
-        player.playSound(player.getEyeLocation(), Sound.ENTITY_GENERIC_DRINK, 0.5f,
-                0.9f + ThreadLocalRandom.current().nextFloat() * 0.3f);
-        if (session.ticks >= DRINK_TICKS) {
-            stopDrinking(id);
-            finishDrink(player, session.snapshot);
-        }
-    }
-
-    private void stopDrinking(UUID id) {
-        DrinkSession session = drinking.remove(id);
-        if (session != null && session.task != null) session.task.cancel();
+        if (!MILK_KIND.equals(contents.kind) || contents.count >= BUCKET_SLOTS) return;
+        player.sendActionBar("§cМолока меньше ведра — пить нечего. Нужно " + BUCKET_SLOTS + " порции.");
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        stopDrinking(event.getPlayer().getUniqueId());
+        removeWornDisplay(event.getPlayer().getUniqueId());
     }
 
-    private void finishDrink(Player player, ItemStack snapshot) {
-        ItemStack main = player.getInventory().getItemInMainHand();
+    private void finishDrink(Player player, ItemStack snapshot, EquipmentSlot hand) {
+        ItemStack main = hand == EquipmentSlot.OFF_HAND
+                ? player.getInventory().getItemInOffHand()
+                : player.getInventory().getItemInMainHand();
         if (!main.isSimilar(snapshot)) return;
         Contents contents = contentsOf(main);
         if (contents.count <= 0) return;
@@ -1257,6 +1258,8 @@ public class AncientJug implements Listener {
             main.setAmount(main.getAmount() - 1);
             player.getInventory().addItem(updated).values()
                     .forEach(leftover -> player.getWorld().dropItemNaturally(player.getLocation(), leftover));
+        } else if (hand == EquipmentSlot.OFF_HAND) {
+            player.getInventory().setItemInOffHand(updated);
         } else {
             player.getInventory().setItemInMainHand(updated);
         }
@@ -1352,8 +1355,69 @@ public class AncientJug implements Listener {
         }
     }
 
+    // ===== КУВШИН НА СПИНЕ (надетый кувшин) =====
+    // Кувшин — обычный предмет, на модели игрока брони у него нет, поэтому рядом
+    // висит витрина-сущность (item display) с тем же предметом. Стоит она на
+    // спине: смещения ниже можно подкрутить, они в блоках.
+
+    /** Раз в тик: у кого кувшин в слоте нагрудника — тому витрину на спину. */
+    private void syncWornJugs() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            ItemStack chest = player.getInventory().getChestplate();
+            UUID id = player.getUniqueId();
+            if (!isJug(chest)) {
+                if (wornJugs.containsKey(id)) removeWornDisplay(id);
+                continue;
+            }
+            ItemDisplay display = wornJugs.get(id);
+            if (display == null || !display.isValid()) {
+                wornJugs.remove(id);
+                wornJugs.put(id, spawnWornDisplay(player, chest));
+                continue;
+            }
+            if (!chest.isSimilar(display.getItemStack())) display.setItemStack(chest.clone());
+            Location spot = backSpot(player);
+            display.teleport(spot);
+            display.setRotation(spot.getYaw(), 0f);
+        }
+    }
+
+    /** Витрина с кувшином: масштаб и поворот задаются преобразованием. */
+    private ItemDisplay spawnWornDisplay(Player player, ItemStack jug) {
+        return player.getWorld().spawn(backSpot(player), ItemDisplay.class, display -> {
+            display.setItemStack(jug.clone());
+            display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
+            display.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),
+                    new Vector3f(WORN_JUG_SCALE), new Quaternionf()));
+            display.setInterpolationDuration(0);
+            display.setTeleportDuration(1);
+            display.setShadowRadius(0f);
+            display.setShadowStrength(0f);
+            display.setPersistent(false);
+            display.setInvulnerable(true);
+            display.setGravity(false);
+            display.setSilent(true);
+        });
+    }
+
+    /** Точка на спине игрока: назад по взгляду и на высоту лопаток. */
+    private static Location backSpot(Player player) {
+        Location loc = player.getLocation();
+        double yaw = Math.toRadians(loc.getYaw());
+        return new Location(loc.getWorld(),
+                loc.getX() + Math.sin(yaw) * WORN_JUG_BACK,
+                loc.getY() + WORN_JUG_HEIGHT,
+                loc.getZ() - Math.cos(yaw) * WORN_JUG_BACK,
+                loc.getYaw(), 0f);
+    }
+
+    private void removeWornDisplay(UUID id) {
+        ItemDisplay display = wornJugs.remove(id);
+        if (display != null && display.isValid()) display.remove();
+    }
+
     void disable() {
-        for (UUID id : new ArrayList<>(drinking.keySet())) stopDrinking(id);
+        for (UUID id : new ArrayList<>(wornJugs.keySet())) removeWornDisplay(id);
         storage.flushBlocking();
     }
 }
