@@ -86,10 +86,17 @@ import java.util.concurrent.ThreadLocalRandom;
  * пустая тара возвращается. Сломанный кувшин сохраняет содержимое
  * (хранится в jugs.yml), пить из него можно прямо из руки (ПКМ по воздуху,
  * пьётся 1.6 секунды, как обычное зелье). Кувшин можно надеть как
- * нагрудник — тогда он не замедляет. Пока кувшин хотя бы с одной
- * бутылочкой лежит в инвентаре (не надет), игрок получает Замедление IV
+ * нагрудник — тогда он не замедляет (надеть можно только вручную, положив
+ * кувшин в слот). Пока кувшин хотя бы с одной
+ * бутылочкой лежит в инвентаре (не надет), игрок получает Замедление II
  * без частиц, прыгает примерно в половину блока, а на элитрах теряет их
  * прочность в 4 раза быстрее и медленно тянется вниз.
+ *
+ * Вода и молоко наливаются и забираются вёдрами: одно ведро — три порции
+ * («слота»). Молоко из кувшина пьют только при трёх и более порциях.
+ * Растение можно пропитать зельем или молоком: урожай с него даёт эффект
+ * зелья на 8 секунд, а молочный урожай срезает по 8 секунд со всех
+ * активных эффектов.
  */
 public class AncientJug implements Listener {
 
@@ -104,6 +111,15 @@ public class AncientJug implements Listener {
     static final String POTION_KIND = "POTION";
     static final String HONEY_KIND = "HONEY";
     static final String CUSTOM_KIND = "CUSTOM";
+    /** Молоко: наливается и забирается ведром, порция — 3 слота. */
+    static final String MILK_KIND = "MILK";
+    /** Вода: наливается и забирается ведром, порция — 3 слота. */
+    static final String WATER_KIND = "WATER";
+    /**
+     * Метка «растение пропитано молоком» в записи о пропитке. Имена зелий пишутся
+     * без решётки, так что метка не может совпасть с настоящим зельем.
+     */
+    static final String MILK_INFUSION = "#milk";
 
     /** Биомы, в которых клюёт кувшин. */
     private static final Set<String> DESERT_BIOMES = Set.of("minecraft:desert");
@@ -112,7 +128,11 @@ public class AncientJug implements Listener {
     /** Как часто (в тиках) реестр кувшинов пересобирается целиком. */
     private static final int PIN_RESCAN_TICKS = 200;
     /** Сколько длится эффект зелья со съеденного пропитанного урожая. */
-    private static final int INFUSED_EFFECT_TICKS = 20 * 30;
+    private static final int INFUSED_EFFECT_TICKS = 20 * 8;
+    /** На сколько молочная пропитка срезает таймеры всех активных эффектов. */
+    private static final int MILK_CUT_TICKS = 20 * 8;
+    /** Сколько «слотов жидкости» наливает/забирает один предмет: бутылочка — 1, ведро — 3. */
+    private static final int BUCKET_SLOTS = 3;
     /**
      * Сила прыжка под весом кувшина: 0.27 даёт подъём примерно 0.58 блока
      * (ванильные 0.42 — это 1.25 блока). Плиту и ступеньку игрок ещё берёт,
@@ -191,6 +211,8 @@ public class AncientJug implements Listener {
         String identity() {
             if (count <= 0) return "";
             if (HONEY_KIND.equals(kind)) return "HONEY";
+            if (MILK_KIND.equals(kind)) return "MILK";
+            if (WATER_KIND.equals(kind)) return "WATER";
             if (CUSTOM_KIND.equals(kind)) return "CUSTOM:" + (custom == null ? "" : Base64.getEncoder().encodeToString(custom));
             return "POTION:" + (potion == null ? "" : potion);
         }
@@ -232,9 +254,13 @@ public class AncientJug implements Listener {
         meta.getPersistentDataContainer().set(jugKey, PersistentDataType.BYTE, (byte) 1);
         item.setItemMeta(meta);
         try {
-            // Кувшин надевается в слот нагрудника: надетый полный кувшин давит
-            // на игрока (замедление и низкий прыжок), лежащий в инвентаре — нет.
-            item.setData(DataComponentTypes.EQUIPPABLE, Equippable.equippable(EquipmentSlot.CHEST).build());
+            // Кувшин можно надеть в слот нагрудника, но только положив его туда
+            // руками: swappable = false убирает ванильное «надевание по ПКМ»,
+            // которое перехватывало жест выливания и питья.
+            item.setData(DataComponentTypes.EQUIPPABLE, Equippable.equippable(EquipmentSlot.CHEST)
+                    .swappable(false)
+                    .dispensable(false)
+                    .build());
         } catch (Throwable ignored) {
             // Старое ядро без компонента: предмет остаётся рабочим, просто не надевается.
         }
@@ -272,6 +298,14 @@ public class AncientJug implements Listener {
         ItemStack sample;
         if (HONEY_KIND.equals(kind)) {
             sample = new ItemStack(Material.HONEY_BOTTLE);
+        } else if (MILK_KIND.equals(kind)) {
+            sample = new ItemStack(Material.MILK_BUCKET);
+        } else if (WATER_KIND.equals(kind)) {
+            sample = new ItemStack(Material.POTION);
+            if (sample.getItemMeta() instanceof PotionMeta meta) {
+                meta.setBasePotionType(PotionType.WATER);
+                sample.setItemMeta(meta);
+            }
         } else if (CUSTOM_KIND.equals(kind)) {
             sample = null;
             try {
@@ -640,17 +674,23 @@ public class AncientJug implements Listener {
         final String kind;
         final String potion;
         final byte[] custom;
-        final boolean returnsBottle;
+        /** Сколько порций наливает один предмет: бутылочка — 1, ведро — 3. */
+        final int amount;
+        /** Что вернуть вместо опустевшей тары: бутылочку, ведро или ничего. */
+        final Material leftover;
 
-        Liquid(String kind, String potion, byte[] custom, boolean returnsBottle) {
+        Liquid(String kind, String potion, byte[] custom, int amount, Material leftover) {
             this.kind = kind;
             this.potion = potion;
             this.custom = custom;
-            this.returnsBottle = returnsBottle;
+            this.amount = amount;
+            this.leftover = leftover;
         }
 
         String identity() {
             if (HONEY_KIND.equals(kind)) return "HONEY";
+            if (MILK_KIND.equals(kind)) return "MILK";
+            if (WATER_KIND.equals(kind)) return "WATER";
             if (CUSTOM_KIND.equals(kind)) return "CUSTOM:" + (custom == null ? "" : Base64.getEncoder().encodeToString(custom));
             return "POTION:" + (potion == null ? "" : potion);
         }
@@ -660,9 +700,12 @@ public class AncientJug implements Listener {
         if (item.getType() == Material.POTION && item.getItemMeta() instanceof PotionMeta meta) {
             PotionType type = meta.getBasePotionType();
             if (type == null) return null;
-            return new Liquid(POTION_KIND, type.name(), null, true);
+            return new Liquid(POTION_KIND, type.name(), null, 1, Material.GLASS_BOTTLE);
         }
-        if (item.getType() == Material.HONEY_BOTTLE) return new Liquid(HONEY_KIND, null, null, true);
+        if (item.getType() == Material.HONEY_BOTTLE) return new Liquid(HONEY_KIND, null, null, 1, Material.GLASS_BOTTLE);
+        // Вёдра: одно ведро воды или молока — сразу три порции кувшина.
+        if (item.getType() == Material.WATER_BUCKET) return new Liquid(WATER_KIND, null, null, BUCKET_SLOTS, Material.BUCKET);
+        if (item.getType() == Material.MILK_BUCKET) return new Liquid(MILK_KIND, null, null, BUCKET_SLOTS, Material.BUCKET);
         if (item.hasItemMeta()) {
             // Универсальный маркер для жидкостей из других плагинов: любой
             // неймспейс, имя ключа "liquid".
@@ -671,7 +714,7 @@ public class AncientJug implements Listener {
             if (marked) {
                 ItemStack one = item.clone();
                 one.setAmount(1);
-                return new Liquid(CUSTOM_KIND, null, one.serializeAsBytes(), false);
+                return new Liquid(CUSTOM_KIND, null, one.serializeAsBytes(), 1, null);
             }
         }
         return null;
@@ -704,6 +747,11 @@ public class AncientJug implements Listener {
             if (takeBottle(player, block, hand)) event.setCancelled(true);
             return;
         }
+        if (event.getHand() == EquipmentSlot.HAND && hand.getType() == Material.BUCKET) {
+            // Ведро черпает воду или молоко: одна порция ведра — три порции кувшина.
+            if (takeBucket(player, block, hand)) event.setCancelled(true);
+            return;
+        }
         if (ContainerInteraction.bypassMenu(player.isSneaking(),
                 player.getInventory().getItemInMainHand().getType().isAir(),
                 player.getInventory().getItemInOffHand().getType().isAir())) {
@@ -722,8 +770,10 @@ public class AncientJug implements Listener {
         String key = blockKey(block);
         Contents stored = readContents(key);
 
-        if (stored.count >= MAX_BOTTLES) {
-            player.sendActionBar("§cКувшин полон! Больше " + MAX_BOTTLES + " бутылочек не влить.");
+        if (stored.count + liquid.amount > MAX_BOTTLES) {
+            player.sendActionBar(liquid.amount > 1
+                    ? "§cВ кувшине нет места на ведро: нужно " + liquid.amount + " порции."
+                    : "§cКувшин полон! Больше " + MAX_BOTTLES + " порций не влить.");
             return;
         }
         if (stored.count > 0 && !stored.identity().equals(liquid.identity())) {
@@ -731,7 +781,7 @@ public class AncientJug implements Listener {
             return;
         }
 
-        int newCount = stored.count + 1;
+        int newCount = stored.count + liquid.amount;
         writeContents(key, new Contents(liquid.kind, liquid.potion, liquid.custom, newCount));
         storage.markDirty();
 
@@ -742,31 +792,43 @@ public class AncientJug implements Listener {
         }
         refresh(key);
 
-        if (liquid.returnsBottle) {
-            // Бутылочка возвращается пустой.
-            if (source.getAmount() > 1) {
-                source.setAmount(source.getAmount() - 1);
-                player.getInventory().addItem(new ItemStack(Material.GLASS_BOTTLE)).values()
-                        .forEach(leftover -> player.getWorld().dropItemNaturally(player.getLocation(), leftover));
-            } else {
-                player.getInventory().setItemInMainHand(new ItemStack(Material.GLASS_BOTTLE));
-            }
+        if (liquid.leftover != null) {
+            // Тара возвращается пустой: бутылочка или ведро.
+            replaceOne(player, source, new ItemStack(liquid.leftover));
         } else if (source.getAmount() > 1) {
             source.setAmount(source.getAmount() - 1);
         } else {
             player.getInventory().setItemInMainHand(new ItemStack(Material.AIR));
         }
-        player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_EMPTY, 0.8f, 1.0f);
+        player.updateInventory();
+        player.playSound(player.getLocation(),
+                liquid.amount > 1 ? Sound.ITEM_BUCKET_EMPTY : Sound.ITEM_BOTTLE_EMPTY, 0.8f, 1.0f);
+    }
+
+    /** Заменяет один предмет в руке на другой, не затирая остальной стек. */
+    private static void replaceOne(Player player, ItemStack source, ItemStack reward) {
+        if (source.getAmount() > 1) {
+            source.setAmount(source.getAmount() - 1);
+            player.getInventory().addItem(reward).values()
+                    .forEach(leftover -> player.getWorld().dropItemNaturally(player.getLocation(), leftover));
+        } else {
+            player.getInventory().setItemInMainHand(reward);
+        }
     }
 
     /**
-     * Пустая бутылочка забирает из кувшина одну порцию: зелье, мёд или
+     * Пустая бутылочка забирает из кувшина одну порцию: зелье, мёд, вода или
      * сторонняя жидкость возвращаются тем же предметом, каким их наливали.
+     * Молоко в бутылочку не наливается — его черпают ведром.
      */
     private boolean takeBottle(Player player, Block block, ItemStack bottle) {
         String key = blockKey(block);
         Contents stored = readContents(key);
         if (stored.count <= 0) return false;
+        if (MILK_KIND.equals(stored.kind)) {
+            player.sendActionBar("§cМолоко из кувшина набирают ведром: нужно " + BUCKET_SLOTS + " порции.");
+            return true;
+        }
         ItemStack filled = bottleOf(stored);
         if (filled == null) return false;
 
@@ -776,15 +838,45 @@ public class AncientJug implements Listener {
         storage.markDirty();
         refresh(key);
 
-        if (bottle.getAmount() > 1) {
-            bottle.setAmount(bottle.getAmount() - 1);
-            player.getInventory().addItem(filled).values()
-                    .forEach(leftover -> player.getWorld().dropItemNaturally(player.getLocation(), leftover));
-        } else {
-            player.getInventory().setItemInMainHand(filled);
-        }
+        replaceOne(player, bottle, filled);
+        player.updateInventory();
         player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_FILL, 0.8f, 1.0f);
         return true;
+    }
+
+    /**
+     * Пустое ведро черпает из кувшина воду или молоко: одно ведро — три порции.
+     */
+    private boolean takeBucket(Player player, Block block, ItemStack bucket) {
+        String key = blockKey(block);
+        Contents stored = readContents(key);
+        if (stored.count <= 0) return false;
+        ItemStack filled = bucketOf(stored);
+        if (filled == null) {
+            player.sendActionBar("§cВедром из кувшина набирают только воду и молоко.");
+            return true;
+        }
+        if (stored.count < BUCKET_SLOTS) {
+            player.sendActionBar("§cВ кувшине меньше ведра — жидкости не хватает.");
+            return true;
+        }
+        writeContents(key, stored.count <= BUCKET_SLOTS
+                ? new Contents(null, null, null, 0)
+                : new Contents(stored.kind, stored.potion, stored.custom, stored.count - BUCKET_SLOTS));
+        storage.markDirty();
+        refresh(key);
+
+        replaceOne(player, bucket, filled);
+        player.updateInventory();
+        player.playSound(player.getLocation(), Sound.ITEM_BUCKET_FILL, 0.8f, 1.0f);
+        return true;
+    }
+
+    /** Ведро воды или молока на три порции из кувшина. */
+    private ItemStack bucketOf(Contents contents) {
+        if (WATER_KIND.equals(contents.kind)) return new ItemStack(Material.WATER_BUCKET);
+        if (MILK_KIND.equals(contents.kind)) return new ItemStack(Material.MILK_BUCKET);
+        return null;
     }
 
     /** Предмет с одной порцией жидкости из кувшина. */
@@ -800,6 +892,14 @@ public class AncientJug implements Listener {
             return potion;
         }
         if (HONEY_KIND.equals(contents.kind)) return new ItemStack(Material.HONEY_BOTTLE);
+        if (WATER_KIND.equals(contents.kind)) {
+            ItemStack water = new ItemStack(Material.POTION);
+            if (water.getItemMeta() instanceof PotionMeta meta) {
+                meta.setBasePotionType(PotionType.WATER);
+                water.setItemMeta(meta);
+            }
+            return water;
+        }
         if (CUSTOM_KIND.equals(contents.kind) && contents.custom != null) {
             try { return ItemStack.deserializeBytes(contents.custom); } catch (Throwable ignored) { return null; }
         }
@@ -830,9 +930,11 @@ public class AncientJug implements Listener {
     }
 
     /**
-     * Шифт + ПКМ по растению с зельем в кувшине — растение пропитывается насовсем:
-     * собранный с него урожай при съедании даст эффект зелья. Пропитка не тает со
-     * временем, но после сбора урожая растение надо полить заново.
+     * Шифт + ПКМ по растению с зельем или молоком в кувшине — растение
+     * пропитывается насовсем: собранный с него урожай при съедании даст эффект
+     * зелья на 8 секунд, а молочный — срежет по 8 секунд со всех активных
+     * эффектов. Пропитка не тает со временем, но после сбора урожая растение
+     * надо полить заново.
      */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onInfusePlant(PlayerInteractEvent event) {
@@ -843,22 +945,27 @@ public class AncientJug implements Listener {
         if (!isJug(main) || bottles(main) <= 0) return;
         Contents contents = contentsOf(main);
         if (contents.count <= 0) return;
-        if (!POTION_KIND.equals(contents.kind)) {
-            player.sendActionBar("§cПропитать растение можно только зельем.");
+        boolean milk = MILK_KIND.equals(contents.kind);
+        if (!milk && !POTION_KIND.equals(contents.kind)) {
+            player.sendActionBar("§cПропитать растение можно зельем или молоком.");
             return;
         }
-        PotionType type = parseType(contents.potion);
-        if (type == null) return;
-        if (type.getPotionEffects().isEmpty()) {
-            player.sendActionBar("§cУ этого зелья нет эффектов — пропитывать нечем.");
-            return;
+        String infusion = MILK_INFUSION;
+        if (!milk) {
+            PotionType type = parseType(contents.potion);
+            if (type == null) return;
+            if (type.getPotionEffects().isEmpty()) {
+                player.sendActionBar("§cУ этого зелья нет эффектов — пропитывать нечем.");
+                return;
+            }
+            infusion = contents.potion;
         }
         Block plant = plantAt(event.getClickedBlock());
         if (plant == null) return;
         event.setCancelled(true);
-        putInfusion(blockKey(plant), contents.potion);
+        putInfusion(blockKey(plant), infusion);
         spillFx(player, plant, contents);
-        player.sendActionBar("§aРастение пропитано зельем — урожай запомнит эффект.");
+        player.sendActionBar("§cВы вылили жидкость из кувшина...");
         swapJugInHand(player, main, contents.count <= 1
                 ? new Contents(null, null, null, 0)
                 : new Contents(contents.kind, contents.potion, contents.custom, contents.count - 1));
@@ -923,6 +1030,8 @@ public class AncientJug implements Listener {
         } else {
             player.getInventory().setItemInMainHand(updated);
         }
+        // Кувшин сменил вид (открытый/закрытый): заставляем клиент перерисовать предмет.
+        player.updateInventory();
     }
 
     // ===== ПРОПИТАННЫЙ УРОЖАЙ =====
@@ -970,14 +1079,18 @@ public class AncientJug implements Listener {
         return potion;
     }
 
-    /** Помечает еду меткой «пропитано зельем»; не еду не трогаем. */
-    private ItemStack infusedProduce(ItemStack stack, String potion) {
+    /**
+     * Помечает еду меткой «пропитано»; не еду не трогаем. Молочная пропитка
+     * подписана «Пропитано молоком» тем же цветом, что и зельевая.
+     */
+    private ItemStack infusedProduce(ItemStack stack, String infusion) {
         if (stack == null || stack.getType().isAir() || !isEdible(stack)) return null;
         ItemStack marked = stack.clone();
         ItemMeta meta = marked.getItemMeta();
-        meta.getPersistentDataContainer().set(infuseKey, PersistentDataType.STRING, potion);
+        meta.getPersistentDataContainer().set(infuseKey, PersistentDataType.STRING, infusion);
         List<Component> lore = meta.lore() == null ? new ArrayList<>() : new ArrayList<>(meta.lore());
-        lore.add(ProfileItems.text("Пропитано зельем", NamedTextColor.LIGHT_PURPLE));
+        lore.add(ProfileItems.text(MILK_INFUSION.equals(infusion) ? "Пропитано молоком" : "Пропитано зельем",
+                NamedTextColor.LIGHT_PURPLE));
         meta.lore(lore);
         marked.setItemMeta(meta);
         return marked;
@@ -1025,21 +1138,39 @@ public class AncientJug implements Listener {
         dropInfusion(key);
     }
 
-    /** Пропитанная еда при съедании даёт эффект зелья на 30 секунд. */
+    /**
+     * Пропитанная еда при съедании даёт эффект зелья на 8 секунд, а молочная —
+     * срезает по 8 секунд со всех активных эффектов игрока.
+     */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onInfusedEat(PlayerItemConsumeEvent event) {
         ItemStack item = event.getItem();
         if (item == null || !item.hasItemMeta()) return;
-        String potion = item.getItemMeta().getPersistentDataContainer().get(infuseKey, PersistentDataType.STRING);
-        if (potion == null) return;
-        PotionType type = parseType(potion);
-        if (type == null) return;
+        String infusion = item.getItemMeta().getPersistentDataContainer().get(infuseKey, PersistentDataType.STRING);
+        if (infusion == null) return;
         Player player = event.getPlayer();
-        for (PotionEffect effect : type.getPotionEffects()) {
-            player.addPotionEffect(new PotionEffect(effect.getType(), INFUSED_EFFECT_TICKS,
-                    effect.getAmplifier(), effect.isAmbient(), effect.hasParticles(), effect.hasIcon()));
+        if (MILK_INFUSION.equals(infusion)) {
+            cutEffectTimers(player);
+        } else {
+            PotionType type = parseType(infusion);
+            if (type == null) return;
+            for (PotionEffect effect : type.getPotionEffects()) {
+                player.addPotionEffect(new PotionEffect(effect.getType(), INFUSED_EFFECT_TICKS,
+                        effect.getAmplifier(), effect.isAmbient(), effect.hasParticles(), effect.hasIcon()));
+            }
         }
         player.playSound(player.getLocation(), Sound.ENTITY_GENERIC_DRINK, 0.5f, 1.3f);
+    }
+
+    /** Молочная пропитка: всем активным эффектам минус 8 секунд (короткие заканчиваются). */
+    private void cutEffectTimers(Player player) {
+        for (PotionEffect effect : new ArrayList<>(player.getActivePotionEffects())) {
+            // Эффект без срока (бесконечный) не трогаем — у него нет таймера.
+            if (effect.getDuration() < 0) continue;
+            int left = effect.getDuration() - MILK_CUT_TICKS;
+            player.removePotionEffect(effect.getType());
+            if (left > 0) player.addPotionEffect(effect.withDuration(left));
+        }
     }
 
     // ===== ПИТЬЁ ПРЯМО ИЗ ИНВЕНТАРЯ (ПКМ по воздуху с кувшином) =====
@@ -1063,6 +1194,13 @@ public class AncientJug implements Listener {
         ItemStack main = player.getInventory().getItemInMainHand();
         if (!isJug(main) || bottles(main) <= 0) return;
         if (drinking.containsKey(player.getUniqueId())) return;
+        Contents contents = contentsOf(main);
+        if (MILK_KIND.equals(contents.kind) && contents.count < BUCKET_SLOTS) {
+            // Молоко пьётся «ведром»: из неполной порции глоток не сделать.
+            event.setCancelled(true);
+            player.sendActionBar("§cМолока меньше ведра — пить нечего. Нужно " + BUCKET_SLOTS + " порции.");
+            return;
+        }
         event.setCancelled(true);
         DrinkSession session = new DrinkSession(main.clone());
         session.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> drinkTick(player, session), 4L, 4L);
@@ -1106,7 +1244,9 @@ public class AncientJug implements Listener {
 
         Component customName = main.getItemMeta().displayName();
         Component defaultName = ProfileItems.text(TITLE, NamedTextColor.GOLD);
-        ItemStack updated = create(contents.count - 1, contents.kind, contents.potion, contents.custom);
+        int portion = MILK_KIND.equals(contents.kind) ? BUCKET_SLOTS : 1;
+        ItemStack updated = create(Math.max(0, contents.count - portion),
+                contents.kind, contents.potion, contents.custom);
         if (customName != null && !customName.equals(defaultName)) {
             ItemMeta updatedMeta = updated.getItemMeta();
             updatedMeta.displayName(customName);
@@ -1120,12 +1260,18 @@ public class AncientJug implements Listener {
         } else {
             player.getInventory().setItemInMainHand(updated);
         }
+        player.updateInventory();
     }
 
     private void applyDrinkEffects(Player player, Contents contents) {
         if (POTION_KIND.equals(contents.kind)) {
             PotionType type = parseType(contents.potion);
             if (type != null) for (PotionEffect effect : type.getPotionEffects()) player.addPotionEffect(effect);
+        } else if (MILK_KIND.equals(contents.kind)) {
+            // Молоко снимает все эффекты, как ванильное ведро молока.
+            for (PotionEffect effect : new ArrayList<>(player.getActivePotionEffects())) {
+                player.removePotionEffect(effect.getType());
+            }
         } else if (HONEY_KIND.equals(contents.kind)) {
             // Мёд: лечит отравление и восстанавливает голод, как бутылочка мёда.
             player.removePotionEffect(PotionEffectType.POISON);
@@ -1168,10 +1314,10 @@ public class AncientJug implements Listener {
         }
     }
 
-    /** Замедление IV без частиц и прыжок примерно в половину блока. */
+    /** Замедление II без частиц и прыжок примерно в половину блока. */
     private void applyWeight(Player player, boolean heavy) {
         if (heavy) {
-            player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 30, 3, true, false, false));
+            player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 30, 1, true, false, false));
         }
         AttributeInstance jump = player.getAttribute(Attribute.JUMP_STRENGTH);
         if (jump == null) return;

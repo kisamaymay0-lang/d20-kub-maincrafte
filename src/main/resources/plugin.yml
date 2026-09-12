@@ -1,5 +1,5 @@
 name: f8-plugin
-version: '10.5'
+version: '10.6'
 main: com.yourserver.adaptation.AdaptationPlugin
 api-version: '1.21.11'
 softdepend: [PlasmoVoice]
