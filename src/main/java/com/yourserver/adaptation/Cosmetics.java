@@ -48,12 +48,13 @@ final class Cosmetics {
     }
 
     private final JavaPlugin plugin;
-    private final Function<Player, String> equipped;
+    /** Косметика игрока (или null, если ничего не надето). */
+    private final Function<Player, CosmeticCatalog.Cosmetic> equipped;
     private final Map<UUID, Entry> worn = new HashMap<>();
     private final BukkitTask task;
     private boolean disabled;
 
-    Cosmetics(JavaPlugin plugin, Function<Player, String> equipped) {
+    Cosmetics(JavaPlugin plugin, Function<Player, CosmeticCatalog.Cosmetic> equipped) {
         this.plugin = plugin;
         this.equipped = equipped;
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
