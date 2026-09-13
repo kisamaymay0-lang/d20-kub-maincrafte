@@ -22,10 +22,20 @@ import java.util.function.Function;
 /**
  * Косметика на голове игрока.
  *
- * Косметика — это НЕ предмет в слоте шлема и не броня: у головы игрока держится
- * отдельная сущность {@link ItemDisplay} с трансформацией HEAD, поэтому она
- * не мешает надеть настоящий шлем, не видна в слотах брони и не выпадает
- * при смерти. Видна всем, включая самого владельца.
+ * Косметика видна всем, включая самого владельца, и ни при каком способе показа
+ * не занимает серверный слот шлема: настоящий шлем надевается, в инвентаре и в
+ * слотах брони предмет не появляется и при смерти не выпадает.
+ *
+ * Способов показа два:
+ * <ul>
+ *   <li>стоит ProtocolLib — косметика уходит клиенту пакетом экипировки и
+ *       надевается настоящим предметом в слот HEAD ({@link CosmeticEquipment});
+ *       посадка и плавность при этом ровно как у обычной брони;</li>
+ *   <li>ProtocolLib нет — у головы держится сущность {@link ItemDisplay}
+ *       с трансформацией HEAD.</li>
+ * </ul>
+ * Оба берут из модели раздел {@code display.head}, то есть посадка — та, что
+ * настроена в Blockbench.
  *
  * Трансформация HEAD берёт из модели раздел {@code display.head} — то есть
  * косметика сидит ровно так, как она выглядит надетой на голову в Blockbench.
@@ -56,12 +66,15 @@ final class Cosmetics {
     /** Косметика игрока (или null, если ничего не надето). */
     private final Function<Player, CosmeticCatalog.Cosmetic> equipped;
     private final Map<UUID, Entry> worn = new HashMap<>();
+    /** Не null, когда стоит ProtocolLib: тогда косметика идёт пакетом, а не сущностью. */
+    private final CosmeticEquipment equipment;
     private final BukkitTask task;
     private boolean disabled;
 
     Cosmetics(JavaPlugin plugin, Function<Player, CosmeticCatalog.Cosmetic> equipped) {
         this.plugin = plugin;
         this.equipped = equipped;
+        this.equipment = CosmeticEquipment.create(plugin);
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
     }
 
@@ -82,6 +95,13 @@ final class Cosmetics {
     void apply(Player player, CosmeticCatalog.Cosmetic cosmetic) {
         if (disabled || player == null || !player.isOnline()) return;
         UUID id = player.getUniqueId();
+        if (equipment != null) {
+            // Слот шлема на клиенте: сущность у головы не нужна вовсе.
+            remove(id);
+            if (cosmetic == null) equipment.clear(player);
+            else equipment.wear(player, item(cosmetic));
+            return;
+        }
         if (cosmetic == null) {
             remove(id);
             return;
@@ -110,12 +130,16 @@ final class Cosmetics {
         }
     }
 
-    void quit(Player player) { remove(player.getUniqueId()); }
+    void quit(Player player) {
+        remove(player.getUniqueId());
+        if (equipment != null) equipment.clear(player);
+    }
 
     void disable() {
         disabled = true;
         task.cancel();
         for (UUID id : new ArrayList<>(worn.keySet())) remove(id);
+        if (equipment != null) equipment.disable();
     }
 
     private CosmeticCatalog.Cosmetic resolve(Player player) {

@@ -28,6 +28,14 @@
             <groupId>su.plo.voice.api</groupId><artifactId>server</artifactId><version>2.1.16</version><scope>provided</scope>
         </dependency>
         <dependency>
+            <!-- Косметика предметом в слоте шлема: пакет экипировки. На сервере
+                 это отдельный плагин (soft-depend), здесь — только API для сборки. -->
+            <groupId>net.dmulloy2</groupId>
+            <artifactId>ProtocolLib</artifactId>
+            <version>5.4.0</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
             <!-- Целевая версия сервера: Paper 1.21.11 / Java 21 -->
