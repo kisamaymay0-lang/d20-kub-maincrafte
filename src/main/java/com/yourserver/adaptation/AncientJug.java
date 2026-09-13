@@ -686,6 +686,10 @@ public class AncientJug implements Listener {
         writeContents(blockKey(block), contents);
         storage.markDirty();
         refresh(blockKey(block));
+        // Клиент на мгновение предсказал нот-блок, а стоит уже ваза. Возвращаем
+        // ему настоящее состояние блока, иначе он может так и показать то, что
+        // предсказал, и кувшин будет выглядеть двумя блоками в одном.
+        placing.sendBlockChange(block.getLocation(), block.getBlockData());
     }
 
     /**

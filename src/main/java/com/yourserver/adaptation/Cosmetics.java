@@ -25,8 +25,13 @@ import java.util.function.Function;
  * Косметика — это НЕ предмет в слоте шлема и не броня: у головы игрока держится
  * отдельная сущность {@link ItemDisplay} с трансформацией HEAD, поэтому она
  * не мешает надеть настоящий шлем, не видна в слотах брони и не выпадает
- * при смерти. Видна всем, кроме самого владельца (ему она только загораживала
- * бы обзор), поэтому владелец видит её только в меню профиля.
+ * при смерти. Видна всем, включая самого владельца.
+ *
+ * Трансформация HEAD берёт из модели раздел {@code display.head} — то есть
+ * косметика сидит ровно так, как она выглядит надетой на голову в Blockbench.
+ * Якорь — уровень глаз игрока, поэтому в присяди и в воде она остаётся на голове;
+ * если посадку надо поправить, крутите {@code translation} в {@code display.head}
+ * самой модели.
  *
  * Модель берётся из ресурспака: {@code file: kosmetika1} → предмет
  * {@code f8resurs:kosmetika1} на базе обычного листа бумаги (сам лист не видно —
@@ -98,7 +103,10 @@ final class Cosmetics {
         } catch (RuntimeException ex) {
             plugin.getLogger().log(java.util.logging.Level.WARNING,
                     "Не удалось надеть косметику на " + player.getName(), ex);
-            remove(id);
+            // Запись оставляем: tick() увидит, что сущности нет, и попробует снова.
+            // Иначе случайный сбой (чанк не загружен, мир меняется) снял бы косметику совсем.
+            Entry failed = worn.get(id);
+            if (failed != null) removeDisplay(failed);
         }
     }
 
@@ -168,10 +176,6 @@ final class Cosmetics {
             entity.setTeleportDuration(2);
             entity.setInterpolationDuration(0);
         });
-        // Владелец свою косметику не видит: в первом лице она висела бы прямо перед камерой.
-        try {
-            player.hideEntity(plugin, display);
-        } catch (RuntimeException ignored) { }
         return display;
     }
 

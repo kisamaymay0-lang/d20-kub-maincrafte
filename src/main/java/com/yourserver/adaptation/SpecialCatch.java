@@ -73,7 +73,16 @@ final class SpecialCatch implements Listener {
     private final Map<UUID, Hunt> hunts = new HashMap<>();
     /** Круги из золотых частиц, которые ещё не стали охотой: игрок должен нажать ПКМ. */
     private final Map<UUID, Bite> bites = new HashMap<>();
+    /**
+     * Игроки, которые только что начали охоту: один клик удочкой приходит двумя
+     * событиями подряд, и второе надо погасить, иначе удочка забросит ещё раз.
+     */
+    private final Map<UUID, Long> startedAt = new HashMap<>();
+    private long gestureTick;
     private BukkitTask task;
+
+    /** Сколько тиков держим пометку «этот жест уже обработан». */
+    private static final int GESTURE_WINDOW = 2;
 
     SpecialCatch(JavaPlugin plugin, AncientJug jug, WinterFishing winter) {
         this.plugin = plugin;
@@ -225,38 +234,46 @@ final class SpecialCatch implements Listener {
      * началась. Игрок должен нажать ПКМ ещё раз — тогда предмет выпрыгнет и
      * начнётся охота. Если не успеет за окно поклёвки, предмет уйдёт на дно.
      * Никаких надписей в этот момент нет: таймер игроку не показывается.
+     *
+     * Круг держится вокруг самого игрока. Забрасывать под него отдельный
+     * поплавок нельзя: получался крючок без удочки — его невозможно вытащить,
+     * и он висел в мире посторонним предметом.
      */
     private void bite(Player player, ItemStack reward) {
-        // Свой поплавок после поклёвки ваниль утаскивает к игроку, поэтому круг
-        // держим на новом поплавке и помечаем его: на своём поклёвка не повторится.
-        FishHook hook = null;
-        try {
-            Vector cast = player.getEyeLocation().getDirection().multiply(1.1);
-            hook = player.launchProjectile(FishHook.class, cast);
-            hook.getPersistentDataContainer().set(ourHook, PersistentDataType.BYTE, (byte) 1);
-        } catch (Throwable ignored) {
-            // Не удалось забросить — круг пойдёт вокруг игрока.
-        }
-        bites.put(player.getUniqueId(), new Bite(player, reward, hook));
+        bites.put(player.getUniqueId(), new Bite(player, reward));
         player.playSound(player.getLocation(), Sound.ENTITY_FISHING_BOBBER_SPLASH, 0.9f, 0.8f);
         ensureTask();
     }
 
-    /** ПКМ во время поклёвки — охота началась. Ванильный дёрг удочки при этом отменяем. */
+    /**
+     * ПКМ во время поклёвки — охота началась. Ванильный заброс удочки гасим.
+     *
+     * Важно: один клик удочкой приходит ДВУМЯ событиями подряд — сначала
+     * «ПКМ по блоку» (UseItemOn), затем «ПКМ в воздух» (UseItem), и крючок
+     * забрасывает именно второе. Поклёвку забираем на первом, а второе помечаем
+     * и тоже гасим: иначе удочка забросит ещё раз поверх начатой охоты.
+     */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onRodUse(PlayerInteractEvent event) {
         Action action = event.getAction();
         if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) return;
         Player player = event.getPlayer();
-        Bite bite = bites.get(player.getUniqueId());
-        if (bite == null || hunts.containsKey(player.getUniqueId())) return;
+        UUID id = player.getUniqueId();
+        Long gesture = startedAt.get(id);
+        if (gesture != null && gestureTick - gesture <= GESTURE_WINDOW) {
+            event.setCancelled(true);
+            return;
+        }
+        Bite bite = bites.get(id);
+        if (bite == null || hunts.containsKey(id)) return;
         if (!holdsRod(player)) return;
-        event.setCancelled(true); // Удочка не сматывается: поплавок остаётся в воде для охоты.
-        bites.remove(player.getUniqueId());
-        start(player, bite.reward, bite.hook);
+        event.setCancelled(true); // Удочка не забрасывается: охота идёт без второго крючка.
+        bites.remove(id);
+        startedAt.put(id, gestureTick);
+        start(player, bite.reward);
     }
 
-    private void start(Player player, ItemStack reward, FishHook carried) {
+    private void start(Player player, ItemStack reward) {
         Hunt hunt = new Hunt(player, reward);
         Location spot = orbitSpot(hunt);
         World world = player.getWorld();
@@ -274,18 +291,15 @@ final class SpecialCatch implements Listener {
             display.setGravity(false);
             display.setSilent(true);
         });
-        // Удочка остаётся заброшенной: охота живёт, пока поплавок в воде и в руке удочка.
-        if (carried != null && carried.isValid()) {
-            hunt.hook = carried;
-        } else {
-            try {
-                Vector cast = player.getEyeLocation().getDirection().multiply(1.1);
-                FishHook hook = player.launchProjectile(FishHook.class, cast);
-                hook.getPersistentDataContainer().set(ourHook, PersistentDataType.BYTE, (byte) 1);
-                hunt.hook = hook;
-            } catch (Throwable ignored) {
-                // Не удалось забросить — миниигра всё равно пойдёт, условие с поплавком мягкое.
-            }
+        // Охота живёт, пока поплавок в воде и в руке удочка: поплавок забрасываем
+        // за игрока — ровно так, как миниигра делала это до появления поклёвки.
+        try {
+            Vector cast = player.getEyeLocation().getDirection().multiply(1.1);
+            FishHook hook = player.launchProjectile(FishHook.class, cast);
+            hook.getPersistentDataContainer().set(ourHook, PersistentDataType.BYTE, (byte) 1);
+            hunt.hook = hook;
+        } catch (Throwable ignored) {
+            // Не удалось забросить — миниигра всё равно пойдёт, условие с поплавком мягкое.
         }
         hunts.put(player.getUniqueId(), hunt);
         player.sendActionBar("§6Из воды выпрыгнул особый предмет биома! Поймай его!");
@@ -301,6 +315,10 @@ final class SpecialCatch implements Listener {
     // ===== ЖИЗНЬ МИНИИГРЫ =====
 
     private void tick() {
+        gestureTick++;
+        if (!startedAt.isEmpty()) {
+            startedAt.values().removeIf(at -> gestureTick - at > GESTURE_WINDOW);
+        }
         if (hunts.isEmpty() && bites.isEmpty()) {
             if (task != null) {
                 task.cancel();
@@ -346,8 +364,7 @@ final class SpecialCatch implements Listener {
         if (bites.isEmpty()) return;
         for (Bite bite : new ArrayList<>(bites.values())) {
             Player player = bite.player;
-            if (!player.isOnline() || player.isDead() || !player.isValid()
-                    || !holdsRod(player) || (bite.hook != null && !bite.hook.isValid())) {
+            if (!player.isOnline() || player.isDead() || !player.isValid() || !holdsRod(player)) {
                 sink(bite);
                 continue;
             }
@@ -360,24 +377,23 @@ final class SpecialCatch implements Listener {
         }
     }
 
-    /** Круг гаснет, поплавок тонет. Других надписей на этом шаге нет. */
+    /** Круг гаснет, предмет тонет. Других надписей на этом шаге нет. */
     private void sink(Bite bite) {
         bites.remove(bite.player.getUniqueId());
         Player player = bite.player;
         World world = player.getWorld();
-        Location water = bite.hook != null && bite.hook.isValid() ? bite.hook.getLocation() : player.getLocation();
-        if (bite.hook != null && bite.hook.isValid()) bite.hook.remove();
+        Location water = player.getLocation();
         if (player.isOnline()) player.sendActionBar("§cПредмет ушел на дно...");
         world.playSound(water, Sound.ENTITY_FISHING_BOBBER_SPLASH, 0.8f, 0.6f);
         world.spawnParticle(Particle.BUBBLE_POP, water, 10, 0.3, 0.1, 0.3, 0.02);
     }
 
-    /** Круг из золотых частиц по воде у поплавка — сигнал «нажми ПКМ ещё раз». */
+    /** Круг из золотых частиц вокруг игрока, у удочки — сигнал «нажми ПКМ ещё раз». */
     private void biteParticles(Bite bite) {
-        World world = bite.player.getWorld();
-        Location water = bite.hook != null && bite.hook.isValid()
-                ? bite.hook.getLocation()
-                : bite.player.getLocation();
+        Player player = bite.player;
+        World world = player.getWorld();
+        // Обруч на уровне груди: его видно и от первого, и от третьего лица.
+        Location water = player.getLocation().add(0.0, Math.max(0.4, player.getEyeHeight() - 0.45), 0.0);
         double radius = swirlRadius();
         Particle.DustOptions gold = goldDust();
         int points = 12;
@@ -591,9 +607,7 @@ final class SpecialCatch implements Listener {
 
     /** Поклёвка убирается молча: игрок ушёл/умер, предмет просто не появился. */
     private void dropBite(UUID player) {
-        Bite bite = bites.remove(player);
-        if (bite == null) return;
-        if (bite.hook != null && bite.hook.isValid()) bite.hook.remove();
+        bites.remove(player);
     }
 
     /** Короткая сводка действующих настроек для /f8 reload. */
@@ -622,6 +636,7 @@ final class SpecialCatch implements Listener {
         hunts.clear();
         for (UUID player : new ArrayList<>(bites.keySet())) dropBite(player);
         bites.clear();
+        startedAt.clear();
     }
 
     /**
@@ -631,15 +646,13 @@ final class SpecialCatch implements Listener {
     private final class Bite {
         final Player player;
         final ItemStack reward;
-        final FishHook hook;
         final int totalTicks = biteTicks();
         double phase = ThreadLocalRandom.current().nextDouble(0, Math.PI * 2);
         int ticks;
 
-        Bite(Player player, ItemStack reward, FishHook hook) {
+        Bite(Player player, ItemStack reward) {
             this.player = player;
             this.reward = reward;
-            this.hook = hook;
         }
     }
 
