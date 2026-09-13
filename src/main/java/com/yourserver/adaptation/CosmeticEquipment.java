@@ -68,6 +68,8 @@ final class CosmeticEquipment {
     private final Method asNmsCopy;
     private final Method pairOf;
     private final Object headSlot;
+    /** {@code ItemStack.EMPTY}: пустой слот — это пустой предмет, а не null. */
+    private final Object emptyStack;
     private final Map<UUID, ItemStack> worn = new HashMap<>();
     /** Кто переводит косметику обратно на сущность, если рассылка встанет. */
     private final Runnable onBroken;
@@ -77,12 +79,13 @@ final class CosmeticEquipment {
 
     private CosmeticEquipment(JavaPlugin plugin, ProtocolManager manager,
                               Method asNmsCopy, Method pairOf, Object headSlot,
-                              Runnable onBroken) {
+                              Object emptyStack, Runnable onBroken) {
         this.plugin = plugin;
         this.manager = manager;
         this.asNmsCopy = asNmsCopy;
         this.pairOf = pairOf;
         this.headSlot = headSlot;
+        this.emptyStack = emptyStack;
         this.onBroken = onBroken;
         this.task = Bukkit.getScheduler().runTaskTimer(plugin, this::resend, RESEND_TICKS, RESEND_TICKS);
     }
@@ -112,8 +115,10 @@ final class CosmeticEquipment {
             Object head = Enum.valueOf((Class) slots, "HEAD");
             Method pairOf = Class.forName("com.mojang.datafixers.util.Pair")
                     .getMethod("of", Object.class, Object.class);
-            CosmeticEquipment equipment =
-                    new CosmeticEquipment(plugin, manager, asNmsCopy, pairOf, head, onBroken);
+            Object emptyStack = MinecraftReflection.getMinecraftClass("world.item.ItemStack")
+                    .getField("EMPTY").get(null);
+            CosmeticEquipment equipment = new CosmeticEquipment(
+                    plugin, manager, asNmsCopy, pairOf, head, emptyStack, onBroken);
             equipment.packet(-1, null); // пробная сборка: несовместимость видна сразу
             plugin.getLogger().info("Косметика надевается предметом в слот шлема (ProtocolLib).");
             return equipment;
@@ -201,28 +206,20 @@ final class CosmeticEquipment {
     }
 
     /**
-     * {@code ClientboundSetEquipmentPacket(int entity, List<Pair<EquipmentSlot, ItemStack>>)}:
-     * поле 0 — id сущности, поле 1 — список пар. Пустой предмет в паре — это
-     * «в слоте ничего нет».
+     * {@code ClientboundSetEquipmentPacket(int entity, List<Pair<EquipmentSlot, ItemStack>>)}.
+     * Пустой предмет в паре — это «в слоте ничего нет».
      *
-     * Конструктора без аргументов у пакета нет, поэтому сначала пробуем обычный
-     * {@code createPacket} (ProtocolLib умеет подставлять значения по умолчанию),
-     * а если он не справился — собираем пакет через {@link PacketConstructor},
-     * передав аргументы прямо в конструктор.
+     * Значения передаются сразу в конструктор, а не записываются в поля пакета,
+     * и это единственно рабочий путь: в 1.21 пакет — рекорд, а поля рекорда
+     * финальные, перезаписать их отражением нельзя. Заодно не нужен
+     * конструктор без аргументов, которого у пакета нет.
      */
     private PacketContainer packet(int entityId, ItemStack item) throws ReflectiveOperationException {
-        Object stack = item == null ? null : asNmsCopy.invoke(null, item);
+        Object stack = item == null ? emptyStack : asNmsCopy.invoke(null, item);
         List<Object> slots = new ArrayList<>(1);
         slots.add(pairOf.invoke(null, headSlot, stack));
-        try {
-            PacketContainer packet = manager.createPacket(PacketType.Play.Server.ENTITY_EQUIPMENT);
-            packet.getIntegers().write(0, entityId);
-            packet.getModifier().write(1, slots);
-            return packet;
-        } catch (Throwable noUsableConstructor) {
-            return PacketConstructor.DEFAULT
-                    .withPacket(PacketType.Play.Server.ENTITY_EQUIPMENT, new Object[]{entityId, slots})
-                    .createPacket();
-        }
+        return PacketConstructor.DEFAULT
+                .withPacket(PacketType.Play.Server.ENTITY_EQUIPMENT, new Object[]{entityId, slots})
+                .createPacket();
     }
 }

@@ -142,6 +142,34 @@ final class Cosmetics {
         }
     }
 
+    /**
+     * Что сейчас происходит с косметикой игрока — для /profile cosmetic status.
+     * Отвечает на два вопроса, из-за которых косметику обычно и не видно:
+     * каким способом она показывается и не мешает ли ей настоящий шлем.
+     */
+    String status(Player player) {
+        StringBuilder out = new StringBuilder();
+        out.append("показ — ").append(equipment == null
+                ? "сущность у головы (ProtocolLib не стоит или рассылка встала)"
+                : "предметом в слот шлема (ProtocolLib)");
+        if (equipment == null) {
+            Entry entry = worn.get(player.getUniqueId());
+            if (entry == null || entry.display == null || !entry.display.isValid()) {
+                out.append("; сущности у головы нет");
+            } else {
+                Location at = entry.display.getLocation();
+                out.append(String.format(java.util.Locale.ROOT,
+                        "; сущность есть в %s %d %d %d, модель f8resurs:%s",
+                        at.getWorld().getName(), at.getBlockX(), at.getBlockY(), at.getBlockZ(), entry.file));
+            }
+        }
+        out.append("; шлем надет: ")
+                .append(player.getInventory().getHelmet() != null
+                        ? "да — косметика не показывается, пока он не снят"
+                        : "нет");
+        return out.toString();
+    }
+
     void quit(Player player) {
         remove(player.getUniqueId());
         if (equipment != null) equipment.clear(player);

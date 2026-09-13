@@ -1351,6 +1351,20 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                     + " (№1–" + cosmetics.size() + "). Файл: " + cosmeticConfig, NamedTextColor.GREEN));
             return;
         }
+        if (args.length == 2 && args[1].equalsIgnoreCase("status")) {
+            Player target = sender instanceof Player self ? self : null;
+            if (target == null) {
+                sender.sendMessage(ProfileItems.text("Из консоли нужен игрок: /profile cosmetic status <ник>", NamedTextColor.RED));
+                return;
+            }
+            CosmeticCatalog.Cosmetic cosmetic = cosmetics.get(equippedCosmetics.get(target.getUniqueId()));
+            sender.sendMessage(ProfileItems.text("Косметика " + target.getName() + ": "
+                    + (cosmetic == null
+                        ? "не выбрана — показывать нечего (профиль → Настроить → Косметика)"
+                        : "надета «" + cosmetic.name() + "», модель f8resurs:" + cosmetic.file())
+                    + "; " + headCosmetics.status(target), NamedTextColor.YELLOW));
+            return;
+        }
         if (args.length < 3) throw new IllegalArgumentException("Использование: /profile cosmetic give|take|list <игрок или UUID> [номер|all]");
         String action = args[1].toLowerCase(java.util.Locale.ROOT);
         if (!action.equals("give") && !action.equals("take") && !action.equals("list")) {
