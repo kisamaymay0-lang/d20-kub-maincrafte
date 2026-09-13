@@ -76,13 +76,15 @@ final class SpecialCatch implements Listener {
     /**
      * Игроки, которые только что начали охоту: один клик удочкой приходит двумя
      * событиями подряд, и второе надо погасить, иначе удочка забросит ещё раз.
+     * Метка живёт полсекунды и снимается при первом же просмотре — считать её
+     * тиками нельзя: задача миниигры останавливается, счётчик замирает, и
+     * удочка у игрока гаснет навсегда.
      */
-    private final Map<UUID, Long> startedAt = new HashMap<>();
-    private long gestureTick;
+    private final Map<UUID, Long> swallowClick = new HashMap<>();
     private BukkitTask task;
 
-    /** Сколько тиков держим пометку «этот жест уже обработан». */
-    private static final int GESTURE_WINDOW = 2;
+    /** Запас на вторую половину жеста: оба события приходят одним пакетом подряд. */
+    private static final long GESTURE_WINDOW_NANOS = 500_000_000L;
 
     SpecialCatch(JavaPlugin plugin, AncientJug jug, WinterFishing winter) {
         this.plugin = plugin;
@@ -225,8 +227,9 @@ final class SpecialCatch implements Listener {
         if (reward == null) return;                       // у биома нет особого предмета
         if (ThreadLocalRandom.current().nextDouble() >= chance()) return;
         // Обычного улова не будет: вместо него у удочки загорается круг из частиц.
+        Location spot = event.getHook().getLocation().clone();
         caught.remove();
-        bite(player, reward);
+        bite(player, reward, spot);
     }
 
     /**
@@ -235,12 +238,12 @@ final class SpecialCatch implements Listener {
      * начнётся охота. Если не успеет за окно поклёвки, предмет уйдёт на дно.
      * Никаких надписей в этот момент нет: таймер игроку не показывается.
      *
-     * Круг держится вокруг самого игрока. Забрасывать под него отдельный
-     * поплавок нельзя: получался крючок без удочки — его невозможно вытащить,
-     * и он висел в мире посторонним предметом.
+     * Круг держится там, где клюнуло — на поплавке. Забрасывать под него
+     * отдельный поплавок нельзя: получался крючок без удочки, его невозможно
+     * вытащить, и он висел в мире посторонним предметом.
      */
-    private void bite(Player player, ItemStack reward) {
-        bites.put(player.getUniqueId(), new Bite(player, reward));
+    private void bite(Player player, ItemStack reward, Location spot) {
+        bites.put(player.getUniqueId(), new Bite(player, reward, spot));
         player.playSound(player.getLocation(), Sound.ENTITY_FISHING_BOBBER_SPLASH, 0.9f, 0.8f);
         ensureTask();
     }
@@ -259,9 +262,8 @@ final class SpecialCatch implements Listener {
         if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) return;
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
-        Long gesture = startedAt.get(id);
-        if (gesture != null && gestureTick - gesture <= GESTURE_WINDOW) {
-            event.setCancelled(true);
+        if (pendingClick(id)) {
+            event.setCancelled(true); // вторая половина того же клика
             return;
         }
         Bite bite = bites.get(id);
@@ -269,8 +271,18 @@ final class SpecialCatch implements Listener {
         if (!holdsRod(player)) return;
         event.setCancelled(true); // Удочка не забрасывается: охота идёт без второго крючка.
         bites.remove(id);
-        startedAt.put(id, gestureTick);
+        // Клик по блоку всегда продолжает клик «в воздух» — вот его и гасим.
+        swallowClick.put(id, System.nanoTime());
         start(player, bite.reward);
+    }
+
+    /**
+     * Есть ли непогашенная вторая половина жеста. Метку снимаем сразу: если её
+     * держать, она съест уже настоящий заброс удочки.
+     */
+    private boolean pendingClick(UUID id) {
+        Long at = swallowClick.remove(id);
+        return at != null && System.nanoTime() - at <= GESTURE_WINDOW_NANOS;
     }
 
     private void start(Player player, ItemStack reward) {
@@ -315,10 +327,6 @@ final class SpecialCatch implements Listener {
     // ===== ЖИЗНЬ МИНИИГРЫ =====
 
     private void tick() {
-        gestureTick++;
-        if (!startedAt.isEmpty()) {
-            startedAt.values().removeIf(at -> gestureTick - at > GESTURE_WINDOW);
-        }
         if (hunts.isEmpty() && bites.isEmpty()) {
             if (task != null) {
                 task.cancel();
@@ -382,18 +390,17 @@ final class SpecialCatch implements Listener {
         bites.remove(bite.player.getUniqueId());
         Player player = bite.player;
         World world = player.getWorld();
-        Location water = player.getLocation();
+        Location water = bite.spot;
         if (player.isOnline()) player.sendActionBar("§cПредмет ушел на дно...");
         world.playSound(water, Sound.ENTITY_FISHING_BOBBER_SPLASH, 0.8f, 0.6f);
         world.spawnParticle(Particle.BUBBLE_POP, water, 10, 0.3, 0.1, 0.3, 0.02);
     }
 
-    /** Круг из золотых частиц вокруг игрока, у удочки — сигнал «нажми ПКМ ещё раз». */
+    /** Круг из золотых частиц на поплавке — сигнал «нажми ПКМ ещё раз». */
     private void biteParticles(Bite bite) {
-        Player player = bite.player;
-        World world = player.getWorld();
-        // Обруч на уровне груди: его видно и от первого, и от третьего лица.
-        Location water = player.getLocation().add(0.0, Math.max(0.4, player.getEyeHeight() - 0.45), 0.0);
+        World world = bite.player.getWorld();
+        // Обруч на воде, где клюнуло: из-под него и выпрыгнет предмет.
+        Location water = bite.spot;
         double radius = swirlRadius();
         Particle.DustOptions gold = goldDust();
         int points = 12;
@@ -636,7 +643,7 @@ final class SpecialCatch implements Listener {
         hunts.clear();
         for (UUID player : new ArrayList<>(bites.keySet())) dropBite(player);
         bites.clear();
-        startedAt.clear();
+        swallowClick.clear();
     }
 
     /**
@@ -646,13 +653,16 @@ final class SpecialCatch implements Listener {
     private final class Bite {
         final Player player;
         final ItemStack reward;
+        /** Где клюнуло: круг частиц и всплеск «ушел на дно» идут сюда, а не в игрока. */
+        final Location spot;
         final int totalTicks = biteTicks();
         double phase = ThreadLocalRandom.current().nextDouble(0, Math.PI * 2);
         int ticks;
 
-        Bite(Player player, ItemStack reward) {
+        Bite(Player player, ItemStack reward, Location spot) {
             this.player = player;
             this.reward = reward;
+            this.spot = spot;
         }
     }
 

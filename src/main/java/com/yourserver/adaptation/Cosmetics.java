@@ -171,15 +171,23 @@ final class Cosmetics {
             entity.setGravity(false);
             entity.setSilent(true);
             entity.setViewRange(64f);
-            entity.setShadowRadius(0.4f);
-            entity.setShadowStrength(0.4f);
-            entity.setTeleportDuration(2);
+            // Тени нет: сущность висит у головы, и её тень плавала бы в воздухе.
+            entity.setShadowRadius(0f);
+            entity.setShadowStrength(0f);
+            // Ноль — иначе клиент догоняет голову пару тиков, и косметика
+            // «летает» за игроком вместо того, чтобы сидеть на голове.
+            entity.setTeleportDuration(0);
             entity.setInterpolationDuration(0);
         });
         return display;
     }
 
-    /** Точка у головы игрока: поворот берём с игрока, наклон не трогаем. */
+    /**
+     * Точка у головы игрока. Уровень глаз — это центр головы (1.62 против 1.65
+     * у куба головы), поэтому модель с трансформацией HEAD ложится ровно так,
+     * как она надета в слоте шлема. Наклон берём с игрока: шлем поворачивается
+     * вместе с головой.
+     */
     private Location headSpot(Player player) {
         Location at = player.getLocation();
         double height;
@@ -190,14 +198,16 @@ final class Cosmetics {
         }
         if (!Double.isFinite(height) || height <= 0.1) height = FALLBACK_HEIGHT;
         at.setY(at.getY() + height);
-        at.setPitch(0);
         return at;
     }
 
     private void moveToHead(Player player, ItemDisplay display) {
         Location at = headSpot(player);
-        if (display.getLocation().distanceSquared(at) > 0.000001
-                || Math.abs(display.getLocation().getYaw() - at.getYaw()) > 0.5f) {
+        Location now = display.getLocation();
+        // Наклон проверяем тоже: без этого косметика не кивала бы вместе с головой.
+        if (now.distanceSquared(at) > 0.000001
+                || Math.abs(now.getYaw() - at.getYaw()) > 0.5f
+                || Math.abs(now.getPitch() - at.getPitch()) > 0.5f) {
             display.teleport(at);
         }
     }
