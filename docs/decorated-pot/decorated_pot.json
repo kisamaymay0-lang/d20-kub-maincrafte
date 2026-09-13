@@ -1,0 +1,20 @@
+{
+  "multipart": [
+    {
+      "when": {
+        "facing": "north|east|west"
+      },
+      "apply": {
+        "model": "f8resurs:block/ancient_jug"
+      }
+    },
+    {
+      "when": {
+        "facing": "south"
+      },
+      "apply": {
+        "model": "f8resurs:block/ancient_jug_filled"
+      }
+    }
+  ]
+}

@@ -4,8 +4,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
-import org.bukkit.enchantments.Enchantment;
-import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -14,7 +12,6 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockCookEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.FurnaceSmeltEvent;
-import org.bukkit.event.player.PlayerFishEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemBreakEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
@@ -26,7 +23,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.RecipeChoice;
 import org.bukkit.inventory.ShapelessRecipe;
 import org.bukkit.inventory.SmokingRecipe;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.ArrayList;
@@ -34,24 +30,25 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
-/** Зимний улов, превращения вида рыбы и предметные события. */
+/**
+ * Превращения вида рыбы и предметные события зимней рыбалки.
+ *
+ * Особый зимний предмет («изморозь») больше НЕ выпадает вместо рыбы: единственный
+ * способ получить его — миниигра особого улова (см. SpecialCatch), в зимних и
+ * ледяных биомах она даёт как раз изморозь.
+ */
 final class WinterFishing implements Listener {
     private record Replacement(int slot, ItemStack fish) { }
     private final JavaPlugin plugin;
     final WinterItems items;
     private final WinterMovement movement;
-    private final NamespacedKey castLuck;
-    private final NamespacedKey rolled;
     private final Map<UUID, List<Replacement>> replacements = new HashMap<>();
     private final List<NamespacedKey> recipes = new ArrayList<>();
 
     WinterFishing(JavaPlugin plugin) {
         this.plugin = plugin;
         items = new WinterItems(plugin);
-        castLuck = new NamespacedKey(plugin, "winter_cast_luck");
-        rolled = new NamespacedKey(plugin, "winter_catch_rolled");
         movement = new WinterMovement(plugin, items);
         plugin.getServer().getPluginManager().registerEvents(movement, plugin);
         registerRecipes();
@@ -75,29 +72,6 @@ final class WinterFishing implements Listener {
             Bukkit.addRecipe(new FurnaceRecipe(recipeKey(kind.id + "_furnace"), fish, items.recipeInput(kind), 0f, 200));
             Bukkit.addRecipe(new SmokingRecipe(recipeKey(kind.id + "_smoker"), fish, items.recipeInput(kind), 0f, 100));
             Bukkit.addRecipe(new CampfireRecipe(recipeKey(kind.id + "_campfire"), fish, items.recipeInput(kind), 0f, 600));
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void fishing(PlayerFishEvent event) {
-        var hook = event.getHook();
-        if (event.getState() == PlayerFishEvent.State.FISHING) {
-            ItemStack rod = event.getHand() == EquipmentSlot.OFF_HAND ? event.getPlayer().getInventory().getItemInOffHand()
-                    : event.getPlayer().getInventory().getItemInMainHand();
-            if (event.getHand() == null && rod.getType() != Material.FISHING_ROD) rod = event.getPlayer().getInventory().getItemInOffHand();
-            hook.getPersistentDataContainer().set(castLuck, PersistentDataType.INTEGER, rod.getEnchantmentLevel(Enchantment.LUCK_OF_THE_SEA));
-            return;
-        }
-        if (event.getState() != PlayerFishEvent.State.CAUGHT_FISH || !(event.getCaught() instanceof Item caught)) return;
-        if (hook.getPersistentDataContainer().has(rolled, PersistentDataType.BYTE)) return;
-        hook.getPersistentDataContainer().set(rolled, PersistentDataType.BYTE, (byte) 1);
-        String biome = hook.getLocation().getBlock().getBiome().getKey().toString();
-        if (!WinterRules.BIOMES.contains(biome)) return;
-        int luck = hook.getPersistentDataContainer().getOrDefault(castLuck, PersistentDataType.INTEGER, 0);
-        double base = plugin.getConfig().getDouble("fishing.winter-tool-chance-percent", 2.0) / 100.0;
-        double perLuck = plugin.getConfig().getDouble("fishing.winter-tool-luck-bonus-percent", 1.0) / 100.0;
-        if (ThreadLocalRandom.current().nextDouble() < WinterRules.catchChance(luck, base, perLuck)) {
-            caught.setItemStack(items.create(WinterItems.Kind.TOOL));
         }
     }
 
