@@ -66,15 +66,15 @@ final class Cosmetics {
     /** Косметика игрока (или null, если ничего не надето). */
     private final Function<Player, CosmeticCatalog.Cosmetic> equipped;
     private final Map<UUID, Entry> worn = new HashMap<>();
-    /** Не null, когда стоит ProtocolLib: тогда косметика идёт пакетом, а не сущностью. */
-    private final CosmeticEquipment equipment;
+    /** Не null, пока работает рассылка пакетом; null — косметика идёт сущностью. */
+    private CosmeticEquipment equipment;
     private final BukkitTask task;
     private boolean disabled;
 
     Cosmetics(JavaPlugin plugin, Function<Player, CosmeticCatalog.Cosmetic> equipped) {
         this.plugin = plugin;
         this.equipped = equipped;
-        this.equipment = CosmeticEquipment.create(plugin);
+        this.equipment = CosmeticEquipment.create(plugin, this::onEquipmentBroken);
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
     }
 
@@ -95,7 +95,7 @@ final class Cosmetics {
     void apply(Player player, CosmeticCatalog.Cosmetic cosmetic) {
         if (disabled || player == null || !player.isOnline()) return;
         UUID id = player.getUniqueId();
-        if (equipment != null) {
+        if (equipment != null && !equipment.isBroken()) {
             // Слот шлема на клиенте: сущность у головы не нужна вовсе.
             remove(id);
             if (cosmetic == null) equipment.clear(player);
@@ -127,6 +127,18 @@ final class Cosmetics {
             // Иначе случайный сбой (чанк не загружен, мир меняется) снял бы косметику совсем.
             Entry failed = worn.get(id);
             if (failed != null) removeDisplay(failed);
+        }
+    }
+
+    /**
+     * Рассылка пакетом встала на ходу. Способ показа переключаем на сущность и
+     * сразу переодеваем всех, кто уже носил косметику: иначе пакет не уходит,
+     * сущности тоже нет, и игрок остаётся с пустой головой.
+     */
+    private void onEquipmentBroken() {
+        equipment = null;
+        for (Player player : new ArrayList<>(Bukkit.getOnlinePlayers())) {
+            apply(player, resolve(player));
         }
     }
 

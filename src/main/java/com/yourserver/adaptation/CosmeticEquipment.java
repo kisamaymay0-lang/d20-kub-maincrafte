@@ -4,6 +4,7 @@ import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
 import com.comphenix.protocol.ProtocolManager;
 import com.comphenix.protocol.events.PacketContainer;
+import com.comphenix.protocol.injector.PacketConstructor;
 import com.comphenix.protocol.utility.MinecraftReflection;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -13,8 +14,8 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -39,9 +40,18 @@ import java.util.logging.Level;
  * нового игрока в зону видимости и при возрождении. Отсюда периодическая
  * рассылка раз в секунду.
  *
- * Нужен ProtocolLib (soft-depend). Без него — или если пакет не собрался —
- * {@link #create} возвращает null, и косметика по-прежнему рисуется
- * сущностью-отображением у головы ({@link Cosmetics}).
+ * Нужен ProtocolLib (soft-depend). Способов показа у косметики два, и этот —
+ * только один из них:
+ * <ul>
+ *   <li>ProtocolLib не стоит — {@link #create} возвращает null сразу;</li>
+ *   <li>ProtocolLib стоит, но пакет не собирается — {@link #create} возвращает
+ *       null уже после пробной сборки, а причина уходит в лог;</li>
+ *   <li>пакет собирался, а потом рассылка сломалась на ходу — {@link #isBroken}
+ *       становится true и {@link Cosmetics} тут же переводит всех обратно на
+ *       сущность у головы ({@code onBroken}).</li>
+ * </ul>
+ * Косметика не пропадает ни в одном из трёх случаев — она всегда рисуется
+ * хоть каким-то способом.
  *
  * Известная особенность: пакет приходит и самому владельцу, и клиент применяет
  * его к своей копии инвентаря, поэтому в окне инвентаря владелец может видеть
@@ -59,27 +69,37 @@ final class CosmeticEquipment {
     private final Method pairOf;
     private final Object headSlot;
     private final Map<UUID, ItemStack> worn = new HashMap<>();
+    /** Кто переводит косметику обратно на сущность, если рассылка встанет. */
+    private final Runnable onBroken;
     private final BukkitTask task;
-    /** Один сбой — и больше не пробуем: косметика остаётся на сущности. */
+    /** Один сбой рассылки — и этот способ показа больше не используется. */
     private boolean broken;
 
     private CosmeticEquipment(JavaPlugin plugin, ProtocolManager manager,
-                              Method asNmsCopy, Method pairOf, Object headSlot) {
+                              Method asNmsCopy, Method pairOf, Object headSlot,
+                              Runnable onBroken) {
         this.plugin = plugin;
         this.manager = manager;
         this.asNmsCopy = asNmsCopy;
         this.pairOf = pairOf;
         this.headSlot = headSlot;
+        this.onBroken = onBroken;
         this.task = Bukkit.getScheduler().runTaskTimer(plugin, this::resend, RESEND_TICKS, RESEND_TICKS);
     }
 
     /**
      * Готовый отправитель или null: ProtocolLib не стоит, либо с ним не
-     * получилось собрать пакет. Во втором случае причина уходит в лог — по ней
-     * видно, что именно не так.
+     * получилось собрать пакет экипировки. Перед возвратом пакет собирается
+     * вхолостую — так несовместимость видна сразу в логе запуска, а не в тот
+     * момент, когда игрок наденет косметику и увидит пустую голову.
      */
-    static CosmeticEquipment create(JavaPlugin plugin) {
-        if (Bukkit.getPluginManager().getPlugin("ProtocolLib") == null) return null;
+    static CosmeticEquipment create(JavaPlugin plugin, Runnable onBroken) {
+        if (Bukkit.getPluginManager().getPlugin("ProtocolLib") == null) {
+            plugin.getLogger().info("ProtocolLib не найден — косметика рисуется сущностью у головы. "
+                    + "Чтобы она надевалась предметом в слот шлема (ровно с посадкой из Blockbench), "
+                    + "поставьте ProtocolLib для вашей версии сервера.");
+            return null;
+        }
         try {
             ProtocolManager manager = ProtocolLibrary.getProtocolManager();
             // Пакет сервера: CraftItemStack лежит в его же пакете, версия не важна.
@@ -92,14 +112,22 @@ final class CosmeticEquipment {
             Object head = Enum.valueOf((Class) slots, "HEAD");
             Method pairOf = Class.forName("com.mojang.datafixers.util.Pair")
                     .getMethod("of", Object.class, Object.class);
-            CosmeticEquipment equipment = new CosmeticEquipment(plugin, manager, asNmsCopy, pairOf, head);
+            CosmeticEquipment equipment =
+                    new CosmeticEquipment(plugin, manager, asNmsCopy, pairOf, head, onBroken);
+            equipment.packet(-1, null); // пробная сборка: несовместимость видна сразу
             plugin.getLogger().info("Косметика надевается предметом в слот шлема (ProtocolLib).");
             return equipment;
         } catch (Throwable ex) {
             plugin.getLogger().log(Level.WARNING,
-                    "ProtocolLib на месте, но пакет экипировки не собрался — косметика пойдёт сущностью у головы", ex);
+                    "ProtocolLib на месте, но пакет экипировки не собрался — косметика пойдёт сущностью "
+                            + "у головы. Скорее всего, версия ProtocolLib не подходит к версии сервера.", ex);
             return null;
         }
+    }
+
+    /** Рассылка встала — {@link Cosmetics} должен вернуть косметику на сущность. */
+    boolean isBroken() {
+        return broken;
     }
 
     /** Надеть косметику; рассылка идёт сразу, не дожидаясь следующего цикла. */
@@ -154,22 +182,47 @@ final class CosmeticEquipment {
                 manager.sendServerPacket(viewer, packet);
             }
         } catch (Throwable ex) {
-            broken = true;
-            plugin.getLogger().log(Level.WARNING,
-                    "Не удалось отправить косметику в слот шлема — косметика пойдёт сущностью у головы", ex);
+            fail(ex);
         }
+    }
+
+    /**
+     * Рассылка не удалась. Способ показа выключаем и сразу отдаём косметику
+     * обратно {@link Cosmetics} — иначе игроки остались бы с пустой головой:
+     * пакет не уходит, а сущность никто не создаёт.
+     */
+    private void fail(Throwable ex) {
+        if (broken) return;
+        broken = true;
+        task.cancel();
+        plugin.getLogger().log(Level.WARNING,
+                "Не удалось отправить косметику в слот шлема — возвращаю её на сущность у головы", ex);
+        onBroken.run();
     }
 
     /**
      * {@code ClientboundSetEquipmentPacket(int entity, List<Pair<EquipmentSlot, ItemStack>>)}:
      * поле 0 — id сущности, поле 1 — список пар. Пустой предмет в паре — это
      * «в слоте ничего нет».
+     *
+     * Конструктора без аргументов у пакета нет, поэтому сначала пробуем обычный
+     * {@code createPacket} (ProtocolLib умеет подставлять значения по умолчанию),
+     * а если он не справился — собираем пакет через {@link PacketConstructor},
+     * передав аргументы прямо в конструктор.
      */
     private PacketContainer packet(int entityId, ItemStack item) throws ReflectiveOperationException {
-        PacketContainer packet = manager.createPacket(PacketType.Play.Server.ENTITY_EQUIPMENT);
-        packet.getIntegers().write(0, entityId);
         Object stack = item == null ? null : asNmsCopy.invoke(null, item);
-        packet.getModifier().write(1, Collections.singletonList(pairOf.invoke(null, headSlot, stack)));
-        return packet;
+        List<Object> slots = new ArrayList<>(1);
+        slots.add(pairOf.invoke(null, headSlot, stack));
+        try {
+            PacketContainer packet = manager.createPacket(PacketType.Play.Server.ENTITY_EQUIPMENT);
+            packet.getIntegers().write(0, entityId);
+            packet.getModifier().write(1, slots);
+            return packet;
+        } catch (Throwable noUsableConstructor) {
+            return PacketConstructor.DEFAULT
+                    .withPacket(PacketType.Play.Server.ENTITY_EQUIPMENT, new Object[]{entityId, slots})
+                    .createPacket();
+        }
     }
 }
