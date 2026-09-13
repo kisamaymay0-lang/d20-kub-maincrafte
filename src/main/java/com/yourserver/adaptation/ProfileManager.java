@@ -336,7 +336,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     /**
-     * Косметика на голове: запоминаем надетую и показываем её всем, кроме владельца.
+     * Косметика на голове: запоминаем надетую и показываем её всем — и владельцу тоже.
      * Ник при этом не меняется — косметика ничего не рисует в чате и в табе.
      */
     private void applyCosmetic(Player player, ProfileData data) {
