@@ -16,12 +16,10 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerAnimationEvent;
 import org.bukkit.event.player.PlayerAnimationType;
 import org.bukkit.event.player.PlayerFishEvent;
-import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.ItemStack;
@@ -42,11 +40,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * Миниигра особого предмета биома.
  *
  * При улове с небольшим шансом (config.yml → fishing.special-item-chance-percent)
- * вместо обычной рыбы начинается ПОКЛЁВКА особого предмета биома: у удочки по воде
- * идёт круг из золотых частиц и больше ничего — ни предмета, ни надписей, ни
- * таймера. Игрок должен нажать ПКМ ещё раз: тогда предмет выпрыгивает и начинается
- * охота. Не успел за окно поклёвки (по умолчанию 10 секунд) — круг гаснет,
- * поплавок уходит на дно, в полоске «Предмет ушел на дно...».
+ * вместо обычной рыбы сразу начинается охота на особый предмет биома: обычный
+ * улов убирается, предмет выпрыгивает из воды и летает вокруг игрока.
  *
  * Во время охоты над инвентарём появляется «Поймай его! Осталось: N», а вокруг
  * игрока в куполе летает предмет. Его надо ударить несколько раз (по умолчанию 4):
@@ -71,20 +66,7 @@ final class SpecialCatch implements Listener {
     private final WinterFishing winter;
 
     private final Map<UUID, Hunt> hunts = new HashMap<>();
-    /** Круги из золотых частиц, которые ещё не стали охотой: игрок должен нажать ПКМ. */
-    private final Map<UUID, Bite> bites = new HashMap<>();
-    /**
-     * Игроки, которые только что начали охоту: один клик удочкой приходит двумя
-     * событиями подряд, и второе надо погасить, иначе удочка забросит ещё раз.
-     * Метка живёт полсекунды и снимается при первом же просмотре — считать её
-     * тиками нельзя: задача миниигры останавливается, счётчик замирает, и
-     * удочка у игрока гаснет навсегда.
-     */
-    private final Map<UUID, Long> swallowClick = new HashMap<>();
     private BukkitTask task;
-
-    /** Запас на вторую половину жеста: оба события приходят одним пакетом подряд. */
-    private static final long GESTURE_WINDOW_NANOS = 500_000_000L;
 
     SpecialCatch(JavaPlugin plugin, AncientJug jug, WinterFishing winter) {
         this.plugin = plugin;
@@ -142,11 +124,6 @@ final class SpecialCatch implements Listener {
     /** Прибавка к силе рывка за каждый удар. */
     private double dashPerHit() {
         return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.dash-per-hit", 0.5), 0.0, 3.0);
-    }
-
-    /** Сколько секунд у игрока на повторный ПКМ, пока у удочки горит круг из частиц. */
-    private int biteTicks() {
-        return Math.clamp(plugin.getConfig().getInt("fishing.special-minigame.bite-window-seconds", 10), 3, 60) * 20;
     }
 
     /** Сколько промахов игрок может допустить, прежде чем предмет уйдёт сам. */
@@ -220,69 +197,15 @@ final class SpecialCatch implements Listener {
         if (event.getState() != PlayerFishEvent.State.CAUGHT_FISH) return;
         if (!(event.getCaught() instanceof Item caught)) return;
         Player player = event.getPlayer();
-        if (hunts.containsKey(player.getUniqueId()) || bites.containsKey(player.getUniqueId())) return;
+        if (hunts.containsKey(player.getUniqueId())) return;
         if (event.getHook().getPersistentDataContainer().has(ourHook, PersistentDataType.BYTE)) return;
         String biome = event.getHook().getLocation().getBlock().getBiome().getKey().toString();
         ItemStack reward = specialItem(biome);
         if (reward == null) return;                       // у биома нет особого предмета
         if (ThreadLocalRandom.current().nextDouble() >= chance()) return;
-        // Обычного улова не будет: вместо него у удочки загорается круг из частиц.
-        Location spot = event.getHook().getLocation().clone();
+        // Обычного улова не будет: вместо него сразу начинается охота.
         caught.remove();
-        bite(player, reward, spot);
-    }
-
-    /**
-     * Поклёвка: у удочки появляется круг из золотых частиц, и миниигра ещё НЕ
-     * началась. Игрок должен нажать ПКМ ещё раз — тогда предмет выпрыгнет и
-     * начнётся охота. Если не успеет за окно поклёвки, предмет уйдёт на дно.
-     * Никаких надписей в этот момент нет: таймер игроку не показывается.
-     *
-     * Круг держится там, где клюнуло — на поплавке. Забрасывать под него
-     * отдельный поплавок нельзя: получался крючок без удочки, его невозможно
-     * вытащить, и он висел в мире посторонним предметом.
-     */
-    private void bite(Player player, ItemStack reward, Location spot) {
-        bites.put(player.getUniqueId(), new Bite(player, reward, spot));
-        player.playSound(player.getLocation(), Sound.ENTITY_FISHING_BOBBER_SPLASH, 0.9f, 0.8f);
-        ensureTask();
-    }
-
-    /**
-     * ПКМ во время поклёвки — охота началась. Ванильный заброс удочки гасим.
-     *
-     * Важно: один клик удочкой приходит ДВУМЯ событиями подряд — сначала
-     * «ПКМ по блоку» (UseItemOn), затем «ПКМ в воздух» (UseItem), и крючок
-     * забрасывает именно второе. Поклёвку забираем на первом, а второе помечаем
-     * и тоже гасим: иначе удочка забросит ещё раз поверх начатой охоты.
-     */
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onRodUse(PlayerInteractEvent event) {
-        Action action = event.getAction();
-        if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) return;
-        Player player = event.getPlayer();
-        UUID id = player.getUniqueId();
-        if (pendingClick(id)) {
-            event.setCancelled(true); // вторая половина того же клика
-            return;
-        }
-        Bite bite = bites.get(id);
-        if (bite == null || hunts.containsKey(id)) return;
-        if (!holdsRod(player)) return;
-        event.setCancelled(true); // Удочка не забрасывается: охота идёт без второго крючка.
-        bites.remove(id);
-        // Клик по блоку всегда продолжает клик «в воздух» — вот его и гасим.
-        swallowClick.put(id, System.nanoTime());
-        start(player, bite.reward);
-    }
-
-    /**
-     * Есть ли непогашенная вторая половина жеста. Метку снимаем сразу: если её
-     * держать, она съест уже настоящий заброс удочки.
-     */
-    private boolean pendingClick(UUID id) {
-        Long at = swallowClick.remove(id);
-        return at != null && System.nanoTime() - at <= GESTURE_WINDOW_NANOS;
+        start(player, reward);
     }
 
     private void start(Player player, ItemStack reward) {
@@ -304,7 +227,7 @@ final class SpecialCatch implements Listener {
             display.setSilent(true);
         });
         // Охота живёт, пока поплавок в воде и в руке удочка: поплавок забрасываем
-        // за игрока — ровно так, как миниигра делала это до появления поклёвки.
+        // за игрока: охота живёт, пока поплавок в воде.
         try {
             Vector cast = player.getEyeLocation().getDirection().multiply(1.1);
             FishHook hook = player.launchProjectile(FishHook.class, cast);
@@ -327,14 +250,13 @@ final class SpecialCatch implements Listener {
     // ===== ЖИЗНЬ МИНИИГРЫ =====
 
     private void tick() {
-        if (hunts.isEmpty() && bites.isEmpty()) {
+        if (hunts.isEmpty()) {
             if (task != null) {
                 task.cancel();
                 task = null;
             }
             return;
         }
-        tickBites();
         for (Hunt hunt : new ArrayList<>(hunts.values())) {
             Player player = hunt.player;
             if (!player.isOnline() || player.isDead() || !player.isValid()) {
@@ -364,56 +286,6 @@ final class SpecialCatch implements Listener {
         }
     }
 
-    /**
-     * Поклёвка живёт, пока игрок с удочкой в руке и поплавок в воде. Не нажал ПКМ
-     * вовремя — круг гаснет, поплавок уходит на дно, в полоске «Предмет ушел на дно...».
-     */
-    private void tickBites() {
-        if (bites.isEmpty()) return;
-        for (Bite bite : new ArrayList<>(bites.values())) {
-            Player player = bite.player;
-            if (!player.isOnline() || player.isDead() || !player.isValid() || !holdsRod(player)) {
-                sink(bite);
-                continue;
-            }
-            bite.ticks++;
-            if (bite.ticks >= bite.totalTicks) {
-                sink(bite);
-                continue;
-            }
-            if (bite.ticks % Math.max(1, particleInterval()) == 0) biteParticles(bite);
-        }
-    }
-
-    /** Круг гаснет, предмет тонет. Других надписей на этом шаге нет. */
-    private void sink(Bite bite) {
-        bites.remove(bite.player.getUniqueId());
-        Player player = bite.player;
-        World world = player.getWorld();
-        Location water = bite.spot;
-        if (player.isOnline()) player.sendActionBar("§cПредмет ушел на дно...");
-        world.playSound(water, Sound.ENTITY_FISHING_BOBBER_SPLASH, 0.8f, 0.6f);
-        world.spawnParticle(Particle.BUBBLE_POP, water, 10, 0.3, 0.1, 0.3, 0.02);
-    }
-
-    /** Круг из золотых частиц на поплавке — сигнал «нажми ПКМ ещё раз». */
-    private void biteParticles(Bite bite) {
-        World world = bite.player.getWorld();
-        // Обруч на воде, где клюнуло: из-под него и выпрыгнет предмет.
-        Location water = bite.spot;
-        double radius = swirlRadius();
-        Particle.DustOptions gold = goldDust();
-        int points = 12;
-        for (int i = 0; i < points; i++) {
-            double angle = bite.phase + i * (Math.PI * 2.0 / points);
-            Location point = water.clone().add(Math.cos(angle) * radius, 0.15 + 0.1 * Math.sin(angle * 2),
-                    Math.sin(angle) * radius);
-            world.spawnParticle(Particle.DUST, point, 1, 0.02, 0.02, 0.02, 0.0, gold);
-        }
-        bite.phase += 0.18;
-    }
-
-    /** Кувшин летает по кругу в куполе вокруг игрока и по инерции доезжает после удара. */
     private void move(Hunt hunt) {
         if (hunt.display == null || !hunt.display.isValid()) return;
         hunt.phase += orbitSpeed(hunt);
@@ -592,14 +464,12 @@ final class SpecialCatch implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         Hunt hunt = hunts.get(event.getPlayer().getUniqueId());
         if (hunt != null) cancel(hunt, null);
-        dropBite(event.getPlayer().getUniqueId());
     }
 
     @EventHandler(ignoreCancelled = true)
     public void onDeath(PlayerDeathEvent event) {
         Hunt hunt = hunts.get(event.getEntity().getUniqueId());
         if (hunt != null) cancel(hunt, null);
-        dropBite(event.getEntity().getUniqueId());
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -612,18 +482,12 @@ final class SpecialCatch implements Listener {
         }
     }
 
-    /** Поклёвка убирается молча: игрок ушёл/умер, предмет просто не появился. */
-    private void dropBite(UUID player) {
-        bites.remove(player);
-    }
-
     /** Короткая сводка действующих настроек для /f8 reload. */
     String describe() {
         List<String> biomes = new ArrayList<>();
         var section = plugin.getConfig().getConfigurationSection("fishing.special-items");
         if (section != null) biomes.addAll(section.getKeys(false));
         return "§7Миниигра особого улова: шанс §f" + Math.round(chance() * 100.0) + "%"
-                + "§7, окно на ПКМ §f" + (biteTicks() / 20) + " с"
                 + "§7, ударов §f" + hitsRequired()
                 + "§7, таймер §f" + (durationTicks() / 20) + " с"
                 + "§7, промахов до провала §f" + missesAllowed()
@@ -641,32 +505,8 @@ final class SpecialCatch implements Listener {
             if (hunt.hook != null && hunt.hook.isValid()) hunt.hook.remove();
         }
         hunts.clear();
-        for (UUID player : new ArrayList<>(bites.keySet())) dropBite(player);
-        bites.clear();
-        swallowClick.clear();
     }
 
-    /**
-     * Поклёвка: круг из золотых частиц у удочки, который ждёт повторного ПКМ.
-     * Предмет ещё не появился, надписей нет — только таймер внутри.
-     */
-    private final class Bite {
-        final Player player;
-        final ItemStack reward;
-        /** Где клюнуло: круг частиц и всплеск «ушел на дно» идут сюда, а не в игрока. */
-        final Location spot;
-        final int totalTicks = biteTicks();
-        double phase = ThreadLocalRandom.current().nextDouble(0, Math.PI * 2);
-        int ticks;
-
-        Bite(Player player, ItemStack reward, Location spot) {
-            this.player = player;
-            this.reward = reward;
-            this.spot = spot;
-        }
-    }
-
-    /** Одна охота: летающий предмет, счётчик ударов и таймер. */
     private final class Hunt {
         final Player player;
         final ItemStack reward;

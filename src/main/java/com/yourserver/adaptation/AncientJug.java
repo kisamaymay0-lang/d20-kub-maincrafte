@@ -20,10 +20,9 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Block;
-import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.data.Ageable;
-import org.bukkit.block.data.type.DecoratedPot;
+import org.bukkit.Note;
 import org.bukkit.block.data.type.NoteBlock;
 import org.bukkit.block.data.type.Slab;
 import org.bukkit.configuration.ConfigurationSection;
@@ -42,7 +41,6 @@ import org.bukkit.event.block.BlockPistonExtendEvent;
 import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
-import org.bukkit.event.entity.EntityChangeBlockEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.event.player.PlayerHarvestBlockEvent;
@@ -75,30 +73,23 @@ import java.util.UUID;
  * Древний кувшин — особый предмет рыбалки в пустынных биомах: выигрывается
  * в миниигре особого улова (см. SpecialCatch).
  *
- * Кувшин ставится как блок: предмет — обычный нот-блок (его можно поставить
- * на любую грань, хоть в воздухе), но на месте установки он сразу заменяется
- * на носитель — узорчатую вазу (decorated_pot). Предмет намеренно оставлен
- * нот-блоком: кувшины из версий до 10.13 лежат в инвентарях именно такими,
- * а внешний вид всё равно задаёт модель ресурспака.
- * Ваза не считается сплошным блоком, поэтому соседние блоки не «пропадают»
- * рядом с кувшином: щелей нет ни в полу, ни в стенах, ни в потолке.
- * Модель выбирается поворотом вазы: пустой кувшин смотрит на север,
- * налитый — на юг. Поворот каждый тик возвращается каноническим, поэтому
- * сбить его отладкой или поршнем не получится.
- * Ваза кувшина всегда «треснувшая» (cracked = true): обычная ваза — это
- * контейнер, и ПКМ по ней засосал бы предмет из руки, а треснувшую ваниль
- * контейнером не считает. Так предмет в кувшин не попадает ни при каком
- * нажатии, и шифт + ПКМ по кувшину работает как обычный шифт + ПКМ по блоку:
- * блоки ставятся, зелья начинают выпиваться и т.д. На вид это не влияет —
- * модель всё равно берёт ресурспак, а треснувшая ваза выглядит как пустая.
- * Ломается кувшин со звуком разбитой вазы (block.decorated_pot.shatter),
- * а простой ПКМ по нему без жидкости в руке звучит как
- * block.decorated_pot.insert_fail. Снаряды вазу не разбивают: иначе от
- * кувшина остались бы черепки, а запись о содержимом повисла бы в воздухе.
+ * Кувшин ставится как блок, и предмет, и блок-носитель — обычный нот-блок
+ * (его можно поставить на любую грань, хоть в воздухе). Модель выбирает
+ * ресурспак по паре «нота + инструмент»: пустой кувшин — нота 24 + флейта,
+ * налитый — нота равна количеству жидкости (она же сигнал компаратора)
+ * + банджо. Состояние каждый тик возвращается каноническим, поэтому сбить
+ * его отладкой или поршнем не получится.
+ *
+ * Узорчатая ваза (decorated_pot) была носителем в 10.13 и не годится: тело
+ * вазы — стороны, верх, низ и горловину — рисует рендерер блочной сущности
+ * DecoratedPotBlockEntityRenderer, а не модель из блок-стейта, поэтому
+ * поверх модели кувшина всегда рисовалась ещё и ванильная ваза: получалось
+ * два блока в одном. Звуки вазы при этом остались — кувшин ломается со звуком
+ * block.decorated_pot.shatter, а простой ПКМ по нему без жидкости в руке
+ * звучит как block.decorated_pot.insert_fail.
  * Кувшины старых версий переезжают сами: 10.11–10.12 стояли плитой
- * петрифайд-дуба, 10.10 и раньше — нот-блоками (нота 24 + флейта /
- * ноты 1..9 + банджо). При первой же проверке такие блоки переносятся
- * на вазу, так что старые постройки не пропадают.
+ * петрифайд-дуба. При первой же проверке такие блоки переносятся на
+ * нот-блок, так что старые постройки не пропадают.
  *
  * В поставленный кувшин ПКМ выливаются жидкости: обычные зелья, бутылочки
  * мёда и любые предметы, помеченные другими плагинами как жидкость
@@ -126,18 +117,17 @@ import java.util.UUID;
 public class AncientJug implements Listener {
 
     static final String TITLE = "Древний кувшин";
-    /** Та же резервная нота, что у медного блока: нужна только для старых кувшинов. */
+    /** Нота пустого кувшина. У медного блока та же нота, но другой инструмент. */
     static final int MARKER_NOTE = 24;
-    /** Кувшин до 10.11 был нот-блоком: пустой — нота 24 + флейта. */
+    /** Пустой кувшин: нота 24 + флейта. */
     static final Instrument EMPTY_INSTRUMENT = Instrument.FLUTE;
-    /** Кувшин до 10.11 с жидкостью: нота 1..9 (= количество) + банджо. */
+    /** Кувшин с жидкостью: нота 1..9 (= количество) + банджо. */
     static final Instrument FILLED_INSTRUMENT = Instrument.BANJO;
     /**
-     * Блок-носитель кувшина: узорчатая ваза (decorated_pot). Она не сплошная,
-     * поэтому не скрывает грани соседних блоков (щелей вокруг кувшина нет),
-     * а по звукам и силуэту это и есть кувшин.
+     * Блок-носитель кувшина — нот-блок: у него нет рендерера блочной сущности,
+     * поэтому модель из ресурспака рисуется одна и без ванильных примесей.
      */
-    private static final Material JUG_BLOCK = Material.DECORATED_POT;
+    private static final Material JUG_BLOCK = Material.NOTE_BLOCK;
     /**
      * Носитель кувшина версий 10.11–10.12 — плита петрифайд-дуба. Такие кувшины
      * переносятся на вазу, как раньше переносились с нот-блока.
@@ -148,8 +138,6 @@ public class AncientJug implements Listener {
      * различать два состояния: модель выбирает ресурспак, а на сам кувшин
      * сторона света никак не влияет (в отличие от «воды внутри» у waterlogged).
      */
-    private static final BlockFace EMPTY_FACING = BlockFace.NORTH;
-    private static final BlockFace FILLED_FACING = BlockFace.SOUTH;
     static final int MAX_BOTTLES = 9;
     static final String POTION_KIND = "POTION";
     static final String HONEY_KIND = "HONEY";
@@ -453,30 +441,26 @@ public class AncientJug implements Listener {
     }
 
     // ===== СОСТОЯНИЕ БЛОКА: ЗАЩИТА ОТ СБОЯ =====
-    // Ресурспак выбирает модель по повороту вазы-носителя, поэтому у кувшина
-    // он обязан совпадать с содержимым: пустой — север, с жидкостью — юг.
-    // Игрок может сбить поворот отладкой, поэтому держим его сами: сразу в
-    // событии и контрольным проходом каждый тик. Здесь же — перенос старых
-    // кувшинов (плита, а ещё раньше нот-блок) на вазу.
+    // Носитель кувшина — нот-блок, а его модель ресурспак выбирает по паре
+    // «нота + инструмент»: пустой кувшин — нота 24 + флейта, налитый —
+    // нота = количество жидкости (она же сигнал компаратора) + банджо.
+    // Игрок может сбить ноту отладкой, поэтому держим состояние сами: сразу в
+    // событии и контрольным проходом каждый тик. Здесь же — перенос кувшинов
+    // 10.11–10.12 (плита петрифайд-дуба) обратно на нот-блок.
     //
-    // Вторая половина состояния — cracked = true. Узорчатая ваза в ванили
-    // контейнер: ПКМ по ней отправляет предмет из руки внутрь, а треснувшую
-    // вазу ваниль контейнером не считает и отвечает PASS — и на сервере, и на
-    // клиенте (cracked — свойство блока, оно синхронизировано; содержимое вазы
-    // Paper клиенту, наоборот, не отдаёт). Именно поэтому ваза кувшина держится
-    // треснувшей: предмет из руки в кувшин не засасывается, а используется как
-    // обычно — блок ставится, зелье начинает выпиваться. На внешний вид это не
-    // влияет: треснувшая ваза выглядит как обычная пустая, а модель кувшина
-    // всё равно берётся из ресурспака (docs/decorated-pot).
+    // Узорчатая ваза носителем быть НЕ может: тело вазы (стороны, верх, низ и
+    // горловина) рисует DecoratedPotBlockEntityRenderer — рендерер блочной
+    // сущности, а не модель из блок-стейта. Ресурспак его не убирает, поэтому
+    // поверх модели кувшина всегда рисовалась ещё и ванильная ваза.
 
-    /** Блок кувшина и его каноническое состояние вазы. */
+    /** Блок кувшина и его каноническое состояние нот-блока. */
     private final class JugPin {
         private final Location location;
-        private final BlockFace facing;
+        private final int count;
 
-        JugPin(Location location, BlockFace facing) {
+        JugPin(Location location, int count) {
             this.location = location.clone();
-            this.facing = facing;
+            this.count = count;
         }
 
         /** Возвращает блоку каноническое состояние; в незагруженном чанке молчит. */
@@ -486,64 +470,70 @@ public class AncientJug implements Listener {
             if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) return;
             Block block = world.getBlockAt(location);
             if (block.getType() == JUG_BLOCK) {
-                if (!(block.getBlockData() instanceof DecoratedPot data)) return;
-                if (data.getFacing() == facing && data.isCracked()) return;
-                data.setFacing(facing);
-                data.setCracked(true);
+                if (!(block.getBlockData() instanceof NoteBlock data)) return;
+                if (isJugState(data, count)) return;
+                applyJugState(data, count);
                 block.setBlockData(data, false);
                 return;
             }
-            // Кувшин версии 10.12 и раньше (плита, а до 10.11 — нот-блок): переносим на вазу.
+            // Кувшин версии 10.11–10.12 (плита петрифайд-дуба): переносим на нот-блок.
             if (isOldJugState(block)) {
-                setJugBlock(block, facing);
+                setJugBlock(block, count);
                 plugin.getLogger().info("Старый кувшин (" + world.getName() + " "
                         + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
-                        + ") перенесён на узорчатую вазу 10.13");
+                        + ") перенесён с плиты на нот-блок");
             }
         }
     }
 
     /**
-     * Кувшин старого образца. Версии 10.11–10.12 стояли плитой петрифайд-дуба
-     * (нижняя — пустой, верхняя — налитый), версии 10.10 и раньше — нот-блоком
-     * с канонической парой «нота + инструмент». Метод вызывается только для
-     * кувшинов из jugs.yml, поэтому обычные плиты и нот-блоки не задеваются.
+     * Кувшин старого образца: версии 10.11–10.12 стояли плитой петрифайд-дуба
+     * (нижняя — пустой, верхняя — налитый). Метод вызывается только для
+     * кувшинов из jugs.yml, поэтому обычные плиты не задеваются.
      */
     private static boolean isOldJugState(Block block) {
-        if (block.getType() == LEGACY_SLAB_BLOCK) {
-            return block.getBlockData() instanceof Slab data && data.getType() != Slab.Type.DOUBLE;
-        }
-        if (block.getType() != Material.NOTE_BLOCK) return false;
-        if (!(block.getBlockData() instanceof NoteBlock data)) return false;
-        int note = data.getNote().getId();
-        if (data.getInstrument() == EMPTY_INSTRUMENT) return note == MARKER_NOTE;
-        return data.getInstrument() == FILLED_INSTRUMENT && note >= 1 && note <= MAX_BOTTLES;
+        return block.getType() == LEGACY_SLAB_BLOCK
+                && block.getBlockData() instanceof Slab data && data.getType() != Slab.Type.DOUBLE;
     }
 
-    /**
-     * Ставит блок-носитель кувшина в нужном состоянии: поворот вазы на север
-     * или на юг, и ваза обязательно «треснувшая» — почему, написано в разделе
-     * «Состояние блока» выше.
-     */
-    private static void setJugBlock(Block block, BlockFace facing) {
+    /** Ставит блок-носитель кувшина и сразу задаёт ему каноническое состояние. */
+    private static void setJugBlock(Block block, int count) {
         block.setType(JUG_BLOCK, false);
-        if (block.getBlockData() instanceof DecoratedPot data) {
-            data.setFacing(facing);
-            data.setCracked(true);
+        if (block.getBlockData() instanceof NoteBlock data) {
+            applyJugState(data, count);
             block.setBlockData(data, false);
         }
     }
 
-    /** Состояние вазы для содержимого: пустой кувшин смотрит на север, налитый — на юг. */
-    private static BlockFace facingOf(Contents contents) {
-        return contents.count > 0 ? FILLED_FACING : EMPTY_FACING;
+    /**
+     * Каноническая пара «нота + инструмент»: пустой кувшин — нота 24 + флейта,
+     * налитый — нота равна количеству жидкости (она же сигнал компаратора)
+     * + банджо. Именно по этой паре ресурспак выбирает модель кувшина.
+     */
+    private static void applyJugState(NoteBlock data, int count) {
+        if (count > 0) {
+            data.setInstrument(FILLED_INSTRUMENT);
+            data.setNote(new Note(Math.min(MAX_BOTTLES, count)));
+        } else {
+            data.setInstrument(EMPTY_INSTRUMENT);
+            data.setNote(new Note(MARKER_NOTE));
+        }
+    }
+
+    /** Стоит ли нот-блок в каноническом состоянии кувшина с таким содержимым. */
+    private static boolean isJugState(NoteBlock data, int count) {
+        int note = data.getNote().getId();
+        if (count > 0) {
+            return data.getInstrument() == FILLED_INSTRUMENT && note == Math.min(MAX_BOTTLES, count);
+        }
+        return data.getInstrument() == EMPTY_INSTRUMENT && note == MARKER_NOTE;
     }
 
     /** Запоминает кувшин по ключу записи; мир ещё не загружен — пропускаем. */
     private void pin(String key, Contents contents) {
         Location location = locationOf(key);
         if (location == null || location.getWorld() == null) return;
-        pins.put(key, new JugPin(location, facingOf(contents)));
+        pins.put(key, new JugPin(location, contents.count));
     }
 
     /** Перечитать запись из jugs.yml и сразу вернуть блоку канонический вид. */
@@ -678,17 +668,16 @@ public class AncientJug implements Listener {
         if (block.getType() != Material.NOTE_BLOCK) return;
         Contents contents = contentsOf(hand);
 
-        // Предмет — нот-блок (ставится на любую грань, хоть в воздухе), а кувшином
-        // становится узорчатая ваза: её канонический поворот (север — пустой,
-        // юг — налитый) выбирает модель в ресурспаке.
-        setJugBlock(block, facingOf(contents));
+        // Предмет и блок-носитель — нот-блок: ставится на любую грань, хоть в
+        // воздухе. Модель кувшина ресурспак выбирает по паре «нота + инструмент»,
+        // поэтому сразу задаём каноническое состояние под содержимое.
+        setJugBlock(block, contents.count);
 
         writeContents(blockKey(block), contents);
         storage.markDirty();
         refresh(blockKey(block));
-        // Клиент на мгновение предсказал нот-блок, а стоит уже ваза. Возвращаем
-        // ему настоящее состояние блока, иначе он может так и показать то, что
-        // предсказал, и кувшин будет выглядеть двумя блоками в одном.
+        // Клиент предсказал обычный нот-блок (нота 0, арфа). Возвращаем ему
+        // настоящее состояние, чтобы модель кувшина появилась сразу.
         placing.sendBlockChange(block.getLocation(), block.getBlockData());
     }
 
@@ -924,10 +913,9 @@ public class AncientJug implements Listener {
     }
 
     /**
-     * Отменяем ПКМ по кувшину и приводим клиента в порядок. Ваза кувшина
-     * треснувшая, поэтому ваниль на неё отвечает PASS и клиент сам доигрывает
-     * жест: блок рядом с кувшином он уже успел «поставить», а зелье — начать
-     * пить. Сервер этого не делает, так что соседний блок возвращаем настоящим,
+     * Отменяем ПКМ по кувшину и приводим клиента в порядок: жест он доигрывает
+     * сам — блок рядом с кувшином уже успел «поставить», а зелье — начать пить.
+     * Сервер этого не делает, так что соседний блок возвращаем настоящим,
      * а жест «в воздух» помечаем на гашение ({@link #onAirUse}).
      */
     private void denyInteraction(PlayerInteractEvent event, Player player, Block block) {
@@ -963,20 +951,6 @@ public class AncientJug implements Listener {
 
     private static String airUseKey(Player player, EquipmentSlot hand) {
         return player.getUniqueId() + ":" + (hand == null ? EquipmentSlot.HAND : hand).name();
-    }
-
-    /**
-     * Стрела, снежок, яйцо и прочее ванильно разбивают узорчатую вазу в
-     * черепки. Кувшин так ломаться не должен: содержимое привязано к
-     * координатам, и от разбитой вазы остались бы только кирпичи да запись в
-     * jugs.yml. Paper вызывает перед этим событие — гасим.
-     */
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onProjectileShatter(EntityChangeBlockEvent event) {
-        Block block = event.getBlock();
-        if (block.getType() != JUG_BLOCK || event.getTo() != Material.AIR) return;
-        if (!jugsData.contains(blockKey(block))) return;
-        event.setCancelled(true);
     }
 
     /** Кувшину нечего принять: короткий звук «ваза не взяла предмет». */
