@@ -22,7 +22,6 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.data.Ageable;
-import org.bukkit.Note;
 import org.bukkit.block.data.type.NoteBlock;
 import org.bukkit.block.data.type.Slab;
 import org.bukkit.configuration.ConfigurationSection;
@@ -73,23 +72,30 @@ import java.util.UUID;
  * Древний кувшин — особый предмет рыбалки в пустынных биомах: выигрывается
  * в миниигре особого улова (см. SpecialCatch).
  *
- * Кувшин ставится как блок, и предмет, и блок-носитель — обычный нот-блок
- * (его можно поставить на любую грань, хоть в воздухе). Модель выбирает
- * ресурспак по паре «нота + инструмент»: пустой кувшин — нота 24 + флейта,
- * налитый — нота равна количеству жидкости (она же сигнал компаратора)
- * + банджо. Состояние каждый тик возвращается каноническим, поэтому сбить
- * его отладкой или поршнем не получится.
+ * Кувшин ставится как блок; предмет — обычный нот-блок (его можно поставить
+ * на любую грань, хоть в воздухе), а блок-носитель — **котёл**: пустой кувшин
+ * это простой котёл, налитый — котёл с водой. По материалу ресурспак и выбирает
+ * модель. Состояние каждый тик возвращается каноническим, поэтому сбить его
+ * отладкой или поршнем не получится.
  *
- * Узорчатая ваза (decorated_pot) была носителем в 10.13 и не годится: тело
- * вазы — стороны, верх, низ и горловину — рисует рендерер блочной сущности
- * DecoratedPotBlockEntityRenderer, а не модель из блок-стейта, поэтому
- * поверх модели кувшина всегда рисовалась ещё и ванильная ваза: получалось
- * два блока в одном. Звуки вазы при этом остались — кувшин ломается со звуком
+ * Почему котёл. Нот-блок (носитель до 10.14) звенит от удара и от редстоуна,
+ * а главное — он сплошной куб, из-за чего грани соседних блоков не рисуются
+ * и рядом с кувшином появляются дыры. Узорчатая ваза (10.13) не годится вовсе:
+ * тело вазы — стороны, верх, низ и горловину — рисует рендерер блочной сущности
+ * DecoratedPotBlockEntityRenderer, а не модель из блок-стейта, поэтому поверх
+ * модели кувшина всегда рисовалась ещё и ванильная ваза: два блока в одном.
+ * Котёл — без блочной сущности (модель рисуется одна), не сплошной куб (щелей
+ * нет), звука не издаёт и на редстоун не реагирует, а по
+ * столкновению это стенки на всю высоту блока — почти как у вазы.
+ * Звуки вазы при этом остались: кувшин ломается со звуком
  * block.decorated_pot.shatter, а простой ПКМ по нему без жидкости в руке
  * звучит как block.decorated_pot.insert_fail.
- * Кувшины старых версий переезжают сами: 10.11–10.12 стояли плитой
- * петрифайд-дуба. При первой же проверке такие блоки переносятся на
- * нот-блок, так что старые постройки не пропадают.
+ *
+ * Кувшины старых версий переезжают сами: 10.13 стоял нот-блоком (нота 24
+ * + флейта / ноты 1..9 + банджо), 10.11–10.12 — плитой петрифайд-дуба.
+ * При первой же проверке такие блоки переносятся на котёл, так что старые
+ * постройки не пропадают. Пустой котёл под дождём на тик становится водяным —
+ * контрольный проход тут же возвращает его на место.
  *
  * В поставленный кувшин ПКМ выливаются жидкости: обычные зелья, бутылочки
  * мёда и любые предметы, помеченные другими плагинами как жидкость
@@ -127,7 +133,9 @@ public class AncientJug implements Listener {
      * Блок-носитель кувшина — нот-блок: у него нет рендерера блочной сущности,
      * поэтому модель из ресурспака рисуется одна и без ванильных примесей.
      */
-    private static final Material JUG_BLOCK = Material.NOTE_BLOCK;
+    private static final Material JUG_BLOCK = Material.CAULDRON;
+    /** Тот же котёл, но с водой: по нему ресурспак рисует налитый кувшин. */
+    private static final Material FILLED_JUG_BLOCK = Material.WATER_CAULDRON;
     /**
      * Носитель кувшина версий 10.11–10.12 — плита петрифайд-дуба. Такие кувшины
      * переносятся на вазу, как раньше переносились с нот-блока.
@@ -444,16 +452,12 @@ public class AncientJug implements Listener {
     // Носитель кувшина — нот-блок, а его модель ресурспак выбирает по паре
     // «нота + инструмент»: пустой кувшин — нота 24 + флейта, налитый —
     // нота = количество жидкости (она же сигнал компаратора) + банджо.
-    // Игрок может сбить ноту отладкой, поэтому держим состояние сами: сразу в
-    // событии и контрольным проходом каждый тик. Здесь же — перенос кувшинов
-    // 10.11–10.12 (плита петрифайд-дуба) обратно на нот-блок.
-    //
-    // Узорчатая ваза носителем быть НЕ может: тело вазы (стороны, верх, низ и
-    // горловина) рисует DecoratedPotBlockEntityRenderer — рендерер блочной
-    // сущности, а не модель из блок-стейта. Ресурспак его не убирает, поэтому
-    // поверх модели кувшина всегда рисовалась ещё и ванильная ваза.
+    // Игрок может подменить блок отладкой, а дождь — наполнить пустой котёл,
+    // поэтому держим состояние сами: сразу в событии и контрольным проходом
+    // каждый тик. Здесь же — перенос кувшинов 10.13 (нот-блок) и 10.11–10.12
+    // (плита петрифайд-дуба) на котёл.
 
-    /** Блок кувшина и его каноническое состояние нот-блока. */
+    /** Блок кувшина и его канонический материал-носитель. */
     private final class JugPin {
         private final Location location;
         private final int count;
@@ -469,64 +473,49 @@ public class AncientJug implements Listener {
             if (world == null) return;
             if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) return;
             Block block = world.getBlockAt(location);
-            if (block.getType() == JUG_BLOCK) {
-                if (!(block.getBlockData() instanceof NoteBlock data)) return;
-                if (isJugState(data, count)) return;
-                applyJugState(data, count);
-                block.setBlockData(data, false);
-                return;
-            }
-            // Кувшин версии 10.11–10.12 (плита петрифайд-дуба): переносим на нот-блок.
-            if (isOldJugState(block)) {
-                setJugBlock(block, count);
+            Material now = block.getType();
+            if (now == jugMaterial(count)) return;
+            boolean ours = now == JUG_BLOCK || now == FILLED_JUG_BLOCK;
+            if (!ours && !isOldJugState(block)) return;
+            setJugBlock(block, count);
+            if (!ours) {
                 plugin.getLogger().info("Старый кувшин (" + world.getName() + " "
                         + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
-                        + ") перенесён с плиты на нот-блок");
+                        + ") перенесён на котёл");
             }
         }
     }
 
     /**
-     * Кувшин старого образца: версии 10.11–10.12 стояли плитой петрифайд-дуба
-     * (нижняя — пустой, верхняя — налитый). Метод вызывается только для
-     * кувшинов из jugs.yml, поэтому обычные плиты не задеваются.
+     * Кувшин старого образца. Версия 10.13 стояла нот-блоком (пустой — нота 24
+     * + флейта, налитый — ноты 1..9 + банджо), версии 10.11–10.12 — плитой
+     * петрифайд-дуба (нижняя — пустой, верхняя — налитый). Метод вызывается
+     * только для кувшинов из jugs.yml, поэтому обычные нот-блоки и плиты
+     * не задеваются.
      */
     private static boolean isOldJugState(Block block) {
-        return block.getType() == LEGACY_SLAB_BLOCK
-                && block.getBlockData() instanceof Slab data && data.getType() != Slab.Type.DOUBLE;
+        if (block.getType() == LEGACY_SLAB_BLOCK) {
+            return block.getBlockData() instanceof Slab data && data.getType() != Slab.Type.DOUBLE;
+        }
+        if (block.getType() != Material.NOTE_BLOCK) return false;
+        if (!(block.getBlockData() instanceof NoteBlock data)) return false;
+        int note = data.getNote().getId();
+        if (data.getInstrument() == EMPTY_INSTRUMENT) return note == MARKER_NOTE;
+        return data.getInstrument() == FILLED_INSTRUMENT && note >= 1 && note <= MAX_BOTTLES;
     }
 
-    /** Ставит блок-носитель кувшина и сразу задаёт ему каноническое состояние. */
+    /** Ставит блок-носитель кувшина: пустой — котёл, с жидкостью — котёл с водой. */
     private static void setJugBlock(Block block, int count) {
-        block.setType(JUG_BLOCK, false);
-        if (block.getBlockData() instanceof NoteBlock data) {
-            applyJugState(data, count);
-            block.setBlockData(data, false);
-        }
+        block.setType(jugMaterial(count), false);
     }
 
     /**
-     * Каноническая пара «нота + инструмент»: пустой кувшин — нота 24 + флейта,
-     * налитый — нота равна количеству жидкости (она же сигнал компаратора)
-     * + банджо. Именно по этой паре ресурспак выбирает модель кувшина.
+     * Материал-носитель под содержимое. Ресурспак рисует модель именно по
+     * материалу блока, поэтому состояний блока трогать не нужно: котёл ставится
+     * в своё состояние по умолчанию, какое бы оно ни было.
      */
-    private static void applyJugState(NoteBlock data, int count) {
-        if (count > 0) {
-            data.setInstrument(FILLED_INSTRUMENT);
-            data.setNote(new Note(Math.min(MAX_BOTTLES, count)));
-        } else {
-            data.setInstrument(EMPTY_INSTRUMENT);
-            data.setNote(new Note(MARKER_NOTE));
-        }
-    }
-
-    /** Стоит ли нот-блок в каноническом состоянии кувшина с таким содержимым. */
-    private static boolean isJugState(NoteBlock data, int count) {
-        int note = data.getNote().getId();
-        if (count > 0) {
-            return data.getInstrument() == FILLED_INSTRUMENT && note == Math.min(MAX_BOTTLES, count);
-        }
-        return data.getInstrument() == EMPTY_INSTRUMENT && note == MARKER_NOTE;
+    private static Material jugMaterial(int count) {
+        return count > 0 ? FILLED_JUG_BLOCK : JUG_BLOCK;
     }
 
     /** Запоминает кувшин по ключу записи; мир ещё не загружен — пропускаем. */
@@ -633,14 +622,15 @@ public class AncientJug implements Listener {
     }
 
     /**
-     * Кувшин — это ваза-носитель, поставленная из предмета кувшина. Признак —
+     * Кувшин — это котёл-носитель, поставленный из предмета кувшина. Признак —
      * запись в jugs.yml: её создаёт только установка кувшина, поэтому состояние
      * блока (поворот вазы) не обязательное условие. Так блок остаётся
      * кувшином, даже если состояние сбили отладкой или поршнем: каноническое
      * возвращается {@link #guardTick()} и событиями защиты.
      */
     private boolean isJugBlock(Block block) {
-        return block != null && block.getType() == JUG_BLOCK
+        return block != null
+                && (block.getType() == JUG_BLOCK || block.getType() == FILLED_JUG_BLOCK)
                 && jugsData.contains(blockKey(block));
     }
 
@@ -668,16 +658,15 @@ public class AncientJug implements Listener {
         if (block.getType() != Material.NOTE_BLOCK) return;
         Contents contents = contentsOf(hand);
 
-        // Предмет и блок-носитель — нот-блок: ставится на любую грань, хоть в
-        // воздухе. Модель кувшина ресурспак выбирает по паре «нота + инструмент»,
-        // поэтому сразу задаём каноническое состояние под содержимое.
+        // Предмет — нот-блок (ставится на любую грань, хоть в воздухе), а
+        // кувшином становится котёл: пустой — простой, с жидкостью — с водой.
         setJugBlock(block, contents.count);
 
         writeContents(blockKey(block), contents);
         storage.markDirty();
         refresh(blockKey(block));
-        // Клиент предсказал обычный нот-блок (нота 0, арфа). Возвращаем ему
-        // настоящее состояние, чтобы модель кувшина появилась сразу.
+        // Клиент предсказал нот-блок. Возвращаем ему настоящее состояние,
+        // чтобы модель кувшина появилась сразу.
         placing.sendBlockChange(block.getLocation(), block.getBlockData());
     }
 
@@ -869,7 +858,8 @@ public class AncientJug implements Listener {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         Block block = event.getClickedBlock();
         if (block == null
-                || (block.getType() != JUG_BLOCK && block.getType() != LEGACY_SLAB_BLOCK
+                || (block.getType() != JUG_BLOCK && block.getType() != FILLED_JUG_BLOCK
+                        && block.getType() != LEGACY_SLAB_BLOCK
                         && block.getType() != Material.NOTE_BLOCK)) return;
         Player player = event.getPlayer();
         if (!isJugBlock(block)) {
