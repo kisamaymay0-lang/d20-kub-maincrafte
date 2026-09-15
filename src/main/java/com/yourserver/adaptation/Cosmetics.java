@@ -2,184 +2,160 @@ package com.yourserver.adaptation;
 
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
-import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.entity.Display;
-import org.bukkit.entity.ItemDisplay;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 
 /**
- * Косметика на голове игрока.
+ * Косметика на голове игрока — предмет, который буквально лежит в слоте шлема.
  *
- * Косметика видна всем, включая самого владельца, и ни при каком способе показа
- * не занимает серверный слот шлема: настоящий шлем надевается, в инвентаре и в
- * слотах брони предмет не появляется и при смерти не выпадает.
+ * Никаких сущностей и никаких пакетов: косметика ставится в
+ * {@code inventory.setHelmet(...)} обычным предметом, и клиент рисует её ровно
+ * так, как она выглядит в Blockbench в разделе {@code display.head}, — потому
+ * что это и есть настоящий надетый предмет. Посадку правят в самой модели.
  *
- * Способов показа два:
+ * Слот при этом занят по-настоящему, и из этого следуют три правила, которые
+ * здесь и зашиты:
  * <ul>
- *   <li>стоит ProtocolLib — косметика уходит клиенту пакетом экипировки и
- *       надевается настоящим предметом в слот HEAD ({@link CosmeticEquipment});
- *       посадка и плавность при этом ровно как у обычной брони;</li>
- *   <li>ProtocolLib нет — у головы держится сущность {@link ItemDisplay}
- *       с трансформацией HEAD.</li>
+ *   <li>предмет помечен меткой в PDC, поэтому плагин отличает косметику от
+ *       любого другого предмета и не даёт её вытащить, выкинуть, перетащить
+ *       или потерять при смерти;</li>
+ *   <li>настоящий шлем и косметика в один слот не помещаются: при надевании
+ *       косметики прежний шлем возвращается в инвентарь (или падает под ноги,
+ *       если места нет), а пока косметика надета, шлем не надеть;</li>
+ *   <li>косметику видно всем, включая владельца, — это обычный надетый
+ *       предмет.</li>
  * </ul>
- * Оба берут из модели раздел {@code display.head}, то есть посадка — та, что
- * настроена в Blockbench.
- *
- * Трансформация HEAD берёт из модели раздел {@code display.head} — то есть
- * косметика сидит ровно так, как она выглядит надетой на голову в Blockbench.
- * Якорь — уровень глаз игрока, поэтому в присяди и в воде она остаётся на голове;
- * если посадку надо поправить, крутите {@code translation} в {@code display.head}
- * самой модели.
  *
  * Модель берётся из ресурспака: {@code file: kosmetika1} → предмет
  * {@code f8resurs:kosmetika1} на базе обычного листа бумаги (сам лист не видно —
  * рисуется только модель косметики).
  *
- * Запись о надетой косметике живёт в {@code worn}, даже когда самой сущности
- * сейчас нет (игрок умер или невидим): иначе после возрождения косметика
- * не вернулась бы. Устройство то же, что у {@link ProfileTags}.
+ * Раз в секунду слот проверяется: если косметику сняли чем-то посторонним
+ * (команда, чужой плагин), она возвращается на место. Заодно из инвентаря
+ * убираются случайные копии — например, если предмет всё же удалось куда-то
+ * переложить.
  */
-final class Cosmetics {
+final class Cosmetics implements Listener {
     /** База для косметики: её модель целиком задаёт ресурспак. */
     private static final Material BASE_ITEM = Material.PAPER;
-    /** Насколько выше ног держится косметика, если высоту глаз спросить не удалось. */
-    private static final double FALLBACK_HEIGHT = 1.62;
-
-    private static final class Entry {
-        ItemDisplay display;
-        String file;
-    }
 
     private final JavaPlugin plugin;
+    /** Метка «это косметика» в PersistentDataContainer предмета. */
+    private final NamespacedKey marker;
     /** Косметика игрока (или null, если ничего не надето). */
     private final Function<Player, CosmeticCatalog.Cosmetic> equipped;
-    private final Map<UUID, Entry> worn = new HashMap<>();
-    /** Не null, пока работает рассылка пакетом; null — косметика идёт сущностью. */
-    private CosmeticEquipment equipment;
+    /** Какая косметика надета — для повторной проверки и диагностики. */
+    private final Map<UUID, String> worn = new HashMap<>();
     private final BukkitTask task;
     private boolean disabled;
 
     Cosmetics(JavaPlugin plugin, Function<Player, CosmeticCatalog.Cosmetic> equipped) {
         this.plugin = plugin;
         this.equipped = equipped;
-        this.equipment = CosmeticEquipment.create(plugin, this::onEquipmentBroken);
-        task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
+        this.marker = new NamespacedKey(plugin, "cosmetic");
+        this.task = Bukkit.getScheduler().runTaskTimer(plugin, this::check, 20L, 20L);
     }
 
     /**
      * Предмет косметики: обычный лист бумаги, у которого модель заменена на
-     * {@code f8resurs:<file>} из ресурспака.
+     * {@code f8resurs:<file>} из ресурспака. Помечен меткой, чтобы плагин
+     * узнавал его в слоте шлема.
      */
-    static ItemStack item(CosmeticCatalog.Cosmetic cosmetic) {
+    static ItemStack item(JavaPlugin plugin, CosmeticCatalog.Cosmetic cosmetic) {
         ItemStack item = new ItemStack(BASE_ITEM);
         ItemMeta meta = item.getItemMeta();
         meta.displayName(ProfileItems.text(cosmetic.name(), NamedTextColor.GOLD));
         meta.setItemModel(new NamespacedKey("f8resurs", cosmetic.file()));
+        meta.getPersistentDataContainer().set(
+                new NamespacedKey(plugin, "cosmetic"), PersistentDataType.STRING, cosmetic.id());
         item.setItemMeta(meta);
         return item;
     }
 
+    /** Наш ли это предмет: косметика, а не настоящий шлем игрока. */
+    private boolean isCosmetic(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return false;
+        return item.getItemMeta().getPersistentDataContainer().has(marker, PersistentDataType.STRING);
+    }
+
     /** Надеть/снять косметику; null снимает её совсем. */
     void apply(Player player, CosmeticCatalog.Cosmetic cosmetic) {
-        if (disabled || player == null || !player.isOnline()) return;
+        if (player == null || !player.isOnline()) return;
         UUID id = player.getUniqueId();
-        if (equipment != null && !equipment.isBroken()) {
-            // Слот шлема на клиенте: сущность у головы не нужна вовсе.
-            remove(id);
-            if (cosmetic == null) equipment.clear(player);
-            else equipment.wear(player, item(cosmetic));
-            return;
-        }
+        PlayerInventory inventory = player.getInventory();
         if (cosmetic == null) {
-            remove(id);
+            worn.remove(id);
+            if (isCosmetic(inventory.getHelmet())) inventory.setHelmet(null);
+            sweepStray(player);
             return;
         }
-        try {
-            Entry entry = worn.get(id);
-            if (entry == null) {
-                entry = new Entry();
-                worn.put(id, entry);
+        ItemStack helmet = inventory.getHelmet();
+        if (isCosmetic(helmet)) {
+            String current = helmet.getItemMeta().getPersistentDataContainer().get(marker, PersistentDataType.STRING);
+            if (cosmetic.id().equals(current)) {
+                worn.put(id, cosmetic.id());
+                return; // уже надета именно эта
             }
-            if (entry.display == null || !entry.display.isValid()
-                    || !entry.display.getWorld().equals(player.getWorld())
-                    || !cosmetic.file().equals(entry.file)) {
-                removeDisplay(entry);
-                entry.display = spawn(player, cosmetic);
-                entry.file = cosmetic.file();
-            }
-            moveToHead(player, entry.display);
-        } catch (RuntimeException ex) {
-            plugin.getLogger().log(java.util.logging.Level.WARNING,
-                    "Не удалось надеть косметику на " + player.getName(), ex);
-            // Запись оставляем: tick() увидит, что сущности нет, и попробует снова.
-            // Иначе случайный сбой (чанк не загружен, мир меняется) снял бы косметику совсем.
-            Entry failed = worn.get(id);
-            if (failed != null) removeDisplay(failed);
-        }
-    }
-
-    /**
-     * Рассылка пакетом встала на ходу. Способ показа переключаем на сущность и
-     * сразу переодеваем всех, кто уже носил косметику: иначе пакет не уходит,
-     * сущности тоже нет, и игрок остаётся с пустой головой.
-     */
-    private void onEquipmentBroken() {
-        equipment = null;
-        for (Player player : new ArrayList<>(Bukkit.getOnlinePlayers())) {
-            apply(player, resolve(player));
-        }
-    }
-
-    /**
-     * Что сейчас происходит с косметикой игрока — для /profile cosmetic status.
-     * Отвечает на два вопроса, из-за которых косметику обычно и не видно:
-     * каким способом она показывается и не мешает ли ей настоящий шлем.
-     */
-    String status(Player player) {
-        StringBuilder out = new StringBuilder();
-        out.append("показ — ").append(equipment == null
-                ? "сущность у головы (ProtocolLib не стоит или рассылка встала)"
-                : "предметом в слот шлема (ProtocolLib)");
-        if (equipment == null) {
-            Entry entry = worn.get(player.getUniqueId());
-            if (entry == null || entry.display == null || !entry.display.isValid()) {
-                out.append("; сущности у головы нет");
+        } else if (helmet != null) {
+            // Настоящий шлем в один слот с косметикой не помещается — возвращаем его.
+            inventory.setHelmet(null);
+            if (inventory.addItem(helmet).isEmpty()) {
+                player.sendMessage("§7Ваш шлем переложен в инвентарь: слот заняла косметика.");
             } else {
-                Location at = entry.display.getLocation();
-                out.append(String.format(java.util.Locale.ROOT,
-                        "; сущность есть в %s %d %d %d, модель f8resurs:%s",
-                        at.getWorld().getName(), at.getBlockX(), at.getBlockY(), at.getBlockZ(), entry.file));
+                player.getWorld().dropItemNaturally(player.getLocation(), helmet);
+                player.sendMessage("§7В инвентаре не было места, шлем упал под ноги: слот заняла косметика.");
             }
         }
-        out.append("; шлем надет: ")
-                .append(player.getInventory().getHelmet() != null
-                        ? "да — косметика не показывается, пока он не снят"
-                        : "нет");
-        return out.toString();
+        inventory.setHelmet(item(plugin, cosmetic));
+        worn.put(id, cosmetic.id());
+        sweepStray(player);
     }
 
     void quit(Player player) {
-        remove(player.getUniqueId());
-        if (equipment != null) equipment.clear(player);
+        worn.remove(player.getUniqueId());
     }
 
     void disable() {
         disabled = true;
         task.cancel();
-        for (UUID id : new ArrayList<>(worn.keySet())) remove(id);
-        if (equipment != null) equipment.disable();
+        worn.clear();
+    }
+
+    /**
+     * Что сейчас надето — для /profile cosmetic status.
+     */
+    String status(Player player) {
+        ItemStack helmet = player.getInventory().getHelmet();
+        if (isCosmetic(helmet)) {
+            return "в слоте шлема лежит косметика "
+                    + helmet.getItemMeta().getPersistentDataContainer().get(marker, PersistentDataType.STRING)
+                    + ", модель f8resurs:" + helmet.getItemMeta().getItemModel();
+        }
+        return "в слоте шлема косметики нет"
+                + (helmet == null ? " (слот пуст)" : " (там настоящий предмет: " + helmet.getType() + ")");
     }
 
     private CosmeticCatalog.Cosmetic resolve(Player player) {
@@ -190,100 +166,61 @@ final class Cosmetics {
         }
     }
 
-    private void tick() {
-        if (worn.isEmpty()) return;
-        for (Map.Entry<UUID, Entry> each : new ArrayList<>(worn.entrySet())) {
-            UUID id = each.getKey();
-            Entry head = each.getValue();
-            Player player = Bukkit.getPlayer(id);
-            if (player == null || !player.isOnline()) {
-                remove(id);
-                continue;
-            }
+    /** Раз в секунду: вернуть косметику, если её сняли в обход плагина, и убрать копии. */
+    private void check() {
+        if (disabled) return;
+        for (Player player : new ArrayList<>(Bukkit.getOnlinePlayers())) {
             try {
-                if (head.display == null || !head.display.isValid()) {
-                    // Сущности нет: создаём для живого видимого игрока, иначе просто ждём.
-                    removeDisplay(head);
-                    if (!player.isDead() && !player.isInvisible()) apply(player, resolve(player));
-                    continue;
-                }
-                if (!player.getWorld().equals(head.display.getWorld())) {
-                    // Переход между мирами: переносим косметику в новый мир.
-                    apply(player, resolve(player));
-                    continue;
-                }
-                if (player.isDead() || player.isInvisible()) {
-                    // Мёртвому и невидимому косметика не показывается, запись остаётся.
-                    removeDisplay(head);
-                    continue;
-                }
-                moveToHead(player, head.display);
+                apply(player, resolve(player));
             } catch (RuntimeException ex) {
-                remove(id);
+                plugin.getLogger().warning("Не применена косметика " + player.getName() + ": " + ex);
             }
         }
     }
 
-    private ItemDisplay spawn(Player player, CosmeticCatalog.Cosmetic cosmetic) {
-        Location at = headSpot(player);
-        ItemDisplay display = player.getWorld().spawn(at, ItemDisplay.class, entity -> {
-            entity.setItemStack(item(cosmetic));
-            entity.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.HEAD);
-            entity.setBillboard(Display.Billboard.FIXED);
-            entity.setPersistent(false);
-            entity.setInvulnerable(true);
-            entity.setGravity(false);
-            entity.setSilent(true);
-            entity.setViewRange(64f);
-            // Тени нет: сущность висит у головы, и её тень плавала бы в воздухе.
-            entity.setShadowRadius(0f);
-            entity.setShadowStrength(0f);
-            // Ноль — иначе клиент догоняет голову пару тиков, и косметика
-            // «летает» за игроком вместо того, чтобы сидеть на голове.
-            entity.setTeleportDuration(0);
-            entity.setInterpolationDuration(0);
+    /** Копии косметики вне слота шлема — мусор: удаляем, иначе их можно размножить. */
+    private void sweepStray(Player player) {
+        for (ItemStack each : player.getInventory().getContents()) {
+            if (isCosmetic(each)) each.setAmount(0);
+        }
+    }
+
+    // ===== ЗАЩИТА ПРЕДМЕТА В СЛОТЕ =====
+    // Косметика — настоящий предмет в слоте брони, поэтому её надо охранять от
+    // всего, что умеет делать игрок с предметами: вытащить, выкинуть,
+    // перетащить, потерять при смерти.
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onClick(InventoryClickEvent event) {
+        if (!isCosmetic(event.getCurrentItem()) && !isCosmetic(event.getCursor())) return;
+        event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onDrag(InventoryDragEvent event) {
+        if (isCosmetic(event.getOldCursor())) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onDrop(PlayerDropItemEvent event) {
+        Item dropped = event.getItemDrop();
+        if (isCosmetic(dropped.getItemStack())) event.setCancelled(true);
+    }
+
+    /** При смерти косметика не выпадает: она вернётся на голову после возрождения. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onDeath(PlayerDeathEvent event) {
+        List<ItemStack> drops = event.getDrops();
+        drops.removeIf(this::isCosmetic);
+    }
+
+    /** После возрождения инвентарь пуст — косметику надо надеть заново. */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRespawn(PlayerRespawnEvent event) {
+        if (disabled) return;
+        Player player = event.getPlayer();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isOnline()) apply(player, resolve(player));
         });
-        return display;
-    }
-
-    /**
-     * Точка у головы игрока. Уровень глаз — это центр головы (1.62 против 1.65
-     * у куба головы), поэтому модель с трансформацией HEAD ложится ровно так,
-     * как она надета в слоте шлема. Наклон берём с игрока: шлем поворачивается
-     * вместе с головой.
-     */
-    private Location headSpot(Player player) {
-        Location at = player.getLocation();
-        double height;
-        try {
-            height = player.getEyeHeight();
-        } catch (RuntimeException ex) {
-            height = FALLBACK_HEIGHT;
-        }
-        if (!Double.isFinite(height) || height <= 0.1) height = FALLBACK_HEIGHT;
-        at.setY(at.getY() + height);
-        return at;
-    }
-
-    private void moveToHead(Player player, ItemDisplay display) {
-        Location at = headSpot(player);
-        Location now = display.getLocation();
-        // Наклон проверяем тоже: без этого косметика не кивала бы вместе с головой.
-        if (now.distanceSquared(at) > 0.000001
-                || Math.abs(now.getYaw() - at.getYaw()) > 0.5f
-                || Math.abs(now.getPitch() - at.getPitch()) > 0.5f) {
-            display.teleport(at);
-        }
-    }
-
-    private static void removeDisplay(Entry entry) {
-        if (entry.display != null && entry.display.isValid()) entry.display.remove();
-        entry.display = null;
-        entry.file = null;
-    }
-
-    private void remove(UUID id) {
-        Entry entry = worn.remove(id);
-        if (entry != null) removeDisplay(entry);
     }
 }

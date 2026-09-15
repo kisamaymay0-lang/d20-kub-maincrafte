@@ -73,10 +73,12 @@ import java.util.UUID;
  * в миниигре особого улова (см. SpecialCatch).
  *
  * Кувшин ставится как блок; предмет — обычный нот-блок (его можно поставить
- * на любую грань, хоть в воздухе), а блок-носитель — **стекло**: пустой кувшин
- * это простое стекло, налитый — фиолетовое крашеное стекло. По материалу
- * ресурспак и выбирает модель. Состояние каждый тик возвращается каноническим,
- * поэтому сбить его отладкой или поршнем не получится.
+ * на любую грань, хоть в воздухе), а блок-носитель — **стекло**, один и тот же
+ * блок и для пустого, и для налитого кувшина. Что внутри, знает только
+ * {@code plugins/f8-plugin/jugs.yml}: блок — метка места, а не хранилище.
+ * Поэтому материал и состояние блока от содержимого не зависят вовсе, и
+ * сбить их отладкой или поршнем нельзя — канонический блок возвращается
+ * каждый тик.
  *
  * Почему стекло. Требований к носителю четыре, и только стекло закрывает их все:
  * <ul>
@@ -92,6 +94,13 @@ import java.util.UUID;
  *   <li>нет звука от удара и нет отклика на редстоун (нот-блок звенел и от
  *       того, и от другого).</li>
  * </ul>
+ * Материал ровно один, и это принципиально. Раньше налитый кувшин был другим
+ * блоком (водяной котёл, потом крашеное стекло), и плановая проверка
+ * {@link #sweepOrphans()} не знала про второй материал: налитый кувшин
+ * признавался осиротевшим, его содержимое выпадало предметом, а запись
+ * удалялась — блок при этом оставался стоять и выглядел кувшином. Отсюда
+ * «кувшин ломается сам через несколько секунд» и дубли. Теперь материал один,
+ * и сверять его не с чем.
  * Звуки вазы при этом остались: кувшин ломается со звуком
  * block.decorated_pot.shatter, а простой ПКМ по нему без жидкости в руке
  * звучит как block.decorated_pot.insert_fail.
@@ -143,15 +152,6 @@ public class AncientJug implements Listener {
      * на редстоун нет.
      */
     private static final Material JUG_BLOCK = Material.GLASS;
-    /**
-     * Блок-носитель налитого кувшина — фиолетовое крашеное стекло: у стекла нет
-     * свойств блока, поэтому два состояния кувшина приходится делать двумя
-     * блоками. Крашеное стекло, в отличие от тонированного, не задерживает
-     * свет, так что пустой и налитый кувшин освещают окружение одинаково.
-     * Цвет здесь ни на что не влияет — модель рисует ресурспак; поменять его
-     * можно одной этой строкой и парным файл в blockstates/ пака.
-     */
-    private static final Material FILLED_JUG_BLOCK = Material.PURPLE_STAINED_GLASS;
     /**
      * Носитель кувшина версий 10.11–10.12 — плита петрифайд-дуба. Такие кувшины
      * переносятся на стекло, как раньше переносились с нот-блока.
@@ -493,15 +493,12 @@ public class AncientJug implements Listener {
             if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) return;
             Block block = world.getBlockAt(location);
             Material now = block.getType();
-            if (now == jugMaterial(count)) return;
-            boolean ours = now == JUG_BLOCK || now == FILLED_JUG_BLOCK;
-            if (!ours && !isOldJugState(block)) return;
-            setJugBlock(block, count);
-            if (!ours) {
-                plugin.getLogger().info("Старый кувшин (" + world.getName() + " "
-                        + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
-                        + ") перенесён на стекло");
-            }
+            if (now == JUG_BLOCK) return;
+            if (!isOldJugState(block)) return;
+            setJugBlock(block);
+            plugin.getLogger().info("Старый кувшин (" + world.getName() + " "
+                    + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
+                    + ") перенесён на стекло");
         }
     }
 
@@ -526,18 +523,27 @@ public class AncientJug implements Listener {
         return data.getInstrument() == FILLED_INSTRUMENT && note >= 1 && note <= MAX_BOTTLES;
     }
 
-    /** Ставит блок-носитель кувшина: пустой — стекло, с жидкостью — крашеное. */
-    private static void setJugBlock(Block block, int count) {
-        block.setType(jugMaterial(count), false);
+    /**
+     * Ставит блок-носитель кувшина. Материал всегда один и от содержимого не
+     * зависит: что налито, знает только jugs.yml, а блок — просто метка места.
+     * Состояний блока трогать не нужно, стекло ставится в своё состояние по
+     * умолчанию, какое бы оно ни было.
+     */
+    private static void setJugBlock(Block block) {
+        block.setType(JUG_BLOCK, false);
     }
 
     /**
-     * Материал-носитель под содержимое. Ресурспак рисует модель именно по
-     * материалу блока, поэтому состояний блока трогать не нужно: стекло
-     * ставится в своё состояние по умолчанию, какое бы оно ни было.
+     * Материалы, которыми кувшин стоит или стоял раньше. Нужны там, где блок
+     * проверяется до переноса: кувшин из jugs.yml может ещё стоять котлом,
+     * плитой или нот-блоком, и его нельзя принять за чужой.
      */
-    private static Material jugMaterial(int count) {
-        return count > 0 ? FILLED_JUG_BLOCK : JUG_BLOCK;
+    private static boolean isCarrierMaterial(Material type) {
+        return type == JUG_BLOCK
+                || type == LEGACY_CAULDRON_BLOCK
+                || type == LEGACY_WATER_CAULDRON_BLOCK
+                || type == LEGACY_SLAB_BLOCK
+                || type == Material.NOTE_BLOCK;
     }
 
     /** Запоминает кувшин по ключу записи; мир ещё не загружен — пропускаем. */
@@ -652,7 +658,7 @@ public class AncientJug implements Listener {
      */
     private boolean isJugBlock(Block block) {
         return block != null
-                && (block.getType() == JUG_BLOCK || block.getType() == FILLED_JUG_BLOCK)
+                && block.getType() == JUG_BLOCK
                 && jugsData.contains(blockKey(block));
     }
 
@@ -681,8 +687,8 @@ public class AncientJug implements Listener {
         Contents contents = contentsOf(hand);
 
         // Предмет — нот-блок (ставится на любую грань, хоть в воздухе), а
-        // кувшином становится стекло: пустой — простое, с жидкостью — крашеное.
-        setJugBlock(block, contents.count);
+        // кувшином становится стекло — один и тот же блок и для пустого, и для налитого.
+        setJugBlock(block);
 
         writeContents(blockKey(block), contents);
         storage.markDirty();
@@ -879,10 +885,7 @@ public class AncientJug implements Listener {
     public void onBlockInteract(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         Block block = event.getClickedBlock();
-        if (block == null
-                || (block.getType() != JUG_BLOCK && block.getType() != FILLED_JUG_BLOCK
-                        && block.getType() != LEGACY_SLAB_BLOCK
-                        && block.getType() != Material.NOTE_BLOCK)) return;
+        if (block == null || !isCarrierMaterial(block.getType())) return;
         Player player = event.getPlayer();
         if (!isJugBlock(block)) {
             // Кувшин старого образца узнаём по состоянию и заводим ему запись.

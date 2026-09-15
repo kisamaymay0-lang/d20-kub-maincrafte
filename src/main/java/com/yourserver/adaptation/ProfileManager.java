@@ -193,6 +193,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         boolean overheadTags = plugin.getConfig().getBoolean("profiles.overhead-tags", false);
         tags = overheadTags ? new ProfileTags(plugin, player -> prefixes.get(equippedPrefixes.get(player.getUniqueId()))) : null;
         headCosmetics = new Cosmetics(plugin, player -> cosmetics.get(equippedCosmetics.get(player.getUniqueId())));
+        // Косметика — настоящий предмет в слоте шлема, поэтому ей нужны события
+        // инвентаря: не дать вытащить, выкинуть, перетащить или потерять.
+        plugin.getServer().getPluginManager().registerEvents(headCosmetics, plugin);
         maintenance = Bukkit.getScheduler().runTaskTimer(plugin, this::maintenance, 20L, 20L);
         for (Player player : Bukkit.getOnlinePlayers()) join(player);
     }
