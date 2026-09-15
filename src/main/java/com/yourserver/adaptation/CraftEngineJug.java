@@ -55,11 +55,6 @@ final class CraftEngineJug {
         return count > 0 ? FILLED_ID : EMPTY_ID;
     }
 
-    /** Заблоки определён в конфиге CraftEngine. */
-    static boolean registered(int count) {
-        return available() && CraftEngineBlocks.byId(key(count)) != null;
-    }
-
     /** Кастомный ли блок на этом месте (любой блок CraftEngine, не только кувшин). */
     static boolean isCustom(Block block) {
         return available() && block != null && CraftEngineBlocks.isCustomBlock(block);

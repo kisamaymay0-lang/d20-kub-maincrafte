@@ -1,19 +1,27 @@
-# Древний кувшин — два настоящих кастомных блока CraftEngine.
+# Древний кувшин — два кастомных блока CraftEngine.
 #
 # Файл положить в plugins/CraftEngine/blocks/ancient_jug.yml
-# (или в любую подпапку plugins/CraftEngine/ — CraftEngine читает все *.yml).
 #
-# Пустой и налитый кувшин — два разных блока, потому что по блоку извне видно
-# только «он кастомный», но не «он пустой или налитый». Содержимое при этом
-# хранится не здесь, а в plugins/f8-plugin/jugs.yml.
+# Пустой и налитый кувшин — два разных блока: по блоку извне видно только
+# «он кастомный», но не «он пустой или налитый». Содержимое хранится не здесь,
+# а в plugins/f8-plugin/jugs.yml.
+#
+# auto_state — это ВИЗУАЛЬНЫЙ носитель: какой ванильный блок-стейт клиент
+# увидит на месте кувшина. Внутренний блок при этом настоящий, со своим id.
+#
+# Группа note_block здесь сознательно НЕ используется: в вашем ресурспаке
+# blockstates/note_block.json уже привязывает стейты note=24/flute и
+# note=1..9/banjo к моделям кувшина. CraftEngine про эти привязки не знает,
+# выбрал бы занятый стейт и написал в консоль конфликт. mushroom_stem ваш пак
+# не трогает, коллизия исключена.
 
 blocks:
 
   f8resurs:ancient_jug:
     state:
-      # Модель кувшина берётся из вашего ресурспака.
+      auto_state: mushroom_stem
       model:
-        model: "f8resurs:block/ancient_jug"
+        path: "f8resurs:block/ancient_jug"
     settings:
       hardness: 1.2
       resistance: 6.0
@@ -26,8 +34,9 @@ blocks:
 
   f8resurs:ancient_jug_filled:
     state:
+      auto_state: mushroom_stem
       model:
-        model: "f8resurs:block/ancient_jug_filled"
+        path: "f8resurs:block/ancient_jug_filled"
     settings:
       hardness: 1.2
       resistance: 6.0

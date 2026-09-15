@@ -575,16 +575,19 @@ public class AncientJug implements Listener {
     }
 
     /** Ставит кувшин: настоящий кастомный блок CraftEngine под содержимое. */
-    private void setJugBlock(Block block, int count) {
+    /** Ставит кувшин и говорит, принял ли его CraftEngine. */
+    private boolean setJugBlock(Block block, int count) {
         CraftEngineJug.remove(block);
+        boolean placed = CraftEngineJug.place(block, count);
         // Один раз за запуск: постановка идёт из метода, который вызывается часто,
         // а причина у всех неудач одна.
-        if (!CraftEngineJug.place(block, count) && !placeWarned) {
+        if (!placed && !placeWarned) {
             placeWarned = true;
-            plugin.getLogger().warning("Кувшин не ставится: блок " + CraftEngineJug.keyName(count)
-                    + " не определён в конфиге CraftEngine. Проверьте "
-                    + "plugins/CraftEngine/blocks/ancient_jug.yml");
+            plugin.getLogger().warning("CraftEngine не принял блок " + CraftEngineJug.keyName(count)
+                    + ". Проверьте plugins/CraftEngine/blocks/ancient_jug.yml: в секции state должны "
+                    + "быть auto_state и model.path, и строки загрузки этого файла в консоли CraftEngine.");
         }
+        return placed;
     }
 
     /**
@@ -746,17 +749,25 @@ public class AncientJug implements Listener {
         Contents contents = contentsOf(hand);
 
         // Предмет-кувшин — обычный нот-блок с подменённой моделью, поэтому клиент
-        // первым делом ставит именно нот-блок. Если кастомного блока нет, он так
-        // и остался бы стоять — со звуком и поведением нот-блока. Не ставим вовсе.
-        if (!CraftEngineJug.available() || !CraftEngineJug.registered(contents.count)) {
+        // первым делом ставит именно нот-блок. Если кастомный блок не встанет, он
+        // так и остался бы стоять — со звуком и поведением нот-блока. Отменяем.
+        //
+        // Спрашиваем результат у самой постановки, а не у byId(): раньше барьер
+        // стоял на byId(), и если CraftEngine блок знал, а byId() его не отдавал,
+        // кувшин не ставился вовсе при полностью рабочем конфиге.
+        if (!CraftEngineJug.available()) {
             event.setCancelled(true);
             placing.sendMessage(org.bukkit.ChatColor.RED
-                    + "Кувшин не ставится: на сервере нет блока " + CraftEngineJug.keyName(contents.count)
-                    + ". Нужен CraftEngine и plugins/CraftEngine/blocks/ancient_jug.yml.");
+                    + "Кувшин не ставится: на сервере нет CraftEngine.");
             return;
         }
-
-        setJugBlock(block, contents.count);
+        if (!setJugBlock(block, contents.count)) {
+            event.setCancelled(true);
+            placing.sendMessage(org.bukkit.ChatColor.RED
+                    + "Кувшин не ставится: CraftEngine не принял блок "
+                    + CraftEngineJug.keyName(contents.count) + ". Смотрите консоль.");
+            return;
+        }
 
         writeContents(blockKey(block), contents);
         storage.markDirty();
