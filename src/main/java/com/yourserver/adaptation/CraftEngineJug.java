@@ -8,56 +8,70 @@ import org.bukkit.block.Block;
 /**
  * Кувшин как настоящий кастомный блок CraftEngine.
  *
- * Все предыдущие носители проваливались по одной причине: ресурспак перерисовывает
- * блок целиком, а не конкретный экземпляр. Узорчатая ваза рисовалась ещё и
- * рендерером блочной сущности, нот-блок звенел и был сплошным кубом, котёл
- * пускал внутрь, стекло превращало в кувшин каждое окно сервера, а рамка
- * портала Края есть в каждой крепости — и везде вместо портала оказывались
- * кувшины.
+ * Все прежние носители проваливались по одной причине: ресурспак перерисовывает
+ * блок целиком, а не конкретный экземпляр. Стекло превращало в кувшин каждое
+ * окно сервера, рамка портала Края есть в каждой крепости. CraftEngine
+ * регистрирует блок по-настоящему, со своим id, которого в ванили нет, поэтому
+ * кувшин существует ровно там, где его поставили.
  *
- * CraftEngine регистрирует блок по-настоящему, со своим id, которого в ванили
- * нет. Поэтому кувшин существует в мире ровно там, где его поставили, —
- * встретить его иначе нельзя ни в генерации, ни в крафте. Модель, звук,
- * прочность и дроп задаются конфигом CraftEngine, а не блок-стейтом пака.
- *
- * Содержимое кувшина по-прежнему живёт только в jugs.yml: блок — метка места.
+ * CraftEngine — зависимость необязательная, а обращение к нему сидит в методе,
+ * который вызывается каждый тик. Если класса нет на сервере, прямое обращение
+ * бросало {@code NoClassDefFoundError} каждый тик на каждый кувшин, и сервер
+ * вставал. Поэтому наличие класса определяется один раз при загрузке этого
+ * класса, а каждый метод проверяет его первым делом: при {@code false} класс
+ * CraftEngine вообще не загружается и исключения быть не может.
  */
 final class CraftEngineJug {
 
-    /** Пустой кувшин. */
-    static final Key EMPTY = Key.of("f8resurs", "ancient_jug");
-    /** Налитый кувшин. */
-    static final Key FILLED = Key.of("f8resurs", "ancient_jug_filled");
+    static final String EMPTY_ID = "f8resurs:ancient_jug";
+    static final String FILLED_ID = "f8resurs:ancient_jug_filled";
+
+    /** Есть ли класс CraftEngine на сервере. Считается один раз. */
+    private static final boolean CLASS_PRESENT = probe();
 
     private CraftEngineJug() { }
 
-    /** Стоит ли CraftEngine. Без него кувшин поставить нельзя. */
-    static boolean available() {
-        return Bukkit.getPluginManager().getPlugin("CraftEngine") != null;
+    private static boolean probe() {
+        try {
+            Class.forName("net.momirealms.craftengine.bukkit.api.CraftEngineBlocks");
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
-    /** Кастомный ли блок на этом месте (любой блок CraftEngine, не только кувшин). */
-    static boolean isCustom(Block block) {
-        return block != null && CraftEngineBlocks.isCustomBlock(block);
+    /** Стоит ли CraftEngine. Без него кувшин поставить нельзя. */
+    static boolean available() {
+        return CLASS_PRESENT && Bukkit.getPluginManager().getPlugin("CraftEngine") != null;
     }
 
     /** id кувшина под содержимое. */
     static Key key(int count) {
-        return count > 0 ? FILLED : EMPTY;
+        return Key.of(count > 0 ? FILLED_ID : EMPTY_ID);
+    }
+
+    /** id строкой — для лога, не тянет за собой класс CraftEngine. */
+    static String keyName(int count) {
+        return count > 0 ? FILLED_ID : EMPTY_ID;
     }
 
     /** Заблоки определён в конфиге CraftEngine. */
     static boolean registered(int count) {
-        return CraftEngineBlocks.byId(key(count)) != null;
+        return available() && CraftEngineBlocks.byId(key(count)) != null;
+    }
+
+    /** Кастомный ли блок на этом месте (любой блок CraftEngine, не только кувшин). */
+    static boolean isCustom(Block block) {
+        return available() && block != null && CraftEngineBlocks.isCustomBlock(block);
     }
 
     /** Поставить кувшин; звук места не нужен — свой играет AncientJug. */
     static boolean place(Block block, int count) {
-        return CraftEngineBlocks.place(block.getLocation(), key(count), false);
+        return available() && CraftEngineBlocks.place(block.getLocation(), key(count), false);
     }
 
     /** Убрать кувшин из мира. Дроп не заказываем — его роняет AncientJug. */
     static boolean remove(Block block) {
-        return CraftEngineBlocks.remove(block);
+        return available() && CraftEngineBlocks.remove(block);
     }
 }

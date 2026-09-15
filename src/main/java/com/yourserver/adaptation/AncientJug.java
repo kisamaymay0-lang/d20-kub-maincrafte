@@ -247,6 +247,8 @@ public class AncientJug implements Listener {
      * что по блоку извне видно только «он кастомный», а не «он пустой/налитый».
      */
     private final Map<String, Integer> placedCounts = new HashMap<>();
+    /** Причина у всех неудач постановки одна, поэтому предупреждаем один раз. */
+    private boolean placeWarned;
     private int guardTicks = PIN_RESCAN_TICKS;
     private int infusionTicks = INFUSION_SWEEP_TICKS;
 
@@ -275,6 +277,12 @@ public class AncientJug implements Listener {
         // (север у пустого, юг у налитого) — по нему ресурспак выбирает модель.
         // Здесь же старые кувшины (плита, а ещё раньше нот-блок) переносятся на вазу.
         Bukkit.getScheduler().runTaskTimer(plugin, this::guardTick, 1L, 1L);
+        if (!CraftEngineJug.available()) {
+            plugin.getLogger().warning("CraftEngine не найден: кувшин — настоящий кастомный блок, и без "
+                    + "него он не ставится и не переносится. Поставьте CraftEngine с "
+                    + "https://modrinth.com/plugin/craftengine и скопируйте docs/craftengine/blocks/"
+                    + "ancient_jug.yml в plugins/CraftEngine/blocks/. Содержимое в jugs.yml при этом цело.");
+        }
         // Через пару секунд после запуска приводим в порядок кувшины в тех
         // чанках, что уже загружены (остальные проверятся при загрузке чанка).
         Bukkit.getScheduler().runTaskLater(plugin, this::restoreLoadedJugs, 60L);
@@ -513,6 +521,9 @@ public class AncientJug implements Listener {
 
         /** Возвращает блоку каноническое состояние; в незагруженном чанке молчит. */
         void enforce() {
+            // Без CraftEngine кастомного блока нет: не трогаем блок и не пишем в
+            // лог каждый тик — о причине сказано один раз при старте.
+            if (!CraftEngineJug.available()) return;
             World world = location.getWorld();
             if (world == null) return;
             if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) return;
@@ -522,9 +533,14 @@ public class AncientJug implements Listener {
                     + location.getBlockY() + "_" + location.getBlockZ();
             Integer last = placedCounts.get(spot);
             // Узнать по блоку, пустой кувшин или налитый, извне нельзя: CraftEngine
-            // отдаёт только «блок кастомный». Вид помним сами и переставляем блок
-            // лишь когда содержимое сменило его с пустого на налитый или наоборот.
-            if (ours && last != null && last == count) return;
+            // отдаёт только «блок кастомный», поэтому вид помним сами.
+            //
+            // Ставить заново можно ровно один раз на вид кувшина — проверка стоит
+            // до проверки ours намеренно. Раньше она срабатывала только когда блок
+            // уже наш, и если постановка не приживалась (CraftEngine не стоит или
+            // блок не прописан в его конфиге), блок переставлялся каждый тик до
+            // перезагрузки: отсюда лаги и одинаковые строки в логе потоком.
+            if (last != null && last == count) return;
             if (!ours && !isOldJugState(block)) return;
             setJugBlock(block, count);
             placedCounts.put(spot, count);
@@ -561,10 +577,13 @@ public class AncientJug implements Listener {
     /** Ставит кувшин: настоящий кастомный блок CraftEngine под содержимое. */
     private void setJugBlock(Block block, int count) {
         CraftEngineJug.remove(block);
-        if (!CraftEngineJug.place(block, count)) {
-            plugin.getLogger().warning("Не удалось поставить кувшин в " + block.getWorld().getName()
-                    + " " + block.getX() + " " + block.getY() + " " + block.getZ()
-                    + ": блок " + CraftEngineJug.key(count) + " не определён в конфиге CraftEngine");
+        // Один раз за запуск: постановка идёт из метода, который вызывается часто,
+        // а причина у всех неудач одна.
+        if (!CraftEngineJug.place(block, count) && !placeWarned) {
+            placeWarned = true;
+            plugin.getLogger().warning("Кувшин не ставится: блок " + CraftEngineJug.keyName(count)
+                    + " не определён в конфиге CraftEngine. Проверьте "
+                    + "plugins/CraftEngine/blocks/ancient_jug.yml");
         }
     }
 
@@ -612,6 +631,9 @@ public class AncientJug implements Listener {
      * содержимое выпадает предметом.
      */
     private void sweepOrphans() {
+        // Без CraftEngine ни один кувшин не выглядит «нашим», и содержимое всех
+        // кувшинов выпало бы предметом, а записи удалились. Не трогаем.
+        if (!CraftEngineJug.available()) return;
         List<String> gone = new ArrayList<>();
         for (String key : jugsData.getKeys(false)) {
             Location location = locationOf(key);
@@ -723,8 +745,17 @@ public class AncientJug implements Listener {
         if (block.getType() != Material.NOTE_BLOCK) return;
         Contents contents = contentsOf(hand);
 
-        // Предмет — нот-блок (ставится на любую грань, хоть в воздухе), а
-        // кувшином становится рамка портала Края: пустая — без ока, налитая — с оком.
+        // Предмет-кувшин — обычный нот-блок с подменённой моделью, поэтому клиент
+        // первым делом ставит именно нот-блок. Если кастомного блока нет, он так
+        // и остался бы стоять — со звуком и поведением нот-блока. Не ставим вовсе.
+        if (!CraftEngineJug.available() || !CraftEngineJug.registered(contents.count)) {
+            event.setCancelled(true);
+            placing.sendMessage(org.bukkit.ChatColor.RED
+                    + "Кувшин не ставится: на сервере нет блока " + CraftEngineJug.keyName(contents.count)
+                    + ". Нужен CraftEngine и plugins/CraftEngine/blocks/ancient_jug.yml.");
+            return;
+        }
+
         setJugBlock(block, contents.count);
 
         writeContents(blockKey(block), contents);
