@@ -34,6 +34,9 @@ final class ProfileData {
     private final Set<String> ownedPrefixes = new HashSet<>();
     private String equippedPrefix;
     private int prefixCases;
+    private final Set<String> ownedCosmetics = new HashSet<>();
+    private String equippedCosmetic;
+    private int cosmeticCases;
 
     ProfileData(UUID owner, String name) {
         this.owner = Objects.requireNonNull(owner);
@@ -63,6 +66,9 @@ final class ProfileData {
         copy.ownedPrefixes.addAll(ownedPrefixes);
         copy.equippedPrefix = equippedPrefix;
         copy.prefixCases = prefixCases;
+        copy.ownedCosmetics.addAll(ownedCosmetics);
+        copy.equippedCosmetic = equippedCosmetic;
+        copy.cosmeticCases = cosmeticCases;
         System.arraycopy(layout, 0, copy.layout, 0, layout.length);
         copy.astronomyProgress = astronomyProgress;
         return copy;
@@ -129,6 +135,61 @@ final class ProfileData {
         }
         equippedPrefix = (equipped != null && ownedPrefixes.contains(equipped)) ? equipped : null;
         prefixCases = Math.max(0, cases);
+    }
+
+    // ===== КОСМЕТИКА =====
+    // Устройство ровно как у префиксов: своя коллекция, одна надетая и свои кейсы.
+    // Отличие только в показе: косметика визуально надета на голову игрока.
+
+    boolean ownsCosmetic(String id) { return id != null && ownedCosmetics.contains(id); }
+    Set<String> ownedCosmetics() { return Set.copyOf(ownedCosmetics); }
+    String equippedCosmetic() { return equippedCosmetic; }
+    int cosmeticCases() { return cosmeticCases; }
+    boolean addCosmetic(String id) {
+        if (id == null || id.isEmpty() || !ownedCosmetics.add(id)) return false;
+        revision++;
+        return true;
+    }
+    /** Забрать косметику; надетая косметика при этом снимается. */
+    boolean revokeCosmetic(String id) {
+        if (id == null || !ownedCosmetics.remove(id)) return false;
+        if (java.util.Objects.equals(equippedCosmetic, id)) equippedCosmetic = null;
+        revision++;
+        return true;
+    }
+    boolean clearCosmetics() {
+        boolean changed = !ownedCosmetics.isEmpty();
+        ownedCosmetics.clear();
+        if (equippedCosmetic != null) { equippedCosmetic = null; changed = true; }
+        if (changed) revision++;
+        return changed;
+    }
+    boolean equipCosmetic(String id) {
+        if (id != null && !ownedCosmetics.contains(id)) return false;
+        if (java.util.Objects.equals(equippedCosmetic, id)) return false;
+        equippedCosmetic = id;
+        revision++;
+        return true;
+    }
+    boolean addCosmeticCase() {
+        cosmeticCases++;
+        revision++;
+        return true;
+    }
+    boolean takeCosmeticCase() {
+        if (cosmeticCases <= 0) return false;
+        cosmeticCases--;
+        revision++;
+        return true;
+    }
+    /** Только чтение из файла: без пометки изменения, как restorePrefixes. */
+    void restoreCosmetics(Set<String> owned, String equipped, int cases) {
+        ownedCosmetics.clear();
+        if (owned != null) {
+            for (String id : owned) if (id != null && !id.isEmpty()) ownedCosmetics.add(id);
+        }
+        equippedCosmetic = (equipped != null && ownedCosmetics.contains(equipped)) ? equipped : null;
+        cosmeticCases = Math.max(0, cases);
     }
     Map<UUID, Long> notificationHistory() { return Map.copyOf(notified); }
     Vote voteBy(UUID voter) { return votes.get(voter); }
