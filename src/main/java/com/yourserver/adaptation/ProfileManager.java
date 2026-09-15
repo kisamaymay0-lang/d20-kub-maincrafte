@@ -1354,6 +1354,14 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                     + " (№1–" + cosmetics.size() + "). Файл: " + cosmeticConfig, NamedTextColor.GREEN));
             return;
         }
+        if (args.length == 2 && args[1].equalsIgnoreCase("test")) {
+            if (!(sender instanceof Player self)) { sender.sendMessage("§cТолько из игры."); return; }
+            for (String line : headCosmetics.diagnose(
+                    self, cosmetics.get(equippedCosmetics.get(self.getUniqueId())))) {
+                self.sendMessage(line);
+            }
+            return;
+        }
         if (args.length == 2 && args[1].equalsIgnoreCase("status")) {
             Player target = sender instanceof Player self ? self : null;
             if (target == null) {

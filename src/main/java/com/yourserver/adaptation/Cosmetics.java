@@ -39,23 +39,18 @@ import java.util.logging.Level;
  * так, как она выглядит в Blockbench в разделе {@code display.head}, — потому
  * что это и есть настоящий надетый предмет. Посадку правят в самой модели.
  *
- * Слот при этом занят по-настоящему, и из этого следуют три правила:
- * <ul>
- *   <li>предмет узнаётся по двум признакам сразу — метке в PDC и модели
- *       {@code f8resurs:*}, поэтому плагин отличает косметику от любого другого
- *       предмета и не даёт её вытащить, выкинуть, перетащить или потерять
- *       при смерти;</li>
- *   <li>настоящий шлем и косметика в один слот не помещаются: при надевании
- *       косметики прежний шлем возвращается в инвентарь (или падает под ноги,
- *       если места нет), а пока косметика надета, шлем не надеть;</li>
- *   <li>косметику видно всем, включая владельца, — это обычный надетый
- *       предмет.</li>
- * </ul>
+ * Свой предмет узнаётся по модели {@code f8resurs:*} — это главный признак,
+ * он же и нужен ресурспаку, поэтому потеряться он не может. Метка в PDC лежит
+ * рядом и только уточняет, какая именно косметика надета.
  *
- * Раз в секунду слот проверяется: если косметику сняли чем-то посторонним
- * (команда, чужой плагин), она возвращается на место. Каждая запись в слот
- * проверяется — если слот предмет не принял, причина уходит в лог, а не
- * превращается в молчаливую пустую голову.
+ * Настоящий шлем и косметика в один слот не помещаются: при надевании прежний
+ * шлем возвращается в инвентарь (или падает под ноги, если места нет), и
+ * сообщают об этом ровно один раз — иначе проверка раз в секунду превратила бы
+ * это в спам. Пока косметика надета, настоящий шлем не надеть.
+ *
+ * Каждая запись в слот проверяется. Если слот предмет не принял, причина
+ * уходит в лог строкой «Косметика не встала в слот шлема», а подробный разбор
+ * по шагам делает {@link #diagnose} (команда {@code /profile cosmetic test}).
  *
  * Модель берётся из ресурспака: {@code file: kosmetika1} → предмет
  * {@code f8resurs:kosmetika1} на базе обычного листа бумаги (сам лист не видно —
@@ -98,29 +93,28 @@ final class Cosmetics implements Listener {
         meta.getPersistentDataContainer().set(
                 new NamespacedKey(plugin, "cosmetic"), PersistentDataType.STRING, cosmetic.id());
         if (!item.setItemMeta(meta)) {
-            throw new IllegalStateException("Предмет косметики не принял метаданные: " + cosmetic.id());
+            throw new IllegalStateException("предмет не принял метаданные");
         }
         return item;
     }
 
-    /**
-     * Наш ли это предмет. Признаков два, и достаточно любого: метка в PDC или
-     * модель из пространства имён ресурспака. Второй признак — страховка: если
-     * метка по какой-то причине не переживёт round-trip через инвентарь,
-     * косметика всё равно будет узнана, а не принята за настоящий шлем.
-     */
-    private boolean isCosmetic(ItemStack item) {
-        if (item == null || item.getType() != BASE_ITEM || !item.hasItemMeta()) return false;
-        ItemMeta meta = item.getItemMeta();
-        if (meta.getPersistentDataContainer().has(marker, PersistentDataType.STRING)) return true;
-        NamespacedKey model = meta.getItemModel();
+    /** Модель предмета (или null). */
+    private static NamespacedKey modelOf(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return null;
+        return item.getItemMeta().getItemModel();
+    }
+
+    /** Наш ли это предмет вообще: любая косметика из ресурспака. */
+    private static boolean isCosmetic(ItemStack item) {
+        NamespacedKey model = modelOf(item);
         return model != null && MODEL_NAMESPACE.equals(model.getNamespace());
     }
 
-    /** Какая косметика помечена на предмете (или null). */
-    private String cosmeticId(ItemStack item) {
-        if (item == null || !item.hasItemMeta()) return null;
-        return item.getItemMeta().getPersistentDataContainer().get(marker, PersistentDataType.STRING);
+    /** Та ли это косметика, что нужна. */
+    private static boolean isCosmetic(ItemStack item, CosmeticCatalog.Cosmetic cosmetic) {
+        NamespacedKey model = modelOf(item);
+        return model != null && MODEL_NAMESPACE.equals(model.getNamespace())
+                && model.getKey().equals(cosmetic.file());
     }
 
     /** Надеть/снять косметику; null снимает её совсем. */
@@ -136,7 +130,7 @@ final class Cosmetics implements Listener {
             if (isCosmetic(helmet)) inventory.setHelmet(null);
             return;
         }
-        if (isCosmetic(helmet) && cosmetic.id().equals(cosmeticId(helmet))) {
+        if (isCosmetic(helmet, cosmetic)) {
             worn.put(id, cosmetic.id());
             return; // уже надета именно эта
         }
@@ -153,21 +147,55 @@ final class Cosmetics implements Listener {
             }
         }
 
-        ItemStack item = item(plugin, cosmetic);
-        inventory.setHelmet(item);
+        inventory.setHelmet(item(plugin, cosmetic));
         worn.put(id, cosmetic.id());
 
         // Проверяем собственную запись. Если слот предмет не принял, косметика
         // молча не появится — об этом надо сказать сразу и внятно.
         ItemStack after = inventory.getHelmet();
-        if (!isCosmetic(after)) {
+        if (!isCosmetic(after, cosmetic)) {
             plugin.getLogger().warning("Косметика не встала в слот шлема " + player.getName()
-                    + ": после записи в слоте " + describe(after));
+                    + ": после записи в слоте " + describe(after)
+                    + ", модель " + modelOf(after) + ". Подробности: /profile cosmetic test");
         }
     }
 
     private static String describe(ItemStack item) {
         return item == null ? "ничего" : item.getType() + " x" + item.getAmount();
+    }
+
+    /**
+     * Пошаговый разбор надевания косметики — для {@code /profile cosmetic test}.
+     * Показывает каждый шаг: чем слот был занят, какой предмет собрался, что
+     * реально легло в слот. Если косметика не надевается, причина видна здесь.
+     */
+    List<String> diagnose(Player player, CosmeticCatalog.Cosmetic cosmetic) {
+        List<String> out = new ArrayList<>();
+        if (cosmetic == null) {
+            out.add("§cКосметика не выбрана — надевать нечего. Профиль → Настроить → Косметика.");
+            return out;
+        }
+        PlayerInventory inventory = player.getInventory();
+        out.add("§7Косметика: §f" + cosmetic.id() + "§7, файл §ff8resurs:" + cosmetic.file());
+        out.add("§7В слоте до: §f" + describe(inventory.getHelmet()));
+        ItemStack item;
+        try {
+            item = item(plugin, cosmetic);
+        } catch (RuntimeException ex) {
+            out.add("§cПредмет косметики не собрался: " + ex.getMessage());
+            return out;
+        }
+        ItemMeta meta = item.getItemMeta();
+        out.add("§7Собран предмет: §f" + item.getType() + "§7, модель §f" + meta.getItemModel()
+                + "§7, метка §f" + meta.getPersistentDataContainer().has(marker, PersistentDataType.STRING));
+        inventory.setHelmet(item);
+        ItemStack after = inventory.getHelmet();
+        out.add("§7В слоте после записи: §f" + describe(after) + "§7, модель §f" + modelOf(after));
+        out.add(isCosmetic(after, cosmetic)
+                ? "§aСлот принял косметику. Если на голове её не видно — дело в ресурспаке: "
+                        + "нет assets/f8resurs/items/" + cosmetic.file() + ".json"
+                : "§cСлот НЕ принял косметику: предмет подменился или метаданные не легли.");
+        return out;
     }
 
     void quit(Player player) {
@@ -186,8 +214,7 @@ final class Cosmetics implements Listener {
     String status(Player player) {
         ItemStack helmet = player.getInventory().getHelmet();
         if (isCosmetic(helmet)) {
-            return "в слоте шлема косметика " + cosmeticId(helmet)
-                    + ", модель " + helmet.getItemMeta().getItemModel();
+            return "в слоте шлема косметика, модель " + modelOf(helmet);
         }
         return "в слоте шлема косметики нет"
                 + (helmet == null ? " (слот пуст)" : " (там настоящий предмет: " + describe(helmet) + ")");
@@ -239,7 +266,7 @@ final class Cosmetics implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDeath(PlayerDeathEvent event) {
         List<ItemStack> drops = event.getDrops();
-        drops.removeIf(this::isCosmetic);
+        drops.removeIf(Cosmetics::isCosmetic);
     }
 
     /** После возрождения инвентарь пуст — косметику надо надеть заново. */

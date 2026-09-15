@@ -28,6 +28,10 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.type.EndPortalFrame;
+import org.bukkit.block.BlockFace;
+import org.bukkit.GameMode;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -151,15 +155,24 @@ public class AncientJug implements Listener {
      * куб (грани соседей рисуются), столкновение — полный куб, звука и отклика
      * на редстоун нет.
      */
-    private static final Material JUG_BLOCK = Material.GLASS;
     /**
-     * Блок-носитель налитого кувшина — фиолетовое крашеное стекло: у стекла нет
-     * свойств блока, поэтому два вида кувшина приходится делать двумя блоками.
-     * Оба материала обязан знать один и тот же признак {@link #isJugCarrier}:
-     * раньше плановая проверка знала только один, и налитый кувшин
-     * признавался потерянным — содержимое выпадало, а блок оставался стоять.
+     * Блок-носитель кувшина — рамка портала Края. Выбрана потому, что это
+     * блок, которого у игроков нет и быть не может: в выживании он не
+     * добывается никак, даже на шёлковое касание. Значит, кувшин — отдельный
+     * блок, который появляется в мире только из рыбалки, и ни один обычный
+     * блок у сервера не отбирается (стекло для этого не годилось: каждое окно
+     * на сервере становилось кувшином).
+     *
+     * Остальное тоже подходит: блочной сущности с рендерером нет (модель
+     * рисуется одна, из блок-стейта — в 1.21.11 у рамки восемь вариантов
+     * {@code eye}/{@code facing}); блок не сплошной куб, поэтому грани
+     * соседних блоков рисуются; на редстоун не реагирует; высота 13/16, то
+     * есть сквозь кувшин не пройти и на него можно встать.
+     *
+     * Пустой кувшин — {@code eye=false}, налитый — {@code eye=true}: два вида
+     * у одного блока, второй материал не нужен.
      */
-    private static final Material FILLED_JUG_BLOCK = Material.PURPLE_STAINED_GLASS;
+    private static final Material JUG_BLOCK = Material.END_PORTAL_FRAME;
     /**
      * Носитель кувшина версий 10.11–10.12 — плита петрифайд-дуба. Такие кувшины
      * переносятся на стекло, как раньше переносились с нот-блока.
@@ -168,6 +181,9 @@ public class AncientJug implements Listener {
     /** Носители кувшина версии 10.14 — простой и водяной котёл. */
     private static final Material LEGACY_CAULDRON_BLOCK = Material.CAULDRON;
     private static final Material LEGACY_WATER_CAULDRON_BLOCK = Material.WATER_CAULDRON;
+    /** Носители кувшина 10.15–10.16 — простое и фиолетовое крашеное стекло. */
+    private static final Material LEGACY_GLASS_BLOCK = Material.GLASS;
+    private static final Material LEGACY_STAINED_GLASS_BLOCK = Material.PURPLE_STAINED_GLASS;
     /**
      * Пустой кувшин — ваза смотрит на север, налитый — на юг. Поворотом удобно
      * различать два состояния: модель выбирает ресурспак, а на сам кувшин
@@ -500,13 +516,15 @@ public class AncientJug implements Listener {
             if (world == null) return;
             if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) return;
             Block block = world.getBlockAt(location);
-            Material now = block.getType();
-            if (now == jugMaterial(count)) return;
-            if (!isJugCarrier(now) && !isOldJugState(block)) return;
+            if (block.getType() == JUG_BLOCK && jugState(count).matches(block.getBlockData())) return;
+            if (!isJugCarrier(block.getType()) && !isOldJugState(block)) return;
+            boolean ours = isJugCarrier(block.getType());
             setJugBlock(block, count);
-            plugin.getLogger().info("Старый кувшин (" + world.getName() + " "
-                    + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
-                    + ") перенесён на стекло");
+            if (!ours) {
+                plugin.getLogger().info("Старый кувшин (" + world.getName() + " "
+                        + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
+                        + ") перенесён на рамку портала Края");
+            }
         }
     }
 
@@ -520,6 +538,7 @@ public class AncientJug implements Listener {
      */
     private static boolean isOldJugState(Block block) {
         Material type = block.getType();
+        if (type == LEGACY_GLASS_BLOCK || type == LEGACY_STAINED_GLASS_BLOCK) return true;
         if (type == LEGACY_CAULDRON_BLOCK || type == LEGACY_WATER_CAULDRON_BLOCK) return true;
         if (type == LEGACY_SLAB_BLOCK) {
             return block.getBlockData() instanceof Slab data && data.getType() != Slab.Type.DOUBLE;
@@ -531,28 +550,31 @@ public class AncientJug implements Listener {
         return data.getInstrument() == FILLED_INSTRUMENT && note >= 1 && note <= MAX_BOTTLES;
     }
 
-    /** Ставит блок-носитель кувшина: пустой — стекло, налитый — крашеное. */
+    /** Ставит блок-носитель кувшина и его каноническое состояние. */
     private static void setJugBlock(Block block, int count) {
-        block.setType(jugMaterial(count), false);
+        block.setBlockData(jugState(count), false);
     }
 
     /**
-     * Материал-носитель под содержимое. Содержимое при этом живёт только в
-     * jugs.yml: блок его не хранит, по материалу ресурспак лишь выбирает
-     * модель — пустой кувшин или налитый. Состояний блока трогать не нужно,
-     * стекло ставится в своё состояние по умолчанию, какое бы оно ни было.
+     * Каноническое состояние кувшина: рамка смотрит на север, а {@code eye}
+     * показывает, налит кувшин или пуст — по нему ресурспак выбирает модель.
+     * Содержимое при этом живёт только в jugs.yml: блок его не хранит,
+     * состояние лишь сообщает клиенту, какую модель рисовать.
      */
-    private static Material jugMaterial(int count) {
-        return count > 0 ? FILLED_JUG_BLOCK : JUG_BLOCK;
+    private static BlockData jugState(int count) {
+        EndPortalFrame state = (EndPortalFrame) Bukkit.createBlockData(JUG_BLOCK);
+        state.setFacing(BlockFace.NORTH);
+        state.setEye(count > 0);
+        return state;
     }
 
     /**
-     * Оба материала-носителя. Признак один на весь класс: канонический проход,
+     * Материал-носитель. Признак один на весь класс: канонический проход,
      * плановая проверка потерянных записей и события блока обязаны понимать
      * «это наш блок» одинаково, иначе кувшин признаётся потерянным.
      */
     private static boolean isJugCarrier(Material type) {
-        return type == JUG_BLOCK || type == FILLED_JUG_BLOCK;
+        return type == JUG_BLOCK;
     }
 
     /**
@@ -562,6 +584,8 @@ public class AncientJug implements Listener {
      */
     private static boolean isCarrierMaterial(Material type) {
         return isJugCarrier(type)
+                || type == LEGACY_GLASS_BLOCK
+                || type == LEGACY_STAINED_GLASS_BLOCK
                 || type == LEGACY_CAULDRON_BLOCK
                 || type == LEGACY_WATER_CAULDRON_BLOCK
                 || type == LEGACY_SLAB_BLOCK
@@ -709,7 +733,7 @@ public class AncientJug implements Listener {
         Contents contents = contentsOf(hand);
 
         // Предмет — нот-блок (ставится на любую грань, хоть в воздухе), а
-        // кувшином становится стекло: пустой — простое, налитый — крашеное.
+        // кувшином становится рамка портала Края: пустая — без ока, налитая — с оком.
         setJugBlock(block, contents.count);
 
         writeContents(blockKey(block), contents);
@@ -742,16 +766,43 @@ public class AncientJug implements Listener {
         // Кувшин старого образца (нот-блок без записи) тоже забирается: считаем
         // его пустым — записи о содержимом у таких кувшинов нет.
         if (!isJugBlock(block) && !isLegacyJug(block, false)) return;
+        event.setDropItems(false);
+        breakJug(block, true);
+    }
+
+    /**
+     * Разбить кувшин: запись удаляется, содержимое выпадает предметом, блок
+     * гасится. Ванильный дроп не используется — рамка портала Края в выживании
+     * не ломается вовсе (прочность −1), поэтому кувшин разбивает
+     * {@link #onBlockHit}, а не игра.
+     */
+    private void breakJug(Block block, boolean drop) {
+        String key = blockKey(block);
         Contents contents = readContents(key);
         jugsData.set(key, null);
         pins.remove(key);
         storage.markDirty();
-        // Сам блок-носитель не выпадает: вместо него — кувшин с содержимым.
-        event.setDropItems(false);
-        block.getWorld().dropItemNaturally(block.getLocation(),
-                create(contents.count, contents.kind, contents.potion, contents.custom));
+        if (drop) {
+            block.getWorld().dropItemNaturally(block.getLocation().add(0.5, 0.5, 0.5),
+                    create(contents.count, contents.kind, contents.potion, contents.custom));
+        }
         // Кувшин разбивается со звуком узорчатой вазы.
         block.getWorld().playSound(block.getLocation(), Sound.BLOCK_DECORATED_POT_SHATTER, 1.0f, 1.0f);
+        block.setType(Material.AIR, false);
+    }
+
+    /**
+     * Удар левой кнопкой разбивает кувшин. Без этого его нельзя было бы поднять:
+     * рамка портала Края в выживании не ломается, и {@code BlockBreakEvent}
+     * на неё не приходит. В творческом режиме предмет не выпадает.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBlockHit(PlayerInteractEvent event) {
+        if (event.getAction() != Action.LEFT_CLICK_BLOCK) return;
+        Block block = event.getClickedBlock();
+        if (!isJugBlock(block)) return;
+        event.setCancelled(true);
+        breakJug(block, event.getPlayer().getGameMode() != GameMode.CREATIVE);
     }
 
     /** Кувшин нельзя двигать поршнем: содержимое привязано к координатам. */
@@ -928,6 +979,13 @@ public class AncientJug implements Listener {
             // Ведро черпает воду или молоко: одна порция ведра — три порции кувшина.
             denyInteraction(event, player, block);
             if (!takeBucket(player, block, hand, slot)) insertFail(player, block);
+            return;
+        }
+        if (hand.getType() == Material.ENDER_EYE) {
+            // Шифт+ПКМ с оком края ваниль пропустила бы на рамку: глаз встал бы
+            // в кувшин и пропал. Не пускаем.
+            denyInteraction(event, player, block);
+            insertFail(player, block);
             return;
         }
         if (player.isSneaking()) {
