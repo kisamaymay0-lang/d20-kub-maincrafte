@@ -1,0 +1,48 @@
+# Древний кувшин — два кастомных блока CraftEngine.
+#
+# Файл положить в plugins/CraftEngine/blocks/ancient_jug.yml
+#
+# Пустой и налитый кувшин — два разных блока: по блоку извне видно только
+# «он кастомный», но не «он пустой или налитый». Содержимое хранится не здесь,
+# а в plugins/f8-plugin/jugs.yml.
+#
+# auto_state — это ВИЗУАЛЬНЫЙ носитель: какой ванильный блок-стейт клиент
+# увидит на месте кувшина. Внутренний блок при этом настоящий, со своим id.
+#
+# Группа note_block здесь сознательно НЕ используется: в вашем ресурспаке
+# blockstates/note_block.json уже привязывает стейты note=24/flute и
+# note=1..9/banjo к моделям кувшина. CraftEngine про эти привязки не знает,
+# выбрал бы занятый стейт и написал в консоль конфликт. mushroom_stem ваш пак
+# не трогает, коллизия исключена.
+
+blocks:
+
+  f8resurs:ancient_jug:
+    state:
+      auto_state: mushroom_stem
+      model:
+        path: "f8resurs:block/ancient_jug"
+    settings:
+      hardness: 1.2
+      resistance: 6.0
+      sounds:
+        break: minecraft:block.decorated_pot.break
+        step: minecraft:block.decorated_pot.step
+        place: minecraft:block.decorated_pot.place
+        hit: minecraft:block.decorated_pot.hit
+        fall: minecraft:block.decorated_pot.fall
+
+  f8resurs:ancient_jug_filled:
+    state:
+      auto_state: mushroom_stem
+      model:
+        path: "f8resurs:block/ancient_jug_filled"
+    settings:
+      hardness: 1.2
+      resistance: 6.0
+      sounds:
+        break: minecraft:block.decorated_pot.break
+        step: minecraft:block.decorated_pot.step
+        place: minecraft:block.decorated_pot.place
+        hit: minecraft:block.decorated_pot.hit
+        fall: minecraft:block.decorated_pot.fall

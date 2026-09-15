@@ -66,7 +66,20 @@ public class F8Command implements CommandExecutor, Listener {
             String label,
             String[] args
     ) {
+        // /f8 reload — перечитать config.yml (доступно и из консоли).
+        if (args.length > 0 && args[0].equalsIgnoreCase("reload")) {
+            if (!sender.hasPermission("f8.admin")) {
+                sender.sendMessage("§cНедостаточно прав.");
+                return true;
+            }
+            String summary = plugin.reloadPluginSettings();
+            sender.sendMessage("§aНастройки f8-plugin перечитаны из config.yml.");
+            if (summary != null && !summary.isBlank()) sender.sendMessage(summary);
+            return true;
+        }
+
         if (!(sender instanceof Player player)) {
+            sender.sendMessage("§7Использование: /f8 reload — перечитать config.yml");
             return true;
         }
 
