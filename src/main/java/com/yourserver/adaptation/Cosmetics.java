@@ -23,10 +23,13 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.logging.Level;
 
 /**
  * Косметика на голове игрока — предмет, который буквально лежит в слоте шлема.
@@ -36,12 +39,12 @@ import java.util.function.Function;
  * так, как она выглядит в Blockbench в разделе {@code display.head}, — потому
  * что это и есть настоящий надетый предмет. Посадку правят в самой модели.
  *
- * Слот при этом занят по-настоящему, и из этого следуют три правила, которые
- * здесь и зашиты:
+ * Слот при этом занят по-настоящему, и из этого следуют три правила:
  * <ul>
- *   <li>предмет помечен меткой в PDC, поэтому плагин отличает косметику от
- *       любого другого предмета и не даёт её вытащить, выкинуть, перетащить
- *       или потерять при смерти;</li>
+ *   <li>предмет узнаётся по двум признакам сразу — метке в PDC и модели
+ *       {@code f8resurs:*}, поэтому плагин отличает косметику от любого другого
+ *       предмета и не даёт её вытащить, выкинуть, перетащить или потерять
+ *       при смерти;</li>
  *   <li>настоящий шлем и косметика в один слот не помещаются: при надевании
  *       косметики прежний шлем возвращается в инвентарь (или падает под ноги,
  *       если места нет), а пока косметика надета, шлем не надеть;</li>
@@ -49,26 +52,30 @@ import java.util.function.Function;
  *       предмет.</li>
  * </ul>
  *
+ * Раз в секунду слот проверяется: если косметику сняли чем-то посторонним
+ * (команда, чужой плагин), она возвращается на место. Каждая запись в слот
+ * проверяется — если слот предмет не принял, причина уходит в лог, а не
+ * превращается в молчаливую пустую голову.
+ *
  * Модель берётся из ресурспака: {@code file: kosmetika1} → предмет
  * {@code f8resurs:kosmetika1} на базе обычного листа бумаги (сам лист не видно —
  * рисуется только модель косметики).
- *
- * Раз в секунду слот проверяется: если косметику сняли чем-то посторонним
- * (команда, чужой плагин), она возвращается на место. Заодно из инвентаря
- * убираются случайные копии — например, если предмет всё же удалось куда-то
- * переложить.
  */
 final class Cosmetics implements Listener {
     /** База для косметики: её модель целиком задаёт ресурспак. */
     private static final Material BASE_ITEM = Material.PAPER;
+    /** Пространство имён моделей косметики в ресурспаке. */
+    private static final String MODEL_NAMESPACE = "f8resurs";
 
     private final JavaPlugin plugin;
     /** Метка «это косметика» в PersistentDataContainer предмета. */
     private final NamespacedKey marker;
     /** Косметика игрока (или null, если ничего не надето). */
     private final Function<Player, CosmeticCatalog.Cosmetic> equipped;
-    /** Какая косметика надета — для повторной проверки и диагностики. */
+    /** Какая косметика надета. */
     private final Map<UUID, String> worn = new HashMap<>();
+    /** Кому уже сказали про переложенный шлем — чтобы не повторять каждый тик. */
+    private final Set<UUID> helmetMoved = new HashSet<>();
     private final BukkitTask task;
     private boolean disabled;
 
@@ -81,24 +88,39 @@ final class Cosmetics implements Listener {
 
     /**
      * Предмет косметики: обычный лист бумаги, у которого модель заменена на
-     * {@code f8resurs:<file>} из ресурспака. Помечен меткой, чтобы плагин
-     * узнавал его в слоте шлема.
+     * {@code f8resurs:<file>} из ресурспака.
      */
     static ItemStack item(JavaPlugin plugin, CosmeticCatalog.Cosmetic cosmetic) {
         ItemStack item = new ItemStack(BASE_ITEM);
         ItemMeta meta = item.getItemMeta();
         meta.displayName(ProfileItems.text(cosmetic.name(), NamedTextColor.GOLD));
-        meta.setItemModel(new NamespacedKey("f8resurs", cosmetic.file()));
+        meta.setItemModel(new NamespacedKey(MODEL_NAMESPACE, cosmetic.file()));
         meta.getPersistentDataContainer().set(
                 new NamespacedKey(plugin, "cosmetic"), PersistentDataType.STRING, cosmetic.id());
-        item.setItemMeta(meta);
+        if (!item.setItemMeta(meta)) {
+            throw new IllegalStateException("Предмет косметики не принял метаданные: " + cosmetic.id());
+        }
         return item;
     }
 
-    /** Наш ли это предмет: косметика, а не настоящий шлем игрока. */
+    /**
+     * Наш ли это предмет. Признаков два, и достаточно любого: метка в PDC или
+     * модель из пространства имён ресурспака. Второй признак — страховка: если
+     * метка по какой-то причине не переживёт round-trip через инвентарь,
+     * косметика всё равно будет узнана, а не принята за настоящий шлем.
+     */
     private boolean isCosmetic(ItemStack item) {
-        if (item == null || !item.hasItemMeta()) return false;
-        return item.getItemMeta().getPersistentDataContainer().has(marker, PersistentDataType.STRING);
+        if (item == null || item.getType() != BASE_ITEM || !item.hasItemMeta()) return false;
+        ItemMeta meta = item.getItemMeta();
+        if (meta.getPersistentDataContainer().has(marker, PersistentDataType.STRING)) return true;
+        NamespacedKey model = meta.getItemModel();
+        return model != null && MODEL_NAMESPACE.equals(model.getNamespace());
+    }
+
+    /** Какая косметика помечена на предмете (или null). */
+    private String cosmeticId(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return null;
+        return item.getItemMeta().getPersistentDataContainer().get(marker, PersistentDataType.STRING);
     }
 
     /** Надеть/снять косметику; null снимает её совсем. */
@@ -106,56 +128,69 @@ final class Cosmetics implements Listener {
         if (player == null || !player.isOnline()) return;
         UUID id = player.getUniqueId();
         PlayerInventory inventory = player.getInventory();
+        ItemStack helmet = inventory.getHelmet();
+
         if (cosmetic == null) {
             worn.remove(id);
-            if (isCosmetic(inventory.getHelmet())) inventory.setHelmet(null);
-            sweepStray(player);
+            helmetMoved.remove(id);
+            if (isCosmetic(helmet)) inventory.setHelmet(null);
             return;
         }
-        ItemStack helmet = inventory.getHelmet();
-        if (isCosmetic(helmet)) {
-            String current = helmet.getItemMeta().getPersistentDataContainer().get(marker, PersistentDataType.STRING);
-            if (cosmetic.id().equals(current)) {
-                worn.put(id, cosmetic.id());
-                return; // уже надета именно эта
-            }
-        } else if (helmet != null) {
-            // Настоящий шлем в один слот с косметикой не помещается — возвращаем его.
+        if (isCosmetic(helmet) && cosmetic.id().equals(cosmeticId(helmet))) {
+            worn.put(id, cosmetic.id());
+            return; // уже надета именно эта
+        }
+        // Настоящий шлем в один слот с косметикой не помещается — возвращаем его.
+        if (helmet != null && !isCosmetic(helmet)) {
             inventory.setHelmet(null);
-            if (inventory.addItem(helmet).isEmpty()) {
-                player.sendMessage("§7Ваш шлем переложен в инвентарь: слот заняла косметика.");
-            } else {
+            if (!inventory.addItem(helmet).isEmpty()) {
                 player.getWorld().dropItemNaturally(player.getLocation(), helmet);
-                player.sendMessage("§7В инвентаре не было места, шлем упал под ноги: слот заняла косметика.");
+            }
+            // Говорим один раз: иначе проверка раз в секунду превратила бы это в спам.
+            if (helmetMoved.add(id)) {
+                player.sendMessage("§7Шлем переложен в инвентарь: слот заняла косметика. "
+                        + "Пока косметика надета, настоящий шлем не надеть.");
             }
         }
-        inventory.setHelmet(item(plugin, cosmetic));
+
+        ItemStack item = item(plugin, cosmetic);
+        inventory.setHelmet(item);
         worn.put(id, cosmetic.id());
-        sweepStray(player);
+
+        // Проверяем собственную запись. Если слот предмет не принял, косметика
+        // молча не появится — об этом надо сказать сразу и внятно.
+        ItemStack after = inventory.getHelmet();
+        if (!isCosmetic(after)) {
+            plugin.getLogger().warning("Косметика не встала в слот шлема " + player.getName()
+                    + ": после записи в слоте " + describe(after));
+        }
+    }
+
+    private static String describe(ItemStack item) {
+        return item == null ? "ничего" : item.getType() + " x" + item.getAmount();
     }
 
     void quit(Player player) {
         worn.remove(player.getUniqueId());
+        helmetMoved.remove(player.getUniqueId());
     }
 
     void disable() {
         disabled = true;
         task.cancel();
         worn.clear();
+        helmetMoved.clear();
     }
 
-    /**
-     * Что сейчас надето — для /profile cosmetic status.
-     */
+    /** Что сейчас надето — для /profile cosmetic status. */
     String status(Player player) {
         ItemStack helmet = player.getInventory().getHelmet();
         if (isCosmetic(helmet)) {
-            return "в слоте шлема лежит косметика "
-                    + helmet.getItemMeta().getPersistentDataContainer().get(marker, PersistentDataType.STRING)
-                    + ", модель f8resurs:" + helmet.getItemMeta().getItemModel();
+            return "в слоте шлема косметика " + cosmeticId(helmet)
+                    + ", модель " + helmet.getItemMeta().getItemModel();
         }
         return "в слоте шлема косметики нет"
-                + (helmet == null ? " (слот пуст)" : " (там настоящий предмет: " + helmet.getType() + ")");
+                + (helmet == null ? " (слот пуст)" : " (там настоящий предмет: " + describe(helmet) + ")");
     }
 
     private CosmeticCatalog.Cosmetic resolve(Player player) {
@@ -166,22 +201,15 @@ final class Cosmetics implements Listener {
         }
     }
 
-    /** Раз в секунду: вернуть косметику, если её сняли в обход плагина, и убрать копии. */
+    /** Раз в секунду: вернуть косметику, если её сняли в обход плагина. */
     private void check() {
         if (disabled) return;
         for (Player player : new ArrayList<>(Bukkit.getOnlinePlayers())) {
             try {
                 apply(player, resolve(player));
             } catch (RuntimeException ex) {
-                plugin.getLogger().warning("Не применена косметика " + player.getName() + ": " + ex);
+                plugin.getLogger().log(Level.WARNING, "Не применена косметика " + player.getName(), ex);
             }
-        }
-    }
-
-    /** Копии косметики вне слота шлема — мусор: удаляем, иначе их можно размножить. */
-    private void sweepStray(Player player) {
-        for (ItemStack each : player.getInventory().getContents()) {
-            if (isCosmetic(each)) each.setAmount(0);
         }
     }
 

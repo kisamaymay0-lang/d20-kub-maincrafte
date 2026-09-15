@@ -73,12 +73,12 @@ import java.util.UUID;
  * в миниигре особого улова (см. SpecialCatch).
  *
  * Кувшин ставится как блок; предмет — обычный нот-блок (его можно поставить
- * на любую грань, хоть в воздухе), а блок-носитель — **стекло**, один и тот же
- * блок и для пустого, и для налитого кувшина. Что внутри, знает только
- * {@code plugins/f8-plugin/jugs.yml}: блок — метка места, а не хранилище.
- * Поэтому материал и состояние блока от содержимого не зависят вовсе, и
- * сбить их отладкой или поршнем нельзя — канонический блок возвращается
- * каждый тик.
+ * на любую грань, хоть в воздухе), а блок-носитель — **стекло**: пустой
+ * кувшин это простое стекло, налитый — фиолетовое крашеное стекло, по нему
+ * ресурспак выбирает модель. Содержимое при этом хранится только в
+ * {@code plugins/f8-plugin/jugs.yml}: блок — метка места, а не хранилище, и
+ * состояние блока от содержимого не зависит вовсе. Сбить материал отладкой или
+ * поршнем нельзя — канонический блок возвращается каждый тик.
  *
  * Почему стекло. Требований к носителю четыре, и только стекло закрывает их все:
  * <ul>
@@ -94,13 +94,13 @@ import java.util.UUID;
  *   <li>нет звука от удара и нет отклика на редстоун (нот-блок звенел и от
  *       того, и от другого).</li>
  * </ul>
- * Материал ровно один, и это принципиально. Раньше налитый кувшин был другим
- * блоком (водяной котёл, потом крашеное стекло), и плановая проверка
- * {@link #sweepOrphans()} не знала про второй материал: налитый кувшин
- * признавался осиротевшим, его содержимое выпадало предметом, а запись
- * удалялась — блок при этом оставался стоять и выглядел кувшином. Отсюда
- * «кувшин ломается сам через несколько секунд» и дубли. Теперь материал один,
- * и сверять его не с чем.
+ * Материалов два, и знать про оба обязан один признак — {@link #isJugCarrier}.
+ * Раньше плановая проверка {@link #sweepOrphans()} знала только пустой
+ * материал: налитый кувшин признавался осиротевшим, его содержимое выпадало
+ * предметом, а запись удалялась — блок при этом оставался стоять и выглядел
+ * кувшином. Отсюда «кувшин ломается сам через несколько секунд» и дубли.
+ * Теперь канонический проход, плановая проверка и события блока спрашивают
+ * один и тот же признак, разойтись во мнении им нечем.
  * Звуки вазы при этом остались: кувшин ломается со звуком
  * block.decorated_pot.shatter, а простой ПКМ по нему без жидкости в руке
  * звучит как block.decorated_pot.insert_fail.
@@ -152,6 +152,14 @@ public class AncientJug implements Listener {
      * на редстоун нет.
      */
     private static final Material JUG_BLOCK = Material.GLASS;
+    /**
+     * Блок-носитель налитого кувшина — фиолетовое крашеное стекло: у стекла нет
+     * свойств блока, поэтому два вида кувшина приходится делать двумя блоками.
+     * Оба материала обязан знать один и тот же признак {@link #isJugCarrier}:
+     * раньше плановая проверка знала только один, и налитый кувшин
+     * признавался потерянным — содержимое выпадало, а блок оставался стоять.
+     */
+    private static final Material FILLED_JUG_BLOCK = Material.PURPLE_STAINED_GLASS;
     /**
      * Носитель кувшина версий 10.11–10.12 — плита петрифайд-дуба. Такие кувшины
      * переносятся на стекло, как раньше переносились с нот-блока.
@@ -493,9 +501,9 @@ public class AncientJug implements Listener {
             if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) return;
             Block block = world.getBlockAt(location);
             Material now = block.getType();
-            if (now == JUG_BLOCK) return;
-            if (!isOldJugState(block)) return;
-            setJugBlock(block);
+            if (now == jugMaterial(count)) return;
+            if (!isJugCarrier(now) && !isOldJugState(block)) return;
+            setJugBlock(block, count);
             plugin.getLogger().info("Старый кувшин (" + world.getName() + " "
                     + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
                     + ") перенесён на стекло");
@@ -523,14 +531,28 @@ public class AncientJug implements Listener {
         return data.getInstrument() == FILLED_INSTRUMENT && note >= 1 && note <= MAX_BOTTLES;
     }
 
+    /** Ставит блок-носитель кувшина: пустой — стекло, налитый — крашеное. */
+    private static void setJugBlock(Block block, int count) {
+        block.setType(jugMaterial(count), false);
+    }
+
     /**
-     * Ставит блок-носитель кувшина. Материал всегда один и от содержимого не
-     * зависит: что налито, знает только jugs.yml, а блок — просто метка места.
-     * Состояний блока трогать не нужно, стекло ставится в своё состояние по
-     * умолчанию, какое бы оно ни было.
+     * Материал-носитель под содержимое. Содержимое при этом живёт только в
+     * jugs.yml: блок его не хранит, по материалу ресурспак лишь выбирает
+     * модель — пустой кувшин или налитый. Состояний блока трогать не нужно,
+     * стекло ставится в своё состояние по умолчанию, какое бы оно ни было.
      */
-    private static void setJugBlock(Block block) {
-        block.setType(JUG_BLOCK, false);
+    private static Material jugMaterial(int count) {
+        return count > 0 ? FILLED_JUG_BLOCK : JUG_BLOCK;
+    }
+
+    /**
+     * Оба материала-носителя. Признак один на весь класс: канонический проход,
+     * плановая проверка потерянных записей и события блока обязаны понимать
+     * «это наш блок» одинаково, иначе кувшин признаётся потерянным.
+     */
+    private static boolean isJugCarrier(Material type) {
+        return type == JUG_BLOCK || type == FILLED_JUG_BLOCK;
     }
 
     /**
@@ -539,7 +561,7 @@ public class AncientJug implements Listener {
      * плитой или нот-блоком, и его нельзя принять за чужой.
      */
     private static boolean isCarrierMaterial(Material type) {
-        return type == JUG_BLOCK
+        return isJugCarrier(type)
                 || type == LEGACY_CAULDRON_BLOCK
                 || type == LEGACY_WATER_CAULDRON_BLOCK
                 || type == LEGACY_SLAB_BLOCK
@@ -582,7 +604,7 @@ public class AncientJug implements Listener {
             World world = location.getWorld();
             if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) continue;
             Block block = world.getBlockAt(location);
-            if (block.getType() == JUG_BLOCK || isOldJugState(block)) continue;
+            if (isJugCarrier(block.getType()) || isOldJugState(block)) continue;
             Contents contents = readContents(key);
             world.dropItemNaturally(location.clone().add(0.5, 0.0, 0.5),
                     create(contents.count, contents.kind, contents.potion, contents.custom));
@@ -658,7 +680,7 @@ public class AncientJug implements Listener {
      */
     private boolean isJugBlock(Block block) {
         return block != null
-                && block.getType() == JUG_BLOCK
+                && isJugCarrier(block.getType())
                 && jugsData.contains(blockKey(block));
     }
 
@@ -687,8 +709,8 @@ public class AncientJug implements Listener {
         Contents contents = contentsOf(hand);
 
         // Предмет — нот-блок (ставится на любую грань, хоть в воздухе), а
-        // кувшином становится стекло — один и тот же блок и для пустого, и для налитого.
-        setJugBlock(block);
+        // кувшином становится стекло: пустой — простое, налитый — крашеное.
+        setJugBlock(block, contents.count);
 
         writeContents(blockKey(block), contents);
         storage.markDirty();
