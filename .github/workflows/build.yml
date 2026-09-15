@@ -130,8 +130,8 @@ jobs:
       if: steps.maven.outputs.exit_code == '0'
       uses: actions/upload-artifact@v4
       with:
-        name: f8-plugin-10.13
+        name: f8-plugin-10.19
         path: |
           target/*.jar
           docs/f8resurspack-fixed.zip
-          docs/craftengine/**
+          craftengine/**

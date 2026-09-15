@@ -39,9 +39,10 @@ import java.util.logging.Level;
  * так, как она выглядит в Blockbench в разделе {@code display.head}, — потому
  * что это и есть настоящий надетый предмет. Посадку правят в самой модели.
  *
- * Свой предмет узнаётся по модели {@code f8resurs:*} — это главный признак,
- * он же и нужен ресурспаку, поэтому потеряться он не может. Метка в PDC лежит
- * рядом и только уточняет, какая именно косметика надета.
+ * Свой предмет узнаётся по метке в PersistentDataContainer: её ставит только
+ * {@link #item}, поэтому потерять её предмет не может, а перепутать косметику с
+ * другим кастомным предметом плагина (у всех них модель {@code f8resurs:*}) —
+ * нельзя. Именно по этой метке, а не по модели, работает охрана слота ниже.
  *
  * Настоящий шлем и косметика в один слот не помещаются: при надевании прежний
  * шлем возвращается в инвентарь (или падает под ноги, если места нет), и
@@ -104,17 +105,58 @@ final class Cosmetics implements Listener {
         return item.getItemMeta().getItemModel();
     }
 
-    /** Наш ли это предмет вообще: любая косметика из ресурспака. */
-    private static boolean isCosmetic(ItemStack item) {
-        NamespacedKey model = modelOf(item);
-        return model != null && MODEL_NAMESPACE.equals(model.getNamespace());
+    /**
+     * Метка косметики (её id) или null, если предмет не косметика.
+     *
+     * Признак — ТОЛЬКО метка в PersistentDataContainer, которую ставит
+     * {@link #item}. Признак «модель из пространства имён f8resurs» для этого
+     * не годится: так помечен любой кастомный предмет плагина — кувшин, икра,
+     * колба, звезда, медаль, префикс, изморозь. Пока косметика узнавалась по
+     * пространству имён модели, охрана слота отменяла клик, перетаскивание и
+     * выброс у всех этих предметов сразу: их нельзя было ни переложить в
+     * инвентаре, ни выкинуть, а при смерти они молча исчезали из дропа.
+     */
+    private String markOf(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return null;
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return null;
+        String id = meta.getPersistentDataContainer().get(marker, PersistentDataType.STRING);
+        return id == null || id.isEmpty() ? null : id;
+    }
+
+    /** Наш ли это предмет: косметика, созданная этим плагином. */
+    private boolean isCosmetic(ItemStack item) {
+        return cosmetic(markOf(item));
     }
 
     /** Та ли это косметика, что нужна. */
-    private static boolean isCosmetic(ItemStack item, CosmeticCatalog.Cosmetic cosmetic) {
+    private boolean isCosmetic(ItemStack item, CosmeticCatalog.Cosmetic cosmetic) {
+        if (item == null || cosmetic == null) return false;
         NamespacedKey model = modelOf(item);
-        return model != null && MODEL_NAMESPACE.equals(model.getNamespace())
-                && model.getKey().equals(cosmetic.file());
+        return sameCosmetic(markOf(item),
+                model == null ? null : model.getNamespace(),
+                model == null ? null : model.getKey(),
+                cosmetic.id(), cosmetic.file());
+    }
+
+    /**
+     * Косметика ли предмет — по метке. Модель предмета здесь не участвует
+     * намеренно: она есть у каждого кастомного предмета плагина.
+     */
+    static boolean cosmetic(String mark) {
+        return mark != null;
+    }
+
+    /**
+     * Та ли это косметика, что нужна. Метка важнее модели: если метка есть,
+     * сверяется только она. Модель смотрят лишь тогда, когда метки нет, —
+     * и тогда предмет чужой, а совпадение модели ничего не значит.
+     */
+    static boolean sameCosmetic(String mark, String modelNamespace, String modelKey,
+                                String cosmeticId, String cosmeticFile) {
+        if (cosmetic(mark)) return mark.equals(cosmeticId);
+        return MODEL_NAMESPACE.equals(modelNamespace) && modelKey != null
+                && modelKey.equals(cosmeticFile);
     }
 
     /** Надеть/снять косметику; null снимает её совсем. */
@@ -241,9 +283,11 @@ final class Cosmetics implements Listener {
     }
 
     // ===== ЗАЩИТА ПРЕДМЕТА В СЛОТЕ =====
-    // Косметика — настоящий предмет в слоте брони, поэтому её надо охранять от
-    // всего, что умеет делать игрок с предметами: вытащить, выкинуть,
-    // перетащить, потерять при смерти.
+    // Косметика — настоящий предмет в слоте брони, и забрать её оттуда нельзя:
+    // проверка раз в секунду ставит в слот новый предмет, и вытащенный остался
+    // бы у игрока вторым экземпляром. Отменяются только действия с самой
+    // косметикой — остальные предметы, в том числе все прочие кастомные
+    // предметы плагина, перекладываются и выбрасываются как обычно.
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onClick(InventoryClickEvent event) {
@@ -266,7 +310,7 @@ final class Cosmetics implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDeath(PlayerDeathEvent event) {
         List<ItemStack> drops = event.getDrops();
-        drops.removeIf(Cosmetics::isCosmetic);
+        drops.removeIf(this::isCosmetic);
     }
 
     /** После возрождения инвентарь пуст — косметику надо надеть заново. */

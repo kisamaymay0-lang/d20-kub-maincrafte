@@ -1,0 +1,74 @@
+# Древний кувшин — два кастомных блока CraftEngine.
+#
+# Файл живёт в паке: plugins/CraftEngine/resources/f8_jug/configuration/blocks/ancient_jug.yml.
+# CraftEngine читает ТОЛЬКО паки из resources/<имя пака>/ — рядом с этим файлом
+# обязаны лежать pack.yml и папка resourcepack/. Файл, просто брошенный в
+# plugins/CraftEngine/blocks/, плагин не увидит никогда.
+#
+# Пустой и налитый кувшин — два разных блока: по блоку извне видно только
+# «он кастомный», но не «он пустой или налитый». Содержимое хранится не здесь,
+# а в plugins/f8-plugin/jugs.yml.
+#
+# state.auto_state — ВИЗУАЛЬНЫЙ носитель: какое состояние ванильного блока
+# клиент увидит на месте кувшина. Внутренний блок при этом настоящий, со своим id.
+# Группа mushroom_stem выбрана потому, что в ресурспаке f8resurs
+# blockstates/note_block.json уже привязывает состояния note=24/flute и
+# note=1..9/banjo к моделям кувшина — CraftEngine про эти привязки не знает и
+# выбрал бы занятое состояние с предупреждением о конфликте в консоль.
+#
+# state.model.path — путь к УЖЕ СУЩЕСТВУЮЩЕЙ модели. CraftEngine ничего не
+# генерирует по одному только path, поэтому модель и её текстуры лежат в этом же
+# паке: resourcepack/assets/f8resurs/models/block/ и .../textures/block/.
+#
+# Настройки сплошности (is_view_blocking / can_occlude / is_suffocating /
+# is_redstone_conductor / propagate_skylight) сняты специально: носитель
+# mushroom_stem — глухой куб, и без этих ключей соседние блоки не рисовали грани
+# рядом с кувшином (дыры в постройке), проводили редстоун и гасили свет.
+#
+# loot намеренно нет: без таблицы лута блок не роняет ничего, а свой предмет
+# кувшина со всем содержимым роняет плагин (BlockBreakEvent в AncientJug).
+# Если CraftEngine начнёт ронять ещё и свой предмет, получится двойной дроп.
+
+blocks:
+
+  f8resurs:ancient_jug:
+    state:
+      auto_state: mushroom_stem
+      model:
+        path: "f8resurs:block/ancient_jug"
+    settings:
+      hardness: 1.2
+      resistance: 6.0
+      replaceable: false
+      is_suffocating: false
+      is_view_blocking: false
+      is_redstone_conductor: false
+      can_occlude: false
+      propagate_skylight: true
+      sounds:
+        break: minecraft:block.decorated_pot.break
+        step: minecraft:block.decorated_pot.step
+        place: minecraft:block.decorated_pot.place
+        hit: minecraft:block.decorated_pot.hit
+        fall: minecraft:block.decorated_pot.fall
+
+  f8resurs:ancient_jug_filled:
+    state:
+      auto_state: mushroom_stem
+      model:
+        path: "f8resurs:block/ancient_jug_filled"
+    settings:
+      hardness: 1.2
+      resistance: 6.0
+      replaceable: false
+      is_suffocating: false
+      is_view_blocking: false
+      is_redstone_conductor: false
+      can_occlude: false
+      propagate_skylight: true
+      sounds:
+        break: minecraft:block.decorated_pot.break
+        step: minecraft:block.decorated_pot.step
+        place: minecraft:block.decorated_pot.place
+        hit: minecraft:block.decorated_pot.hit
+        fall: minecraft:block.decorated_pot.fall
