@@ -1,0 +1,39 @@
+# Древний кувшин — два настоящих кастомных блока CraftEngine.
+#
+# Файл положить в plugins/CraftEngine/blocks/ancient_jug.yml
+# (или в любую подпапку plugins/CraftEngine/ — CraftEngine читает все *.yml).
+#
+# Пустой и налитый кувшин — два разных блока, потому что по блоку извне видно
+# только «он кастомный», но не «он пустой или налитый». Содержимое при этом
+# хранится не здесь, а в plugins/f8-plugin/jugs.yml.
+
+blocks:
+
+  f8resurs:ancient_jug:
+    state:
+      # Модель кувшина берётся из вашего ресурспака.
+      model:
+        model: "f8resurs:block/ancient_jug"
+    settings:
+      hardness: 1.2
+      resistance: 6.0
+      sounds:
+        break: minecraft:block.decorated_pot.break
+        step: minecraft:block.decorated_pot.step
+        place: minecraft:block.decorated_pot.place
+        hit: minecraft:block.decorated_pot.hit
+        fall: minecraft:block.decorated_pot.fall
+
+  f8resurs:ancient_jug_filled:
+    state:
+      model:
+        model: "f8resurs:block/ancient_jug_filled"
+    settings:
+      hardness: 1.2
+      resistance: 6.0
+      sounds:
+        break: minecraft:block.decorated_pot.break
+        step: minecraft:block.decorated_pot.step
+        place: minecraft:block.decorated_pot.place
+        hit: minecraft:block.decorated_pot.hit
+        fall: minecraft:block.decorated_pot.fall

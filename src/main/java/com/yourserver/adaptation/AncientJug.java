@@ -28,10 +28,6 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
-import org.bukkit.block.data.BlockData;
-import org.bukkit.block.data.type.EndPortalFrame;
-import org.bukkit.block.BlockFace;
-import org.bukkit.GameMode;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -98,13 +94,12 @@ import java.util.UUID;
  *   <li>нет звука от удара и нет отклика на редстоун (нот-блок звенел и от
  *       того, и от другого).</li>
  * </ul>
- * Материалов два, и знать про оба обязан один признак — {@link #isJugCarrier}.
- * Раньше плановая проверка {@link #sweepOrphans()} знала только пустой
- * материал: налитый кувшин признавался осиротевшим, его содержимое выпадало
- * предметом, а запись удалялась — блок при этом оставался стоять и выглядел
- * кувшином. Отсюда «кувшин ломается сам через несколько секунд» и дубли.
- * Теперь канонический проход, плановая проверка и события блока спрашивают
- * один и тот же признак, разойтись во мнении им нечем.
+ * Носитель — настоящий кастомный блок CraftEngine ({@link CraftEngineJug}),
+ * два id: пустой и налитый. Все прежние носители проваливались по одной
+ * причине: ресурспак перерисовывает блок целиком, а не конкретный экземпляр,
+ * поэтому вместе с кувшином перерисовывались обычные окна (стекло) и портал
+ * в каждой крепости (рамка Края). У CraftEngine блок свой, ванильного id у
+ * него нет, и встретить его можно только там, где его поставили.
  * Звуки вазы при этом остались: кувшин ломается со звуком
  * block.decorated_pot.shatter, а простой ПКМ по нему без жидкости в руке
  * звучит как block.decorated_pot.insert_fail.
@@ -172,7 +167,6 @@ public class AncientJug implements Listener {
      * Пустой кувшин — {@code eye=false}, налитый — {@code eye=true}: два вида
      * у одного блока, второй материал не нужен.
      */
-    private static final Material JUG_BLOCK = Material.END_PORTAL_FRAME;
     /**
      * Носитель кувшина версий 10.11–10.12 — плита петрифайд-дуба. Такие кувшины
      * переносятся на стекло, как раньше переносились с нот-блока.
@@ -184,6 +178,8 @@ public class AncientJug implements Listener {
     /** Носители кувшина 10.15–10.16 — простое и фиолетовое крашеное стекло. */
     private static final Material LEGACY_GLASS_BLOCK = Material.GLASS;
     private static final Material LEGACY_STAINED_GLASS_BLOCK = Material.PURPLE_STAINED_GLASS;
+    /** Носитель кувшина 10.17 — рамка портала Края. */
+    private static final Material LEGACY_FRAME_BLOCK = Material.END_PORTAL_FRAME;
     /**
      * Пустой кувшин — ваза смотрит на север, налитый — на юг. Поворотом удобно
      * различать два состояния: модель выбирает ресурспак, а на сам кувшин
@@ -246,6 +242,11 @@ public class AncientJug implements Listener {
     private final BatchedYamlFile storage;
     /** Активные кувшины: ключ записи → блок и его каноническое состояние. */
     private final Map<String, JugPin> pins = new HashMap<>();
+    /**
+     * Какой вид кувшина стоит на месте: ключ «мир_x_y_z» → count. Нужен потому,
+     * что по блоку извне видно только «он кастомный», а не «он пустой/налитый».
+     */
+    private final Map<String, Integer> placedCounts = new HashMap<>();
     private int guardTicks = PIN_RESCAN_TICKS;
     private int infusionTicks = INFUSION_SWEEP_TICKS;
 
@@ -516,14 +517,20 @@ public class AncientJug implements Listener {
             if (world == null) return;
             if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) return;
             Block block = world.getBlockAt(location);
-            if (block.getType() == JUG_BLOCK && jugState(count).matches(block.getBlockData())) return;
-            if (!isJugCarrier(block.getType()) && !isOldJugState(block)) return;
-            boolean ours = isJugCarrier(block.getType());
+            boolean ours = CraftEngineJug.isCustom(block);
+            String spot = world.getName() + "_" + location.getBlockX() + "_"
+                    + location.getBlockY() + "_" + location.getBlockZ();
+            Integer last = placedCounts.get(spot);
+            // Узнать по блоку, пустой кувшин или налитый, извне нельзя: CraftEngine
+            // отдаёт только «блок кастомный». Вид помним сами и переставляем блок
+            // лишь когда содержимое сменило его с пустого на налитый или наоборот.
+            if (ours && last != null && last == count) return;
+            if (!ours && !isOldJugState(block)) return;
             setJugBlock(block, count);
+            placedCounts.put(spot, count);
             if (!ours) {
-                plugin.getLogger().info("Старый кувшин (" + world.getName() + " "
-                        + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ()
-                        + ") перенесён на рамку портала Края");
+                plugin.getLogger().info("Старый кувшин (" + spot
+                        + ") перенесён на кастомный блок CraftEngine");
             }
         }
     }
@@ -538,6 +545,7 @@ public class AncientJug implements Listener {
      */
     private static boolean isOldJugState(Block block) {
         Material type = block.getType();
+        if (type == LEGACY_FRAME_BLOCK) return true;
         if (type == LEGACY_GLASS_BLOCK || type == LEGACY_STAINED_GLASS_BLOCK) return true;
         if (type == LEGACY_CAULDRON_BLOCK || type == LEGACY_WATER_CAULDRON_BLOCK) return true;
         if (type == LEGACY_SLAB_BLOCK) {
@@ -550,31 +558,14 @@ public class AncientJug implements Listener {
         return data.getInstrument() == FILLED_INSTRUMENT && note >= 1 && note <= MAX_BOTTLES;
     }
 
-    /** Ставит блок-носитель кувшина и его каноническое состояние. */
-    private static void setJugBlock(Block block, int count) {
-        block.setBlockData(jugState(count), false);
-    }
-
-    /**
-     * Каноническое состояние кувшина: рамка смотрит на север, а {@code eye}
-     * показывает, налит кувшин или пуст — по нему ресурспак выбирает модель.
-     * Содержимое при этом живёт только в jugs.yml: блок его не хранит,
-     * состояние лишь сообщает клиенту, какую модель рисовать.
-     */
-    private static BlockData jugState(int count) {
-        EndPortalFrame state = (EndPortalFrame) Bukkit.createBlockData(JUG_BLOCK);
-        state.setFacing(BlockFace.NORTH);
-        state.setEye(count > 0);
-        return state;
-    }
-
-    /**
-     * Материал-носитель. Признак один на весь класс: канонический проход,
-     * плановая проверка потерянных записей и события блока обязаны понимать
-     * «это наш блок» одинаково, иначе кувшин признаётся потерянным.
-     */
-    private static boolean isJugCarrier(Material type) {
-        return type == JUG_BLOCK;
+    /** Ставит кувшин: настоящий кастомный блок CraftEngine под содержимое. */
+    private void setJugBlock(Block block, int count) {
+        CraftEngineJug.remove(block);
+        if (!CraftEngineJug.place(block, count)) {
+            plugin.getLogger().warning("Не удалось поставить кувшин в " + block.getWorld().getName()
+                    + " " + block.getX() + " " + block.getY() + " " + block.getZ()
+                    + ": блок " + CraftEngineJug.key(count) + " не определён в конфиге CraftEngine");
+        }
     }
 
     /**
@@ -583,7 +574,7 @@ public class AncientJug implements Listener {
      * плитой или нот-блоком, и его нельзя принять за чужой.
      */
     private static boolean isCarrierMaterial(Material type) {
-        return isJugCarrier(type)
+        return type == LEGACY_FRAME_BLOCK
                 || type == LEGACY_GLASS_BLOCK
                 || type == LEGACY_STAINED_GLASS_BLOCK
                 || type == LEGACY_CAULDRON_BLOCK
@@ -628,7 +619,7 @@ public class AncientJug implements Listener {
             World world = location.getWorld();
             if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) continue;
             Block block = world.getBlockAt(location);
-            if (isJugCarrier(block.getType()) || isOldJugState(block)) continue;
+            if (CraftEngineJug.isCustom(block) || isOldJugState(block)) continue;
             Contents contents = readContents(key);
             world.dropItemNaturally(location.clone().add(0.5, 0.0, 0.5),
                     create(contents.count, contents.kind, contents.potion, contents.custom));
@@ -704,7 +695,7 @@ public class AncientJug implements Listener {
      */
     private boolean isJugBlock(Block block) {
         return block != null
-                && isJugCarrier(block.getType())
+                && CraftEngineJug.isCustom(block)
                 && jugsData.contains(blockKey(block));
     }
 
@@ -788,21 +779,7 @@ public class AncientJug implements Listener {
         }
         // Кувшин разбивается со звуком узорчатой вазы.
         block.getWorld().playSound(block.getLocation(), Sound.BLOCK_DECORATED_POT_SHATTER, 1.0f, 1.0f);
-        block.setType(Material.AIR, false);
-    }
-
-    /**
-     * Удар левой кнопкой разбивает кувшин. Без этого его нельзя было бы поднять:
-     * рамка портала Края в выживании не ломается, и {@code BlockBreakEvent}
-     * на неё не приходит. В творческом режиме предмет не выпадает.
-     */
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBlockHit(PlayerInteractEvent event) {
-        if (event.getAction() != Action.LEFT_CLICK_BLOCK) return;
-        Block block = event.getClickedBlock();
-        if (!isJugBlock(block)) return;
-        event.setCancelled(true);
-        breakJug(block, event.getPlayer().getGameMode() != GameMode.CREATIVE);
+        CraftEngineJug.remove(block);
     }
 
     /** Кувшин нельзя двигать поршнем: содержимое привязано к координатам. */
@@ -958,7 +935,7 @@ public class AncientJug implements Listener {
     public void onBlockInteract(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         Block block = event.getClickedBlock();
-        if (block == null || !isCarrierMaterial(block.getType())) return;
+        if (block == null || (!isJugBlock(block) && !isCarrierMaterial(block.getType()))) return;
         Player player = event.getPlayer();
         if (!isJugBlock(block)) {
             // Кувшин старого образца узнаём по состоянию и заводим ему запись.
