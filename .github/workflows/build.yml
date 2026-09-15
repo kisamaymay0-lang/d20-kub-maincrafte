@@ -134,3 +134,4 @@ jobs:
         path: |
           target/*.jar
           docs/f8resurspack-fixed.zip
+          docs/craftengine/**
