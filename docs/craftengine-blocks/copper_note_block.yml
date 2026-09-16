@@ -1,0 +1,55 @@
+# Медный нотный блок — кастомный блок CraftEngine.
+#
+# Куда положить: в ВАШ пак, который уже стоит в CraftEngine —
+#   plugins/CraftEngine/resources/<имя вашего пака>/configuration/blocks/copper_note_block.yml
+# CraftEngine читает конфиги только из паков (resources/<имя>/configuration/,
+# рекурсивно по подпапкам). Рядом в паке должен быть pack.yml с
+#   namespace: f8resurs
+# Дальше — /ce reload all.
+#
+# Моделей к этому файлу не нужно: state.model.path указывает на модель
+# f8resurs:block/copper_note_block, она уже есть в ресурспаке, который вы
+# перенесли. По одному path CraftEngine ничего не генерирует — он только
+# привязывает существующую модель к блоку.
+#
+# state.auto_state: solid — модель copper_note_block это обычный cube_all,
+# глухой куб, поэтому группа сплошных блоков подходит как есть. Группа
+# note_block не годится: в ресурспаке f8resurs blockstates/note_block.json сам
+# привязывает состояния note=24/… к моделям кувшина и медного блока, и
+# CraftEngine выбрал бы занятое состояние с предупреждением о конфликте.
+#
+# Ключи сплошности заданы явно, потому что по умолчанию они «не определены» и
+# наследуются от носителя. Медный блок — глухой куб, как ванильный нотный
+# блок, и он ДОЛЖЕН проводить редстоун: питание читается обычным
+# block.isBlockPowered(), без проводимости блок перестанет срабатывать от
+# провода.
+#
+# loot намеренно нет: без таблицы лута блок не роняет ничего, а предмет со всем
+# содержимым роняет плагин (BlockBreakEvent в CopperBlockListener). Таблица лута
+# дала бы двойной дроп.
+#
+# Музыка от блока не зависит: ноты играет сам плагин, инструмент выбирается по
+# предмету в слоте меню, а не по блоку.
+
+blocks:
+
+  f8resurs:copper_note_block:
+    state:
+      auto_state: solid
+      model:
+        path: "f8resurs:block/copper_note_block"
+    settings:
+      hardness: 3.0
+      resistance: 6.0
+      replaceable: false
+      is_suffocating: true
+      is_view_blocking: true
+      is_redstone_conductor: true
+      can_occlude: true
+      propagate_skylight: false
+      sounds:
+        break: minecraft:block.copper.break
+        step: minecraft:block.copper.step
+        place: minecraft:block.copper.place
+        hit: minecraft:block.copper.hit
+        fall: minecraft:block.copper.fall

@@ -15,10 +15,18 @@
 
 **Что стало.** Папки нет. Ресурспак вы кладёте в CraftEngine сами, значит модели
 блоков уже там, и дубликат в репозитории был только лишним местом, где копия
-может устареть. Плагину от пака нужна ровно одна вещь — список id и конфиг,
-которым они описаны. Он теперь в
-[`docs/craftengine-blocks.md`](craftengine-blocks.md): один файл
-`configuration/blocks/f8resurs.yml` в ваш пак, моделей к нему не нужно.
+может устареть. Остались готовые конфиги блоков — их и копируют в пак:
+
+```text
+docs/craftengine-blocks/
+├── copper_note_block.yml     # медный нотный блок
+└── ancient_jug.yml           # два кувшина — не нужен, если они уже прописаны
+```
+
+Кладутся в `plugins/CraftEngine/resources/<ваш пак>/configuration/blocks/`,
+дальше `/ce reload all`. Моделей к ним не нужно, `pack.yml` тоже свой.
+Пояснения — [`docs/craftengine-blocks.md`](craftengine-blocks.md).
+В артефакт сборки папка `docs/craftengine-blocks/` кладётся целиком.
 
 Из артефакта сборки `craftengine/**` тоже убран: в нём остались банка и
 ресурспак.
@@ -95,9 +103,9 @@ CraftEngine блок не зарегистрировал, установка о�
 ## Как поставить
 
 1. CraftEngine → в `plugins/`.
-2. Конфиг из [`docs/craftengine-blocks.md`](craftengine-blocks.md) → файлом
-   `configuration/blocks/f8resurs.yml` в ваш пак (в `pack.yml` пака должно быть
-   `namespace: f8resurs`), затем `/ce reload all`.
+2. `docs/craftengine-blocks/copper_note_block.yml` (и `ancient_jug.yml`, если
+   кувшин ещё не прописан) → в `plugins/CraftEngine/resources/<ваш пак>/configuration/blocks/`.
+   В `pack.yml` пака должно быть `namespace: f8resurs`. Затем `/ce reload all`.
 3. Из артефакта `f8-plugin-10.20` взять `adaptation-10.20.jar` → в `plugins/`,
    перезапуск.
 4. Проверить по логу f8-plugin:
@@ -107,12 +115,13 @@ CraftEngine блок не зарегистрировал, установка о�
 
 ## Что проверяют тесты
 
-* `CraftEngineBlocksTest` читает `docs/craftengine-blocks.md` и сверяет конфиг с
-  тем, что реально разбирает CraftEngine (группы `auto_state` — из
+* `CraftEngineBlocksTest` читает файлы из `docs/craftengine-blocks/` и сверяет
+  их с тем, что реально разбирает CraftEngine (группы `auto_state` — из
   `AutoStateGroup`, ключи `settings` — из `BlockSettingsModifiers`, ключи
   `sounds` — из `BlockSounds.fromConfig`), а пути моделей — с собранным
-  ресурспаком `docs/f8resurspack-fixed.zip`. Плюс: id в конфиге и в плагине
-  совпадают, `loot` ни у кого нет, `softdepend: [CraftEngine]` на месте, папки
-  `craftengine/` в репозитории больше нет.
+  ресурспаком `docs/f8resurspack-fixed.zip`. Плюс: id в конфигах и в плагине
+  совпадают и не повторяются в двух файлах, `loot` ни у кого нет,
+  `softdepend: [CraftEngine]` на месте, папки `craftengine/` в репозитории
+  больше нет.
 * `CopperBlockRecipeTest` — алмаз есть, кусочка меди нет, четыре ингредиента,
   годятся все восемь решёток.

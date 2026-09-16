@@ -6,9 +6,10 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -18,13 +19,12 @@ import java.util.zip.ZipFile;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Конфиг кастомных блоков — против формата, который читает сам CraftEngine.
+ * Конфиги кастомных блоков — против формата, который читает сам CraftEngine.
  *
- * <p>Папки с паком в репозитории больше нет: ресурспак в CraftEngine кладёт сам
- * сервер, а от плагина нужен только список id и конфиг. Проверять нечего было
- * бы, если бы конфиг лежал в README «для вида» — поэтому он лежит в
- * {@link CraftEngineSupport#CONFIG_DOC} целиком, и тест читает именно его:
- * проверяется то, что сервер-админ копирует себе в пак.
+ * <p>Проверяются сами файлы из {@code docs/craftengine-blocks/}: их копируют в
+ * пак {@code plugins/CraftEngine/resources/<имя>/configuration/blocks/}, так что
+ * тест читает ровно то, что окажется на сервере. Ресурспак с моделями на сервер
+ * кладут отдельно, поэтому здесь сверяется только конфиг и пути моделей.
  *
  * <p>Списки ключей и значений взяты не «на глаз», а из исходников плагина:
  * группы {@code auto_state} — из {@code AutoStateGroup}, ключи {@code settings}
@@ -36,6 +36,7 @@ class CraftEngineBlocksTest {
 
     private static final Path ROOT = repoRoot();
     private static final Path DOC = ROOT.resolve(CraftEngineSupport.CONFIG_DOC);
+    private static final Path CONFIGS = ROOT.resolve("docs/craftengine-blocks");
     private static final Path SHIPPED_PACK = ROOT.resolve("docs/f8resurspack-fixed.zip");
 
     /** Значения state.auto_state, которые знает CraftEngine (enum AutoStateGroup). */
@@ -77,56 +78,55 @@ class CraftEngineBlocksTest {
         throw new IllegalStateException("Не найден корень репозитория");
     }
 
-    /** Все блоки ```yaml``` из документа — именно их копируют себе в пак. */
-    private static List<YamlConfiguration> yamlBlocks() throws Exception {
-        assertTrue(Files.isRegularFile(DOC),
-                "Нет документа с конфигами блоков: " + ROOT.relativize(DOC));
-        String text = Files.readString(DOC);
-        Matcher matcher = Pattern.compile("```yaml\\R(.*?)```", Pattern.DOTALL).matcher(text);
-        List<YamlConfiguration> blocks = new ArrayList<>();
-        while (matcher.find()) {
-            YamlConfiguration yaml = new YamlConfiguration();
-            yaml.loadFromString(matcher.group(1));
-            blocks.add(yaml);
+    /** Все конфиги блоков: id -> секция блока, по одному на файл. */
+    private static Map<String, ConfigurationSection> blocks() throws Exception {
+        assertTrue(Files.isDirectory(CONFIGS),
+                "Нет папки с конфигами блоков: " + ROOT.relativize(CONFIGS));
+        Map<String, ConfigurationSection> blocks = new LinkedHashMap<>();
+        try (var files = Files.list(CONFIGS)) {
+            List<Path> yaml = files.filter(p -> p.toString().endsWith(".yml")).sorted().toList();
+            assertFalse(yaml.isEmpty(), "В " + ROOT.relativize(CONFIGS) + " нет ни одного .yml");
+            for (Path file : yaml) {
+                YamlConfiguration loaded = new YamlConfiguration();
+                loaded.loadFromString(Files.readString(file));
+                ConfigurationSection section = loaded.getConfigurationSection("blocks");
+                assertNotNull(section, ROOT.relativize(file)
+                        + ": нужен корневой раздел blocks — иначе файл ничего не описывает");
+                for (String id : section.getKeys(false)) {
+                    assertNull(blocks.put(id, section.getConfigurationSection(id)),
+                            id + " описан в двух файлах: один и тот же id в двух паках — конфликт");
+                }
+            }
         }
-        assertFalse(blocks.isEmpty(), "В документе нет ни одного блока ```yaml``` с конфигом");
         return blocks;
     }
 
-    /** Тот блок ```yaml```, где описаны сами блоки. */
-    private static ConfigurationSection blocks() throws Exception {
-        for (YamlConfiguration yaml : yamlBlocks()) {
-            ConfigurationSection section = yaml.getConfigurationSection("blocks");
-            if (section != null) {
-                return section;
-            }
-        }
-        fail("В документе нет блока ```yaml``` с корневым разделом blocks — копировать нечего");
-        throw new IllegalStateException();
-    }
-
-    /** Тот блок ```yaml```, где описан pack.yml. */
-    private static YamlConfiguration packYaml() throws Exception {
-        for (YamlConfiguration yaml : yamlBlocks()) {
-            if (yaml.getString("namespace") != null) {
-                return yaml;
-            }
-        }
-        fail("В документе нет образца pack.yml с namespace");
-        throw new IllegalStateException();
-    }
-
     @Test
-    void docListsExactlyTheBlocksThePluginUses() throws Exception {
+    void configFilesDescribeExactlyTheBlocksThePluginUses() throws Exception {
         // Обратная связь в обе стороны: добавят блок в плагин — тест потребует
-        // описать его здесь, и наоборот.
-        assertEquals(WANTED_IDS, blocks().getKeys(false),
-                "id блоков в конфиге и в плагине обязаны совпадать");
+        // описать его в конфиге, и наоборот.
+        assertEquals(WANTED_IDS, blocks().keySet(),
+                "id блоков в конфигах и в плагине обязаны совпадать");
         assertEquals("f8resurs:ancient_jug", CraftEngineJug.EMPTY_ID);
         assertEquals("f8resurs:ancient_jug_filled", CraftEngineJug.FILLED_ID);
         assertEquals("f8resurs:ancient_jug_filled", CraftEngineJug.keyName(1));
         assertEquals("f8resurs:ancient_jug", CraftEngineJug.keyName(0));
         assertEquals("f8resurs:copper_note_block", CraftEngineCopper.ID);
+    }
+
+    @Test
+    void copperBlockHasItsOwnFileToDropIntoThePack() throws Exception {
+        Path file = CONFIGS.resolve("copper_note_block.yml");
+        assertTrue(Files.isRegularFile(file),
+                "Нужен отдельный файл для медного нотного блока: " + ROOT.relativize(file));
+        YamlConfiguration loaded = new YamlConfiguration();
+        loaded.loadFromString(Files.readString(file));
+        assertEquals(Set.of(CraftEngineCopper.ID),
+                loaded.getConfigurationSection("blocks").getKeys(false),
+                "в файле медного блока должен быть только он: кувшин может быть уже "
+                        + "прописан в паке, и дубль id дал бы конфликт");
+        assertTrue(Files.readString(DOC).contains("copper_note_block.yml"),
+                "документ должен вести к файлу с конфигом");
     }
 
     @Test
@@ -137,10 +137,18 @@ class CraftEngineBlocksTest {
     }
 
     @Test
-    void packNamespaceMatchesTheBlockIds() throws Exception {
-        String namespace = packYaml().getString("namespace");
-        assertNotNull(namespace, "В pack.yml нужен namespace");
-        for (String id : blocks().getKeys(false)) {
+    void documentedPackNamespaceMatchesTheBlockIds() throws Exception {
+        // Образец pack.yml живёт в документе: namespace пака обязан совпадать с
+        // началом id блоков, иначе CraftEngine зарегистрирует их под другим
+        // именем и плагин их не найдёт.
+        String text = Files.readString(DOC);
+        Matcher matcher = Pattern.compile("```yaml\\R(.*?)```", Pattern.DOTALL).matcher(text);
+        assertTrue(matcher.find(), "В документе нет образца pack.yml");
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.loadFromString(matcher.group(1));
+        String namespace = yaml.getString("namespace");
+        assertNotNull(namespace, "В образце pack.yml нужен namespace");
+        for (String id : blocks().keySet()) {
             assertEquals(namespace, id.substring(0, id.indexOf(':')),
                     "Пространство имён блока совпадает с namespace пака: " + id);
         }
@@ -148,9 +156,9 @@ class CraftEngineBlocksTest {
 
     @Test
     void everyBlockHasAStateCraftEngineCanUse() throws Exception {
-        for (String id : blocks().getKeys(false)) {
-            ConfigurationSection block = blocks().getConfigurationSection(id);
-            ConfigurationSection state = block.getConfigurationSection("state");
+        for (var entry : blocks().entrySet()) {
+            String id = entry.getKey();
+            ConfigurationSection state = entry.getValue().getConfigurationSection("state");
             assertNotNull(state, id + ": секция state обязательна");
 
             String autoState = state.getString("auto_state");
@@ -168,29 +176,28 @@ class CraftEngineBlocksTest {
 
     @Test
     void everyModelPathExistsInTheShippedResourcePack() throws Exception {
-        // Пака с моделями в репозитории больше нет: модель берётся из того
-        // ресурспака, который сервер и так ставит в CraftEngine. Если сослаться
-        // на модель, которой там нет, на месте блока будет носитель — и понять
-        // это можно только в игре.
+        // Моделей в репозитории нет: они в том ресурспаке, который сервер и так
+        // ставит в CraftEngine. Если сослаться на модель, которой там нет, на
+        // месте блока будет носитель — и понять это можно только в игре.
         assertTrue(Files.isRegularFile(SHIPPED_PACK), "Нет собранного ресурспака для сверки");
         try (ZipFile zip = new ZipFile(SHIPPED_PACK.toFile())) {
-            for (String id : blocks().getKeys(false)) {
-                String path = blocks().getConfigurationSection(id)
-                        .getConfigurationSection("state").getConfigurationSection("model")
-                        .getString("path");
+            for (var entry : blocks().entrySet()) {
+                String path = entry.getValue().getConfigurationSection("state")
+                        .getConfigurationSection("model").getString("path");
                 String[] split = path.split(":", 2);
-                String entry = "assets/" + split[0] + "/models/" + split[1] + ".json";
-                ZipEntry model = zip.getEntry(entry);
-                assertNotNull(model, id + ": модели " + path + " нет в ресурспаке (" + entry + ")");
+                String name = "assets/" + split[0] + "/models/" + split[1] + ".json";
+                ZipEntry model = zip.getEntry(name);
+                assertNotNull(model, entry.getKey() + ": модели " + path
+                        + " нет в ресурспаке (" + name + ")");
             }
         }
     }
 
     @Test
     void settingsUseOnlyKeysCraftEngineParses() throws Exception {
-        for (String id : blocks().getKeys(false)) {
-            ConfigurationSection settings = blocks().getConfigurationSection(id)
-                    .getConfigurationSection("settings");
+        for (var entry : blocks().entrySet()) {
+            String id = entry.getKey();
+            ConfigurationSection settings = entry.getValue().getConfigurationSection("settings");
             assertNotNull(settings, id + ": без settings блок ведёт себя как носитель");
             for (String key : settings.getKeys(false)) {
                 assertTrue(SETTINGS_KEYS.contains(key),
@@ -212,12 +219,13 @@ class CraftEngineBlocksTest {
         // По умолчанию эти признаки «не определены» и наследуются от носителя.
         // У кувшина носитель — глухой mushroom_stem, у медного блока — сплошной
         // куб; молча наследовать значит получить поведение носителя.
-        for (String id : blocks().getKeys(false)) {
-            ConfigurationSection settings = blocks().getConfigurationSection(id)
-                    .getConfigurationSection("settings");
-            for (String key : List.of("is_view_blocking", "can_occlude", "is_suffocating",
-                    "is_redstone_conductor", "propagate_skylight")) {
-                assertTrue(settings.contains(key), id + ": settings." + key + " не задан явно");
+        List<String> keys = List.of("is_view_blocking", "can_occlude", "is_suffocating",
+                "is_redstone_conductor", "propagate_skylight");
+        for (var entry : blocks().entrySet()) {
+            ConfigurationSection settings = entry.getValue().getConfigurationSection("settings");
+            for (String key : keys) {
+                assertTrue(settings.contains(key),
+                        entry.getKey() + ": settings." + key + " не задан явно");
             }
         }
     }
@@ -228,8 +236,7 @@ class CraftEngineBlocksTest {
         // не рисуют грани рядом с кувшином и проводят редстоун: так кувшин
         // 10.13 оставлял дыры в постройке.
         for (String id : List.of(CraftEngineJug.EMPTY_ID, CraftEngineJug.FILLED_ID)) {
-            ConfigurationSection settings = blocks().getConfigurationSection(id)
-                    .getConfigurationSection("settings");
+            ConfigurationSection settings = blocks().get(id).getConfigurationSection("settings");
             assertFalse(settings.getBoolean("is_view_blocking", true),
                     id + ": кувшин не должен перекрывать обзор соседям");
             assertFalse(settings.getBoolean("can_occlude", true),
@@ -246,14 +253,11 @@ class CraftEngineBlocksTest {
         // Модель медного блока — cube_all, а питание он читает обычным
         // block.isBlockPowered(): если куб не проводит редстоун, блок перестанет
         // срабатывать от провода.
-        ConfigurationSection settings = blocks().getConfigurationSection(CraftEngineCopper.ID)
+        ConfigurationSection settings = blocks().get(CraftEngineCopper.ID)
                 .getConfigurationSection("settings");
-        assertTrue(settings.getBoolean("is_view_blocking", false),
-                "медный блок — глухой куб");
-        assertTrue(settings.getBoolean("can_occlude", false),
-                "медный блок — глухой куб");
-        assertTrue(settings.getBoolean("is_suffocating", false),
-                "медный блок — глухой куб");
+        assertTrue(settings.getBoolean("is_view_blocking", false), "медный блок — глухой куб");
+        assertTrue(settings.getBoolean("can_occlude", false), "медный блок — глухой куб");
+        assertTrue(settings.getBoolean("is_suffocating", false), "медный блок — глухой куб");
         assertTrue(settings.getBoolean("is_redstone_conductor", false),
                 "медный блок должен проводить редстоун, иначе он не сработает от провода");
         assertFalse(settings.getBoolean("propagate_skylight", true),
@@ -262,9 +266,9 @@ class CraftEngineBlocksTest {
 
     @Test
     void noLootTableBecauseThePluginDropsTheItemsItself() throws Exception {
-        for (String id : blocks().getKeys(false)) {
-            assertNull(blocks().getConfigurationSection(id).get("loot"),
-                    id + ": loot не нужен — предмет роняет плагин, иначе дроп получится двойным");
+        for (var entry : blocks().entrySet()) {
+            assertNull(entry.getValue().get("loot"), entry.getKey()
+                    + ": loot не нужен — предмет роняет плагин, иначе дроп получится двойным");
         }
     }
 
@@ -280,13 +284,21 @@ class CraftEngineBlocksTest {
     }
 
     @Test
-    void theRepoNoLongerShipsACraftEnginePack() {
-        // Папку с паком в пул-реквесте носить перестали: ресурспак в CraftEngine
-        // кладёт сам сервер, а дубликат моделей в репозитории только устаревал.
+    void theRepoNoLongerShipsACraftEnginePack() throws Exception {
+        // Папки с паком (pack.yml + копии моделей) в пул-реквесте носить
+        // перестали: ресурспак в CraftEngine кладёт сам сервер, а дубликат
+        // моделей только устаревал. Остались конфиги — их и копируют в пак.
         assertFalse(Files.exists(ROOT.resolve("craftengine")),
                 "Папку craftengine/ в репозитории быть не должно");
         assertFalse(Files.exists(ROOT.resolve("docs/craftengine")),
                 "docs/craftengine с конфигом вне пака больше не нужен");
+        List<String> names;
+        try (var files = Files.list(CONFIGS)) {
+            names = files.map(path -> path.getFileName().toString()).sorted().toList();
+        }
+        assertEquals(List.of("ancient_jug.yml", "copper_note_block.yml"), names,
+                "в папке только конфиги блоков: pack.yml у вас свой, а копии моделей "
+                        + "берутся из вашего ресурспака");
     }
 
     @Test

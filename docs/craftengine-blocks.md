@@ -4,116 +4,51 @@
 встретить их можно только там, где их поставили: ни в генерации, ни у соседей,
 ни в крафте их не бывает.
 
-| id | что это | что рисует |
-|---|---|---|
-| `f8resurs:ancient_jug` | пустой Древний кувшин | `f8resurs:block/ancient_jug` |
-| `f8resurs:ancient_jug_filled` | налитый Древний кувшин | `f8resurs:block/ancient_jug_filled` |
-| `f8resurs:copper_note_block` | медный нотный блок | `f8resurs:block/copper_note_block` |
+| id | что это | что рисует | конфиг |
+|---|---|---|---|
+| `f8resurs:copper_note_block` | медный нотный блок | `f8resurs:block/copper_note_block` | [`copper_note_block.yml`](craftengine-blocks/copper_note_block.yml) |
+| `f8resurs:ancient_jug` | пустой Древний кувшин | `f8resurs:block/ancient_jug` | [`ancient_jug.yml`](craftengine-blocks/ancient_jug.yml) |
+| `f8resurs:ancient_jug_filled` | налитый Древний кувшин | `f8resurs:block/ancient_jug_filled` | [`ancient_jug.yml`](craftengine-blocks/ancient_jug.yml) |
 
-Все три модели уже лежат в ресурспаке f8resurs. Отдельную папку с моделями
-плагин больше не раздаёт — хватает того пака, который вы и так поставили в
-CraftEngine.
+Все три модели уже лежат в ресурспаке f8resurs — том, который вы перенесли в
+CraftEngine. Отдельных моделей к конфигам не нужно: `state.model.path` только
+привязывает существующую модель к блоку, ничего не генерируя.
 
 Содержимое блоков в самих блоках не хранится: у кувшина оно в
 `plugins/f8-plugin/jugs.yml`, у медного блока — в `plugins/f8-plugin/blocks.yml`
 (ключ `мир_x_y_z`).
 
-## Куда это положить
+## Куда положить
 
-CraftEngine читает конфиги **только из паков**: `plugins/CraftEngine/resources/<имя пака>/`
-с `pack.yml`, папкой `configuration/` (все `.yml` и `.json`, рекурсивно) и
-папкой `resourcepack/` (модели и текстуры). Файл, просто брошенный в
-`plugins/CraftEngine/blocks/`, плагин не увидит никогда — именно так кувшин
-версии 10.13 не ставился.
+CraftEngine читает конфиги **только из паков**:
+`plugins/CraftEngine/resources/<имя пака>/` с `pack.yml`, папкой
+`configuration/` (все `.yml` и `.json`, рекурсивно по подпапкам) и папкой
+`resourcepack/`. Файл, просто брошенный в `plugins/CraftEngine/blocks/`, плагин
+не увидит никогда — именно так кувшин версии 10.13 не ставился.
 
-Пак у вас уже есть (тот, куда вы положили ресурспак). Добавьте в него один
-файл: `configuration/blocks/f8resurs.yml`.
+Пак у вас уже есть. Скопируйте нужный файл в его `configuration/blocks/`:
 
-### `pack.yml` — пространство имён
+```text
+plugins/CraftEngine/resources/<ваш пак>/
+├── pack.yml
+├── configuration/blocks/copper_note_block.yml      <- из docs/craftengine-blocks/
+└── resourcepack/…
+```
 
-Пространство имён пака обязано совпадать с началом id блоков, иначе
-CraftEngine зарегистрирует их под другим именем и плагин их не найдёт.
+В `pack.yml` должно быть пространство имён, совпадающее с началом id блоков,
+иначе CraftEngine зарегистрирует их под другим именем и плагин их не найдёт:
 
 ```yaml
 namespace: f8resurs
 ```
 
-### `configuration/blocks/f8resurs.yml` — сами блоки
-
-```yaml
-blocks:
-
-  # Пустой кувшин.
-  f8resurs:ancient_jug:
-    state:
-      auto_state: mushroom_stem
-      model:
-        path: "f8resurs:block/ancient_jug"
-    settings:
-      hardness: 1.2
-      resistance: 6.0
-      replaceable: false
-      is_suffocating: false
-      is_view_blocking: false
-      is_redstone_conductor: false
-      can_occlude: false
-      propagate_skylight: true
-      sounds:
-        break: minecraft:block.decorated_pot.break
-        step: minecraft:block.decorated_pot.step
-        place: minecraft:block.decorated_pot.place
-        hit: minecraft:block.decorated_pot.hit
-        fall: minecraft:block.decorated_pot.fall
-
-  # Налитый кувшин — отдельный блок: по блоку извне видно только «он кастомный»,
-  # но не «он пустой или налитый».
-  f8resurs:ancient_jug_filled:
-    state:
-      auto_state: mushroom_stem
-      model:
-        path: "f8resurs:block/ancient_jug_filled"
-    settings:
-      hardness: 1.2
-      resistance: 6.0
-      replaceable: false
-      is_suffocating: false
-      is_view_blocking: false
-      is_redstone_conductor: false
-      can_occlude: false
-      propagate_skylight: true
-      sounds:
-        break: minecraft:block.decorated_pot.break
-        step: minecraft:block.decorated_pot.step
-        place: minecraft:block.decorated_pot.place
-        hit: minecraft:block.decorated_pot.hit
-        fall: minecraft:block.decorated_pot.fall
-
-  # Медный нотный блок. До 10.20 это был обычный NOTE_BLOCK с нотой 24.
-  f8resurs:copper_note_block:
-    state:
-      auto_state: solid
-      model:
-        path: "f8resurs:block/copper_note_block"
-    settings:
-      hardness: 3.0
-      resistance: 6.0
-      replaceable: false
-      is_suffocating: true
-      is_view_blocking: true
-      is_redstone_conductor: true
-      can_occlude: true
-      propagate_skylight: false
-      sounds:
-        break: minecraft:block.copper.break
-        step: minecraft:block.copper.step
-        place: minecraft:block.copper.place
-        hit: minecraft:block.copper.hit
-        fall: minecraft:block.copper.fall
-```
-
 Дальше — `/ce reload all` или перезапуск сервера.
 
-## Почему именно так
+**Если кувшин у вас уже прописан** (он был в `craftengine/resources/f8_jug/`
+до 10.20), берите только `copper_note_block.yml`. Один и тот же id в двух паках
+— это конфликт и предупреждение в консоль.
+
+## Почему конфиг именно такой
 
 **`state` — единственная обязательная секция**
 ([вики](https://xiao-momi.github.io/craft-engine-wiki/configuration/block/states/)).
@@ -121,33 +56,32 @@ blocks:
 * `auto_state` — группа ванильных состояний-носителей, из которой CraftEngine
   сам берёт свободное. Внутренний блок при этом настоящий, со своим id:
   носитель нужен только для того, чтобы клиенту было что показать.
-* `mushroom_stem` у кувшина и `note_block` несовместимы: в ресурспаке f8resurs
-  `blockstates/note_block.json` уже привязывает состояния `note=24/flute` и
-  `note=1..9/banjo` к моделям кувшина, и CraftEngine выбрал бы занятое
-  состояние с предупреждением о конфликте. Поэтому кувшин сидит на
-  `mushroom_stem`.
-* `solid` у медного блока — модель `cube_all`, то есть обычный глухой куб, так
-  что группа сплошных блоков подходит ему как есть.
-* `model.path` — путь к **уже существующей** модели. По одному `path`
-  CraftEngine ничего не генерирует: модель обязана лежать в паке.
+* `solid` у медного блока — модель `cube_all`, то есть обычный глухой куб.
+* `mushroom_stem` у кувшина — и группа `note_block` не годится ни там, ни там:
+  в ресурспаке f8resurs `blockstates/note_block.json` уже привязывает состояния
+  `note=24/flute`, `note=1..9/banjo` и `note=24/…` к моделям кувшина и медного
+  блока, и CraftEngine выбрал бы занятое состояние с предупреждением о
+  конфликте.
+* `model.path` — путь к **уже существующей** модели.
 
 **`settings` — физика блока**
 ([вики](https://xiao-momi.github.io/craft-engine-wiki/configuration/block/settings/)).
 Ключи сплошности (`is_view_blocking`, `can_occlude`, `is_suffocating`,
 `is_redstone_conductor`, `propagate_skylight`) заданы явно, потому что по
-умолчанию они «не определено» и наследуются от носителя:
+умолчанию они «не определены» и наследуются от носителя:
 
 * кувшин — не куб, он стоит на глухом `mushroom_stem`. Без этих ключей соседние
   блоки не рисовали грани рядом с кувшином (дыры в постройке), проводили
   редстоун и гасили свет — так было в 10.13;
 * медный блок — наоборот, глухой куб, как ванильный нотный блок: он должен
-  перекрывать обзор соседям и проводить редстоун, иначе блок перестанет
-  срабатывать от провода.
+  перекрывать обзор соседям и проводить редстоун. Питание читается обычным
+  `block.isBlockPowered()`, так что без проводимости блок перестанет срабатывать
+  от провода.
 
 **`loot` нет ни у одного блока.** Без таблицы лута блок не роняет ничего, а
-свои предметы роняет плагин: у кувшина — `BlockBreakEvent` в `AncientJug` (вместе
-с содержимым), у медного блока — `BlockBreakEvent` в `CopperBlockListener`.
-Таблица лута дала бы двойной дроп.
+свои предметы роняет плагин: у кувшина — `BlockBreakEvent` в `AncientJug`
+(вместе с содержимым), у медного блока — `BlockBreakEvent` в
+`CopperBlockListener`. Таблица лута дала бы двойной дроп.
 
 **Музыка медного блока от блока не зависит.** Ноты играет сам плагин
 (`world.playSound(...)`), инструмент выбирается по предмету в слоте меню, а не
@@ -176,10 +110,12 @@ blocks:
 
 ## Что проверяют тесты
 
-`CraftEngineBlocksTest` читает этот файл и сверяет конфиг с тем, что реально
-разбирает CraftEngine (группы `auto_state` — из `AutoStateGroup`, ключи
-`settings` — из `BlockSettingsModifiers`, ключи `sounds` — из
-`BlockSounds.fromConfig`), а пути моделей — с собранным ресурспаком
-`docs/f8resurspack-fixed.zip`. Если сюда написать ключ, который CraftEngine не
-понимает, или модель, которой в паке нет, сборка упадёт, а не «блок молча не
-встанет в игре».
+`CraftEngineBlocksTest` читает файлы из `docs/craftengine-blocks/` и сверяет их
+с тем, что реально разбирает CraftEngine (группы `auto_state` — из
+`AutoStateGroup`, ключи `settings` — из `BlockSettingsModifiers`, ключи `sounds`
+— из `BlockSounds.fromConfig`), а пути моделей — с собранным ресурспаком
+`docs/f8resurspack-fixed.zip`. Плюс: id в конфигах и в плагине совпадают, id не
+повторяются в двух файлах, `loot` ни у кого нет, `softdepend: [CraftEngine]` на
+месте, папки `craftengine/` в репозитории больше нет. Если в конфиг написать
+ключ, который CraftEngine не понимает, или модель, которой в паке нет, сборка
+упадёт, а не «блок молча не встанет в игре».
