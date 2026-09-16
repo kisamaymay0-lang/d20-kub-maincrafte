@@ -44,6 +44,11 @@ namespace: f8resurs
 
 Дальше — `/ce reload all` или перезапуск сервера.
 
+Блоки рисуются только у тех игроков, до которых дошёл **собранный CraftEngine**
+ресурспак: отдельный `f8resurspack-fixed.zip` не содержит привязок, которые
+CraftEngine генерирует. Как раздавать пак игрокам —
+[`docs/resource-pack.md`](resource-pack.md).
+
 **Если кувшин у вас уже прописан** (он был в `craftengine/resources/f8_jug/`
 до 10.20), берите только `copper_note_block.yml`. Один и тот же id в двух паках
 — это конфликт и предупреждение в консоль.
