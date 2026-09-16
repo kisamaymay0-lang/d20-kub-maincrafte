@@ -46,6 +46,11 @@
 положенный в `plugins/CraftEngine/blocks/`, плагин не увидит никогда — именно
 поэтому кувшин 10.13 не ставился.
 
+Модели кувшина в `resourcepack/` — точные копии моделей из ресурспака
+(`docs/f8resurspack-fixed.zip`, собран из `f8resurspack@874ce24`). Тест
+`CraftEnginePackTest.jugModelsAreTheOnesFromTheShippedResourcePack` сверяет их
+побайтово, так что устаревшая копия сюда не вернётся.
+
 **`state` — единственная обязательная секция.**
 
 * `auto_state: mushroom_stem` — группа ванильных состояний-носителей, из

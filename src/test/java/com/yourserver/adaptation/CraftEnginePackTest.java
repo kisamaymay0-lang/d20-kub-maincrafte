@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -245,6 +247,33 @@ class CraftEnginePackTest {
     }
 
     @Test
+    void jugModelsAreTheOnesFromTheShippedResourcePack() throws Exception {
+        // Кувшин рисует модель из пака CraftEngine. Если туда положить копию
+        // постарше (в resourcepack/ лежала именно такая), кувшин встаёт, но
+        // выглядит прежним — и понять это можно только в игре.
+        Path archive = ROOT.resolve("docs/f8resurspack-fixed.zip");
+        assertTrue(Files.isRegularFile(archive), "Нет собранного ресурспака для сверки");
+        try (ZipFile zip = new ZipFile(archive.toFile())) {
+            for (String name : List.of("ancient_jug", "ancient_jug_filled")) {
+                ZipEntry entry = zip.getEntry("assets/f8resurs/models/block/" + name + ".json");
+                assertNotNull(entry, name + ": модели нет в ресурспаке");
+                byte[] expected;
+                try (var in = zip.getInputStream(entry)) {
+                    expected = in.readAllBytes();
+                }
+                assertArrayEquals(expected,
+                        Files.readAllBytes(PACK_RESOURCES.resolve("assets/f8resurs/models/block/"
+                                + name + ".json")),
+                        name + ": в паке CraftEngine модель отличается от модели ресурспака");
+                assertArrayEquals(expected,
+                        Files.readAllBytes(ROOT.resolve("resourcepack/assets/f8resurs/models/block/"
+                                + name + ".json")),
+                        name + ": рабочая копия в resourcepack/ разошлась с ресурспаком");
+            }
+        }
+    }
+
+    @Test
     void jugIdsAreTheOnesTheConfigDefines() {
         // Обратная связь от плагина к тесту: если id в CraftEngineJug поменяют,
         // тест blocksAreExactlyTheTwoJugIdsThePluginUses это поймает.
@@ -254,5 +283,10 @@ class CraftEnginePackTest {
         assertEquals("f8resurs:ancient_jug", CraftEngineJug.keyName(0));
         assertTrue(CraftEngineJug.PACK_CONFIG.contains("resources/f8_jug/configuration/blocks/ancient_jug.yml"),
                 "Путь к конфигу в сообщениях должен вести в пак");
+        assertTrue(CraftEngineJug.isJugId(CraftEngineJug.EMPTY_ID));
+        assertTrue(CraftEngineJug.isJugId(CraftEngineJug.FILLED_ID));
+        assertFalse(CraftEngineJug.isJugId("default:topaz_ore"),
+                "Чужой блок CraftEngine кувшином не считается");
+        assertFalse(CraftEngineJug.isJugId(null), "Ванильный блок кувшином не считается");
     }
 }

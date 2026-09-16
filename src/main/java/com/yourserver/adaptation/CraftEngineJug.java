@@ -84,6 +84,25 @@ final class CraftEngineJug {
     }
 
     /**
+     * Оба кувшина зарегистрированы и с ними можно работать.
+     *
+     * Проверять одно только «плагин включён» нельзя: CraftEngine грузит паки в
+     * отложенной фазе включения, и в это окно {@code byId} отдаёт null при
+     * полностью верном конфиге. Всё, что блок снимает, переставляет или считает
+     * пропавшим, обязано идти только после этой проверки — иначе на старте
+     * сервера кувшины терялись: блок снимали, поставить взамен было нечего, а
+     * записи в jugs.yml считались осиротевшими и удалялись.
+     */
+    static boolean ready() {
+        return available() && Bridge.registered(0) && Bridge.registered(1);
+    }
+
+    /** id — один из двух наших кувшинов (пустой или налитый). */
+    static boolean isJugId(String id) {
+        return EMPTY_ID.equals(id) || FILLED_ID.equals(id);
+    }
+
+    /**
      * Короткий диагноз для лога: почему кувшин не работает. Пустая строка —
      * всё в порядке.
      */
@@ -119,8 +138,7 @@ final class CraftEngineJug {
 
     /** Наш ли это кувшин — пустой или налитый. */
     static boolean isJug(Block block) {
-        String id = idAt(block);
-        return EMPTY_ID.equals(id) || FILLED_ID.equals(id);
+        return isJugId(idAt(block));
     }
 
     /** Поставить кувшин; звук места не нужен — свой играет AncientJug. */
