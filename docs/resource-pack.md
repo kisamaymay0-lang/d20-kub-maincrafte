@@ -170,6 +170,40 @@ resource-pack:
 `server.properties`; `port: "auto"` в этом случае означает лишь то, что
 HTTP-сервер CraftEngine делит порт Minecraft и отдельный пробрасывать не нужно.
 
+### Доходит ли игрок до сервера: `http://адрес:порт/metrics`
+
+У встроенного HTTP-сервера CraftEngine есть служебный эндпоинт `/metrics`
+(26.8: `SelfHostHttpServer.handleMetrics`). Он открывается обычным браузером,
+проверку `User-Agent` не проходит и возвращает два счётчика:
+
+```
+# TYPE total_requests counter
+total_requests 17
+# TYPE blocked_requests counter
+blocked_requests 9
+```
+
+Обновите страницу, попросите игрока перезайти и сравните числа:
+
+- страница вообще не открывается — адрес или порт в `url` неверный, игрок до
+  сервера не доходит;
+- `total_requests` растёт, `blocked_requests` нет — сервер пак отдал, причину
+  надо искать на клиенте;
+- `blocked_requests` растёт вместе с `total_requests` — сервер **отклоняет**
+  запрос. В 26.8 таких путей три, и у каждого свой код ответа:
+
+| код | где в коде | из-за чего |
+| --- | --- | --- |
+| 429 | `checkIpRateLimit` | `rate_limiting.qps_per_ip` — общий IP у нескольких игроков |
+| 403 | `denyNonMinecraft` | `User-Agent` не начинается с `Minecraft Java/`; снимается `deny_non_minecraft_request: false` |
+| 403 | `validateToken` | одноразовый токен: истёк (1 минута) или уже использован; снимается `one_time_token: false` |
+| 404 | `resourcePackBytes == null` | пак не собран; но тогда он не грузился бы ни у кого |
+
+Отдельно: `http://адрес:порт/download` в браузере при
+`deny_non_minecraft_request: true` **обязан** вернуть `403 Forbidden` — браузер
+не майнкрафт-клиент. Это хороший знак: значит адрес верный и сервер отвечает.
+Беспокоиться надо, если вместо 403 — «не удаётся получить доступ к сайту».
+
 ## «Не удалось загрузить» у одного игрока
 
 Полезно знать про `self-host` (по вики
