@@ -6,6 +6,12 @@
 «10.13», так что по номеру банки нельзя было понять, что именно установлено.
 Теперь номер один везде: `pom.xml`, `plugin.yml`, имя артефакта.
 
+> **Поправка от 10.20.** Папку `craftengine/` из репозитория убрали: ресурспак в
+> CraftEngine вы кладёте сами, и дубликат моделей в репозитории только устаревал.
+> Конфиг блоков теперь описан в [`docs/craftengine-blocks.md`](craftengine-blocks.md) —
+> один файл в ваш пак, моделей к нему не нужно. Дальше по тексту папка
+> `craftengine/` описана так, как было в 10.19.
+
 ---
 
 ## 1. Кувшин: конфиг лежал там, где CraftEngine его не читает
@@ -51,7 +57,8 @@ craftengine/resources/f8_jug/
 
 Ключи проверены не на глаз, а по исходникам CraftEngine: группы `auto_state` —
 `AutoStateGroup`, ключи `settings` — `BlockSettingsModifiers`, ключи `sounds` —
-`BlockSounds.fromConfig`. Проверка живёт в тесте `CraftEnginePackTest` и падает,
+`BlockSounds.fromConfig`. Проверка живёт в тесте `CraftEnginePackTest` (в 10.20 — `CraftEngineBlocksTest`)
+и падает,
 если в конфиг попадёт ключ, которого плагин не разбирает, или модель без файла.
 
 ## 2. Плагин узнаёт свой кувшин, а не «какой-то кастомный блок»
@@ -123,8 +130,10 @@ CraftEngine грузит паки в отложенной фазе включе�
 `f8resurspack@874ce24`, последней версии.
 
 Тест `CraftEnginePackTest.jugModelsAreTheOnesFromTheShippedResourcePack`
-сверяет обе копии с архивом ресурспака побайтово: если рабочая копия снова
-разойдётся, сборка упадёт, а не покажет в игре кувшин старой модели.
+(в 10.20 — `CraftEngineBlocksTest.jugModelsInTheWorkingPackMatchTheShippedOne`,
+копии в паке больше нет) сверяет модели с архивом ресурспака побайтово: если
+рабочая копия снова разойдётся, сборка упадёт, а не покажет в игре кувшин
+старой модели.
 
 Остальные 10 разошедшихся файлов (`textures/item/pref1..pref10`,
 `icy_rime`, `salmon`, `pack.png`) и 15 файлов, которых в `resourcepack/` нет
@@ -159,8 +168,8 @@ CraftEngine грузит паки в отложенной фазе включе�
 ## Как поставить
 
 1. CraftEngine → в `plugins/`.
-2. Папку `craftengine/resources/f8_jug` → в `plugins/CraftEngine/resources/`,
-   затем `/ce reload all`.
+2. Конфиг блоков из [`docs/craftengine-blocks.md`](craftengine-blocks.md) →
+   файлом `configuration/blocks/f8resurs.yml` в ваш пак, затем `/ce reload all`.
 3. Из артефакта `f8-plugin-10.19` взять `adaptation-10.19.jar` → в `plugins/`,
    перезапуск.
 4. Проверить: в логе f8-plugin — «блоки CraftEngine … зарегистрированы»;

@@ -257,10 +257,11 @@ public class AncientJug implements Listener {
         // старые кувшины переносятся на кастомный блок CraftEngine.
         Bukkit.getScheduler().runTaskTimer(plugin, this::guardTick, 1L, 1L);
         if (!CraftEngineJug.available()) {
-            plugin.getLogger().warning("CraftEngine не найден: кувшин — настоящий кастомный блок, и без "
-                    + "него он не ставится и не переносится. Поставьте CraftEngine с "
-                    + "https://modrinth.com/plugin/craftengine и скопируйте папку craftengine/resources/f8_jug "
-                    + "в plugins/CraftEngine/resources/. Содержимое в jugs.yml при этом цело.");
+            plugin.getLogger().warning("CraftEngine не найден: кувшин и медный нотный блок — настоящие "
+                    + "кастомные блоки, и без него они не ставятся. Поставьте CraftEngine с "
+                    + "https://modrinth.com/plugin/craftengine и пропишите блоки плагина в его паке "
+                    + "(список и образец: " + CraftEngineSupport.CONFIG_DOC
+                    + "). Содержимое в jugs.yml при этом цело.");
         }
         // Приводим в порядок кувшины в уже загруженных чанках (остальные
         // проверятся при загрузке чанка). Не по таймеру, а когда CraftEngine
@@ -625,7 +626,8 @@ public class AncientJug implements Listener {
         String diagnosis = CraftEngineJug.diagnosis();
         plugin.getLogger().warning("CraftEngine не принял блок " + CraftEngineJug.keyName(count)
                 + ". " + (diagnosis.isEmpty()
-                ? "Проверьте консоль CraftEngine при загрузке " + CraftEngineJug.PACK_CONFIG + "."
+                ? "Проверьте консоль CraftEngine; блоки, которые нужны плагину, описаны в "
+                        + CraftEngineSupport.CONFIG_DOC + "."
                 : diagnosis));
     }
 
