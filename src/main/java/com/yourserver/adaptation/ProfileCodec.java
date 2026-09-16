@@ -56,6 +56,9 @@ final class ProfileCodec {
         yaml.set("prefixes.owned", new ArrayList<>(data.ownedPrefixes()));
         yaml.set("prefixes.equipped", data.equippedPrefix() == null ? "" : data.equippedPrefix());
         yaml.set("prefixes.cases", data.prefixCases());
+        yaml.set("cosmetics.owned", new ArrayList<>(data.ownedCosmetics()));
+        yaml.set("cosmetics.equipped", data.equippedCosmetic() == null ? "" : data.equippedCosmetic());
+        yaml.set("cosmetics.cases", data.cosmeticCases());
         List<String> slots = new ArrayList<>();
         for (UUID id : data.layout()) slots.add(id == null ? "" : id.toString());
         yaml.set("display", slots);
@@ -111,6 +114,12 @@ final class ProfileCodec {
         if (prefixes != null) {
             data.restorePrefixes(new HashSet<>(prefixes.getStringList("owned")),
                     prefixes.getString("equipped", ""), prefixes.getInt("cases", 0));
+        }
+        ConfigurationSection cosmetics = yaml.getConfigurationSection("cosmetics");
+        if (yaml.contains("cosmetics") && cosmetics == null) throw new IllegalArgumentException("Неверная косметика");
+        if (cosmetics != null) {
+            data.restoreCosmetics(new HashSet<>(cosmetics.getStringList("owned")),
+                    cosmetics.getString("equipped", ""), cosmetics.getInt("cases", 0));
         }
         if (version == 1) data.replaceMedals(readMedals(yaml));
         if (!yaml.isList("display")) throw new IllegalArgumentException("Неверные слоты профиля");
