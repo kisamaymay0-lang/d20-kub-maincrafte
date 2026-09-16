@@ -24,6 +24,12 @@
 # block.isBlockPowered(), без проводимости блок перестанет срабатывать от
 # провода.
 #
+# Время копания — как у ванильного нотного блока: hardness 0.8 и resistance 0.8
+# (у NOTE_BLOCK ровно столько же), а тег minecraft:mineable/axe даёт топору
+# обычное ускорение — нотный блок в ванили тоже в этом теге. correct_tools
+# намеренно нет: он включил бы require_correct_tools, и без топора блок не
+# дропал бы вовсе, а ванильный нотный блок ломается чем угодно.
+#
 # loot намеренно нет: без таблицы лута блок не роняет ничего, а предмет со всем
 # содержимым роняет плагин (BlockBreakEvent в CopperBlockListener). Таблица лута
 # дала бы двойной дроп.
@@ -39,14 +45,16 @@ blocks:
       model:
         path: "f8resurs:block/copper_note_block"
     settings:
-      hardness: 3.0
-      resistance: 6.0
+      hardness: 0.8
+      resistance: 0.8
       replaceable: false
       is_suffocating: true
       is_view_blocking: true
       is_redstone_conductor: true
       can_occlude: true
       propagate_skylight: false
+      tags:
+        - minecraft:mineable/axe
       sounds:
         break: minecraft:block.copper.break
         step: minecraft:block.copper.step

@@ -69,9 +69,12 @@ def validate() -> dict[str, bytes]:
         if name.endswith(".json"):
             json.loads(contents)
 
-    # Медный блок — нота 24 (14 инструментов). Кувшин: пустой — нота 24 + флейта,
-    # наполненный — ноты 1..9 (нота = количество жидкости = сигнал компаратора)
-    # + банджо. Каждый блок-стейт нот-блока матчится ровно одним кейсом.
+    # Нота 24 больше не принадлежит медному блоку: с 10.21 медный нотный блок —
+    # кастомный блок CraftEngine, и настроенный до ноты 24 обычный нотный блок
+    # не должен ни выглядеть, ни считаться медным. Кувшин: пустой — нота 24 +
+    # флейта, наполненный — ноты 1..9 (нота = количество жидкости = сигнал
+    # компаратора) + банджо. Каждый блок-стейт нот-блока матчится ровно одним
+    # кейсом.
     instruments = {"harp", "basedrum", "snare", "hat", "bass", "bell", "guitar", "chime",
                    "xylophone", "iron_xylophone", "cow_bell", "didgeridoo", "bit", "pling", "flute", "banjo"}
     vanilla = "minecraft:block/note_block"
@@ -90,11 +93,12 @@ def validate() -> dict[str, bytes]:
             f"Note {note} must stay vanilla for every instrument except banjo"
         assert case["apply"]["model"] == vanilla
 
-    copper = cases[10]
-    copper_instruments = set(copper["when"]["instrument"].split("|"))
-    assert copper["when"]["note"] == "24" and copper_instruments == instruments - {"flute", "banjo"}, \
-        "Copper covers note=24 for all instruments except the jug's two"
-    assert copper["apply"]["model"] == "f8resurs:block/copper_note_block"
+    plain = cases[10]
+    plain_instruments = set(plain["when"]["instrument"].split("|"))
+    assert plain["when"]["note"] == "24" and plain_instruments == instruments - {"flute", "banjo"}, \
+        "Note 24 must stay covered for all instruments except the jug's two"
+    assert plain["apply"]["model"] == vanilla, \
+        "Note 24 is an ordinary note block now: the copper block is a custom "        "CraftEngine block, and tuning a note block to 24 must not fake one"
 
     jug_empty = cases[11]
     assert jug_empty["when"] == {"note": "24", "instrument": "flute"}

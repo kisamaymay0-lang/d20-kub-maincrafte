@@ -10,6 +10,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
+import org.bukkit.GameMode;
 import org.bukkit.Instrument;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -853,14 +854,21 @@ public class AncientJug implements Listener {
         // его пустым — записи о содержимом у таких кувшинов нет.
         if (!isJugBlock(block) && !isLegacyJug(block, false)) return;
         event.setDropItems(false);
-        breakJug(block, true);
+        // В креативе пустой кувшин не дропается: хранить ему нечего, а второй
+        // экземпляр предмета в креативе не нужен. Нали кувшин роняется всегда —
+        // иначе содержимое потеряется.
+        boolean empty = readContents(key).count == 0;
+        boolean creative = event.getPlayer().getGameMode() == GameMode.CREATIVE;
+        breakJug(block, !(creative && empty));
     }
 
     /**
-     * Разбить кувшин: запись удаляется, содержимое выпадает предметом, блок
-     * гасится. Ванильный дроп не используется — рамка портала Края в выживании
-     * не ломается вовсе (прочность −1), поэтому кувшин разбивает
-     * {@link #onBlockHit}, а не игра.
+     * Разбить кувшин: запись удаляется, при {@code drop} содержимое выпадает
+     * предметом, блок гасится. Ванильный дроп не используется — без таблицы
+     * лута блок CraftEngine не роняет ничего, предмет кувшина роняем мы сами.
+     *
+     * @param drop ронять ли предмет кувшина. Ломается кувшин мгновенно в любом
+     *             случае — прочность блока в конфиге CraftEngine нулевая.
      */
     private void breakJug(Block block, boolean drop) {
         String key = blockKey(block);

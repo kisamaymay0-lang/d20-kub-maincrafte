@@ -22,6 +22,9 @@
 # без этих ключей соседние блоки не рисовали грани рядом с кувшином (дыры в
 # постройке), проводили редстоун и гасили свет.
 #
+# hardness: 0.0 — кувшин ломается мгновенно и голыми руками, и любым
+# инструментом: при нулевой прочности ваниль ломает блок за один тик.
+#
 # loot намеренно нет: предмет кувшина со всем содержимым роняет плагин
 # (BlockBreakEvent в AncientJug), иначе дроп получится двойным.
 
@@ -33,7 +36,7 @@ blocks:
       model:
         path: "f8resurs:block/ancient_jug"
     settings:
-      hardness: 1.2
+      hardness: 0.0
       resistance: 6.0
       replaceable: false
       is_suffocating: false
@@ -54,7 +57,7 @@ blocks:
       model:
         path: "f8resurs:block/ancient_jug_filled"
     settings:
-      hardness: 1.2
+      hardness: 0.0
       resistance: 6.0
       replaceable: false
       is_suffocating: false

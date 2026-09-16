@@ -4,6 +4,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -262,6 +263,73 @@ class CraftEngineBlocksTest {
                 "медный блок должен проводить редстоун, иначе он не сработает от провода");
         assertFalse(settings.getBoolean("propagate_skylight", true),
                 "глухой куб свет не пропускает");
+    }
+
+    @Test
+    void copperBlockMinesLikeTheNoteBlockItReplaces() throws Exception {
+        ConfigurationSection settings = blocks().get(CraftEngineCopper.ID)
+                .getConfigurationSection("settings");
+        assertEquals(0.8, settings.getDouble("hardness"), 1e-9,
+                "у ванильного NOTE_BLOCK hardness 0.8");
+        assertEquals(0.8, settings.getDouble("resistance"), 1e-9,
+                "у ванильного NOTE_BLOCK resistance 0.8");
+        assertTrue(settings.getStringList("tags").contains("minecraft:mineable/axe"),
+                "топор должен ускорять копание: нотный блок в ванили в этом теге");
+        assertNull(settings.get("correct_tools"),
+                "correct_tools включил бы require_correct_tools, и без топора блок "
+                        + "не дропал бы вовсе, а нотный блок ломается чем угодно");
+        assertNull(settings.get("require_correct_tools"),
+                "нотный блок ломается чем угодно");
+    }
+
+    @Test
+    void jugBreaksInstantlyWithAnything() throws Exception {
+        for (String id : List.of(CraftEngineJug.EMPTY_ID, CraftEngineJug.FILLED_ID)) {
+            ConfigurationSection settings = blocks().get(id).getConfigurationSection("settings");
+            assertEquals(0.0, settings.getDouble("hardness"), 1e-9,
+                    id + ": при нулевой прочности блок ломается за один тик");
+            assertNull(settings.get("correct_tools"),
+                    id + ": кувшин ломается любым инструментом");
+            assertNull(settings.get("require_correct_tools"),
+                    id + ": кувшин ломается любым инструментом");
+        }
+    }
+
+    @Test
+    void tunedNoteBlockNoLongerLooksLikeTheCopperBlock() throws Exception {
+        // Нота 24 снова рисует обычный нотный блок. Модель
+        // f8resurs:block/copper_note_block остаётся в паке — на неё ссылается
+        // state.model.path блока CraftEngine, — но блок-стейт нотного блока к
+        // ней больше не привязан.
+        String model = "f8resurs:block/copper_note_block";
+        assertFalse(Files.readString(ROOT.resolve(
+                        "resourcepack/assets/minecraft/blockstates/note_block.json")).contains(model),
+                "настроенный до ноты 24 нотный блок не должен рисоваться медным");
+        try (ZipFile zip = new ZipFile(SHIPPED_PACK.toFile())) {
+            ZipEntry entry = zip.getEntry("assets/minecraft/blockstates/note_block.json");
+            assertNotNull(entry, "в ресурспаке нет блок-стейта нотного блока");
+            try (var in = zip.getInputStream(entry)) {
+                assertFalse(new String(in.readAllBytes(), StandardCharsets.UTF_8).contains(model),
+                        "в собранном ресурспаке нота 24 всё ещё рисуется медным блоком");
+            }
+        }
+    }
+
+    @Test
+    void noTunedNoteBlockPathRemainsInTheListener() {
+        // Медный нотный блок получается только крафтом. До 10.21 признаком была
+        // нота 24, и любой настроенный нотный блок считался медным — открывал
+        // меню и дропал предмет медного блока. Если этот путь вернут, тест
+        // это поймает.
+        assertThrows(NoSuchFieldException.class,
+                () -> CopperBlockListener.class.getDeclaredField("MARKER_NOTE"),
+                "признак «нота 24» у медного блока больше не используется");
+        for (var method : CopperBlockListener.class.getDeclaredMethods()) {
+            assertNotEquals("isLegacyCopperBlock", method.getName(),
+                    "обычный нотный блок медным больше не считается");
+            assertNotEquals("migrate", method.getName(),
+                    "переноса нотных блоков в медные больше нет");
+        }
     }
 
     @Test

@@ -2,7 +2,6 @@ package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
-import org.bukkit.Instrument;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -11,8 +10,6 @@ import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.World;
 import org.bukkit.block.Block;
-import org.bukkit.block.data.type.NoteBlock;
-import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -57,12 +54,14 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Медный нотный блок.
  *
- * В основе лежит обычный NOTE_BLOCK:
+ * Блок — кастомный блок CraftEngine {@code f8resurs:copper_note_block}:
  *  - запуск ТОЛЬКО по изменению физического питания с 0 на 1;
- *  - ванильная нота, в том числе от удара рукой, всегда заглушена;
- *  - Paper не посылает BlockRedstoneEvent для самого NOTE_BLOCK, поэтому
+ *  - Paper не посылает BlockRedstoneEvent для самого блока, поэтому
  *    заполненные блоки проверяются раз в тик (без загрузки чанков);
- *  - нота №24 (MARKER_NOTE) зарезервирована для модели поставленного блока.
+ *  - свой блок плагин узнаёт по id в CraftEngine, а не по состоянию носителя.
+ *    До 10.21 признаком была нота №24 обычного нотного блока, и любой
+ *    настроенный до ноты 24 нотный блок становился медным — теперь это
+ *    невозможно: медный нотный блок получается только крафтом.
  *
  * В слоте "таймера" (слот №10) может лежать:
  *  - пластинка — тогда блок работает как проигрыватель (см. ниже);
@@ -71,7 +70,6 @@ import java.util.concurrent.ThreadLocalRandom;
 public class CopperBlockListener implements Listener {
 
     private static final int TIMER_SLOT = 10;
-    private static final int MARKER_NOTE = 24;
     private static final double DISC_RANGE = 65.0;
     private static final long DEBOUNCE_MS = 400L;
 
@@ -147,62 +145,10 @@ public class CopperBlockListener implements Listener {
         registerRecipe();
         powerTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickRedstone, 1L, 1L);
         if (!CraftEngineCopper.available()) {
-            plugin.getLogger().warning("CraftEngine не найден: медный нотный блок — кастомный блок, "
-                    + "и без него новый блок не ставится. Поставьте CraftEngine с "
-                    + "https://modrinth.com/plugin/craftengine и пропишите его блоки в паке плагина "
-                    + "(список и образец: " + CraftEngineSupport.CONFIG_DOC + "). "
-                    + "Уже стоящие медные блоки работают как прежде.");
-        }
-        startMigration();
-    }
-
-    /**
-     * Перенос медных блоков старого образца (NOTE_BLOCK с нотой 24) на блок
-     * CraftEngine. Раз в 10 секунд по загруженным чанкам: паки CraftEngine
-     * грузятся в отложенной фазе включения, поэтому не по таймеру, а когда блок
-     * действительно зарегистрирован. Блоки без записи в blocks.yml (в них
-     * ничего не клали) переносятся лениво — при первом открытии меню.
-     */
-    private void startMigration() {
-        new BukkitRunnable() {
-            private int waits;
-
-            @Override
-            public void run() {
-                if (!CraftEngineCopper.ready()) {
-                    // За минуту CraftEngine успевает включить паки. Дальше ждать
-                    // нечего: без него блок не поставится и не перенесётся, а
-                    // задача больше не нужна.
-                    if (++waits >= 60) {
-                        warnOnce();
-                        cancel();
-                    }
-                    return;
-                }
-                migrateLoaded();
-            }
-        }.runTaskTimer(plugin, 20L, 200L);
-    }
-
-    /** Перенести медные блоки старого образца в загруженных чанках. */
-    private void migrateLoaded() {
-        if (!CraftEngineCopper.ready() || !blockData.contains("blocks")) {
-            return;
-        }
-        ConfigurationSection section = blockData.getConfigurationSection("blocks");
-        if (section == null) {
-            return;
-        }
-        for (String key : section.getKeys(false)) {
-            Location location = locationFromKey(key);
-            if (location == null || location.getWorld() == null) {
-                continue;
-            }
-            World world = location.getWorld();
-            if (!world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
-                continue;
-            }
-            migrate(world.getBlockAt(location));
+            plugin.getLogger().warning("CraftEngine не найден: медный нотный блок — кастомный "
+                    + "блок, и без CraftEngine он не ставится вовсе. Поставьте CraftEngine с "
+                    + "https://modrinth.com/plugin/craftengine и скопируйте конфиги блоков в свой "
+                    + "пак (список и образец: " + CraftEngineSupport.CONFIG_DOC + ").");
         }
     }
 
@@ -290,56 +236,16 @@ public class CopperBlockListener implements Listener {
     }
 
     /**
-     * Наш ли это медный нотный блок.
+     * Наш ли это медный нотный блок — только по id кастомного блока CraftEngine.
      *
-     * Основной признак — id кастомного блока CraftEngine. Медные блоки до 10.20
-     * стояли обычным NOTE_BLOCK с зарезервированной нотой 24: их тоже узнаём,
-     * чтобы ничего не сломалось и чтобы перенести на блок CraftEngine
-     * ({@link #migrate(Block)}).
+     * Раньше признаком была нота №24 обычного нотного блока, и любой настроенный
+     * до ноты 24 нотный блок становился медным: открывал меню и дропал предмет
+     * медного блока при разрушении. Так медный блок можно было получить без
+     * крафта, поэтому путь по ноте убран целиком — ни в распознавании, ни в
+     * переносе.
      */
     private boolean isCopperBlock(Block block) {
-        if (block == null) {
-            return false;
-        }
-        if (CraftEngineCopper.isCopper(block)) {
-            return true;
-        }
-        return isLegacyCopperBlock(block);
-    }
-
-    /** Медный нотный блок старого образца — NOTE_BLOCK с нотой 24. */
-    private static boolean isLegacyCopperBlock(Block block) {
-        if (block.getType() != Material.NOTE_BLOCK) {
-            return false;
-        }
-        if (!(block.getBlockData() instanceof NoteBlock noteBlock)) {
-            return false;
-        }
-        if (noteBlock.getNote().getId() != MARKER_NOTE) {
-            return false;
-        }
-        // Ноту 24 с инструментами флейта/банджо резервировал Древний кувшин.
-        Instrument instrument = noteBlock.getInstrument();
-        return instrument != AncientJug.EMPTY_INSTRUMENT
-                && instrument != AncientJug.FILLED_INSTRUMENT;
-    }
-
-    /**
-     * Перенести медный блок старого образца на блок CraftEngine. Координаты не
-     * меняются, поэтому записи в blocks.yml, открытые меню и опрос питания
-     * остаются при блоке. Молчит, если переносить нечего или нечем.
-     */
-    private void migrate(Block block) {
-        if (block == null || !CraftEngineCopper.ready()) {
-            return;
-        }
-        if (!isLegacyCopperBlock(block)) {
-            return;
-        }
-        if (CraftEngineCopper.place(block)) {
-            plugin.getLogger().info("Медный нотный блок (" + getBlockKey(block)
-                    + ") перенесён на кастомный блок CraftEngine");
-        }
+        return CraftEngineCopper.isCopper(block);
     }
 
     private String getBlockKey(Block block) {
@@ -431,10 +337,6 @@ public class CopperBlockListener implements Listener {
         if (!isCopperBlock(block)) {
             return;
         }
-
-        // Блок старого образца переносим здесь: до него точно дошли руки, а
-        // координаты не меняются, так что меню и записи остаются при нём.
-        migrate(block);
 
         Player player = event.getPlayer();
         if (ContainerInteraction.bypassMenu(player.isSneaking(),
@@ -1159,8 +1061,8 @@ public class CopperBlockListener implements Listener {
             blockData.set("blocks." + key, null);
             block.removeMetadata("copper_playing", plugin);
             block.removeMetadata("last_copper_trigger", plugin);
-            // Сам MARKER_NOTE перемещает поршень вместе с BlockData.
-            // Данных в новом месте пока нет: блок гарантированно пустой.
+            // Поршень перемещает блок вместе с его состоянием. Данных в новом
+            // месте пока нет: блок гарантированно пустой.
             changed = true;
         }
         if (changed) {
