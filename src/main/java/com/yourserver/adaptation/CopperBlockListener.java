@@ -215,27 +215,26 @@ public class CopperBlockListener implements Listener {
     private void registerRecipe() {
         NamespacedKey key = new NamespacedKey(plugin, "copper_note_block");
         ShapelessRecipe recipe = new ShapelessRecipe(key, createCopperBlockItem());
-        for (RecipeChoice ingredient : recipeIngredients()) {
-            recipe.addIngredient(ingredient);
+        for (Material material : recipeSingles()) {
+            recipe.addIngredient(material);
         }
+        recipe.addIngredient(new RecipeChoice.MaterialChoice(copperGrates()));
         Bukkit.removeRecipe(key);
         Bukkit.addRecipe(recipe);
     }
 
     /**
-     * Ингредиенты крафта в том виде, в каком их получает
-     * {@link ShapelessRecipe#addIngredient(RecipeChoice)}: три отдельных
-     * предмета и одна медная решётка на выбор — всего четыре слота.
+     * Одиночные ингредиенты крафта: по одному каждого, плюс четвёртым слотом
+     * любая медная решётка из {@link #copperGrates()}.
      *
-     * Метод статический и не трогает сервер, чтобы крафт можно было проверить
-     * тестом: регистрируется ровно этот список.
+     * Метод возвращает просто список материалов, а не готовые
+     * {@code RecipeChoice.MaterialChoice}: конструктор {@code MaterialChoice}
+     * спрашивает у каждого материала {@code isAir()}, а это идёт в реестр
+     * {@code Registry.BLOCK} — без запущенного сервера он не существует. Так
+     * крафт можно проверить тестом.
      */
-    static List<RecipeChoice> recipeIngredients() {
-        return List.of(
-                new RecipeChoice.MaterialChoice(Material.NOTE_BLOCK),
-                new RecipeChoice.MaterialChoice(Material.REDSTONE),
-                new RecipeChoice.MaterialChoice(Material.DIAMOND),
-                new RecipeChoice.MaterialChoice(copperGrates()));
+    static List<Material> recipeSingles() {
+        return List.of(Material.NOTE_BLOCK, Material.REDSTONE, Material.DIAMOND);
     }
 
     /** Решётки, которые годятся в крафт: все стадии окисления и все вощёные. */

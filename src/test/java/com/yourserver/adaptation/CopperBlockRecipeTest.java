@@ -1,7 +1,6 @@
 package com.yourserver.adaptation;
 
 import org.bukkit.Material;
-import org.bukkit.inventory.RecipeChoice;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -14,33 +13,28 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Крафт медного нотного блока.
  *
- * <p>Тест читает тот самый список, который {@code registerRecipe()} отдаёт
- * {@code ShapelessRecipe.addIngredient}: если крафт поменяют в одном месте и
- * забудут про другое, здесь это видно. Сервер для этого не нужен — ингредиенты
- * строятся без него, а результат рецепта (предмет с NBT) собирается уже на
- * сервере.
+ * <p>Тест читает те же два списка, из которых {@code registerRecipe()} собирает
+ * рецепт: три отдельных предмета и одна медная решётка на выбор. Сами
+ * {@code RecipeChoice.MaterialChoice} здесь не строятся — их конструктор
+ * спрашивает у каждого материала {@code isAir()}, а это идёт в реестр
+ * {@code Registry.BLOCK}, которого без запущенного сервера нет (так и падала
+ * первая версия теста). Перечисление {@link Material} при этом инициализируется
+ * спокойно.
  *
  * <p>В 10.20 кусочек меди в крафте заменили на алмаз.
  */
 class CopperBlockRecipeTest {
 
-    private static List<Material> flatten() {
-        List<Material> materials = new ArrayList<>();
-        for (RecipeChoice choice : CopperBlockListener.recipeIngredients()) {
-            materials.addAll(materials(choice));
-        }
+    /** Всё, что можно положить в крафт: три отдельных предмета и решётки. */
+    private static List<Material> everything() {
+        List<Material> materials = new ArrayList<>(CopperBlockListener.recipeSingles());
+        materials.addAll(CopperBlockListener.copperGrates());
         return materials;
-    }
-
-    private static List<Material> materials(RecipeChoice choice) {
-        assertInstanceOf(RecipeChoice.MaterialChoice.class, choice,
-                "ингредиент крафта — список материалов");
-        return ((RecipeChoice.MaterialChoice) choice).getChoices();
     }
 
     @Test
     void recipeTakesADiamondAndNoLongerTakesACopperNugget() {
-        List<Material> materials = flatten();
+        List<Material> materials = everything();
         assertTrue(materials.contains(Material.DIAMOND),
                 "в крафте должен быть алмаз");
         assertFalse(materials.contains(Material.COPPER_NUGGET),
@@ -53,24 +47,20 @@ class CopperBlockRecipeTest {
 
     @Test
     void recipeIsShapelessOverFourIngredients() {
-        // Четыре слота: нотный блок, редстоун, алмаз и одна решётка на выбор.
-        // Пятый слот означал бы, что крафт просит больше предметов, чем заявлено.
-        assertEquals(4, CopperBlockListener.recipeIngredients().size(),
-                "бесформенный крафт на четыре ингредиента");
-        for (RecipeChoice choice : CopperBlockListener.recipeIngredients()) {
-            assertFalse(materials(choice).isEmpty(),
-                    "пустой список материалов ломает регистрацию рецепта");
-        }
-        Set<Material> unique = new HashSet<>(flatten());
-        assertEquals(flatten().size(), unique.size(),
+        // Четыре слота: три отдельных предмета и одна решётка на выбор. Пятый
+        // слот означал бы, что крафт просит больше предметов, чем заявлено.
+        assertEquals(3, CopperBlockListener.recipeSingles().size(),
+                "отдельных предмета три");
+        assertEquals(8, CopperBlockListener.copperGrates().size(),
+                "решёток на выбор восемь");
+        assertFalse(everything().contains(Material.AIR),
+                "воздух ингредиентом быть не может");
+        assertEquals(everything().size(), new HashSet<>(everything()).size(),
                 "один и тот же предмет не должен требоваться дважды");
     }
 
     @Test
     void anyCopperGrateFitsTheRecipe() {
-        RecipeChoice grates = CopperBlockListener.recipeIngredients().get(3);
-        assertEquals(CopperBlockListener.copperGrates(), materials(grates),
-                "четвёртый слот — любая медная решётка");
         assertEquals(Set.of(
                         Material.COPPER_GRATE,
                         Material.EXPOSED_COPPER_GRATE,
@@ -80,9 +70,14 @@ class CopperBlockRecipeTest {
                         Material.WAXED_EXPOSED_COPPER_GRATE,
                         Material.WAXED_WEATHERED_COPPER_GRATE,
                         Material.WAXED_OXIDIZED_COPPER_GRATE),
-                new HashSet<>(materials(grates)),
+                new HashSet<>(CopperBlockListener.copperGrates()),
                 "годятся все стадии окисления решётки, в том числе вощёные");
-        assertTrue(materials(grates).stream().allMatch(m -> m.name().endsWith("COPPER_GRATE")),
+        assertTrue(CopperBlockListener.copperGrates().stream()
+                        .allMatch(material -> material.name().endsWith("COPPER_GRATE")),
                 "в четвёртом слоте только медные решётки");
+        assertEquals(Set.of(), CopperBlockListener.copperGrates().stream()
+                        .filter(material -> CopperBlockListener.recipeSingles().contains(material))
+                        .collect(java.util.stream.Collectors.toSet()),
+                "решётки не повторяют отдельные предметы крафта");
     }
 }
