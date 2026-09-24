@@ -64,11 +64,21 @@ final class WinterItems {
 
     private static String description(Kind kind) {
         return switch (kind) {
-            case TOOL -> "Особый предмет рыбалки в зимних биомах.";
+            case TOOL -> "ПКМ по стене в падении — зацеп, двойной присед — прыжок от стены.";
             case RAW, DEPLETED -> "Рыба с неведомых земель.";
             case ROE -> "Добывается из Изморози (shift + ПКМ)";
             case SANDWICH -> "Сытный, как золотая морковка";
         };
+    }
+
+    /** Прежнее описание изморози: его тоже заменяем на актуальное, чтобы вещи обновились. */
+    private static String legacyDescription(Kind kind) {
+        return kind == Kind.TOOL ? "Особый предмет рыбалки в зимних биомах." : null;
+    }
+
+    private static boolean defaultLore(Kind kind, String plain) {
+        return plain.equals(description(kind)) || plain.equals(legacyDescription(kind))
+                || (kind == Kind.ROE && plain.equals("Добывается из Изморози"));
     }
 
     RecipeChoice.ExactChoice recipeInput(Kind kind) {
@@ -102,9 +112,8 @@ final class WinterItems {
             if (meta.hasEnchantmentGlintOverride() && meta.getEnchantmentGlintOverride()) meta.setEnchantmentGlintOverride(false);
         }
         var lore = meta.lore();
-        if (lore == null || lore.isEmpty() || (lore.size() == 1 && (
-                PlainTextComponentSerializer.plainText().serialize(lore.getFirst()).equals(description(kind))
-                || (kind == Kind.ROE && PlainTextComponentSerializer.plainText().serialize(lore.getFirst()).equals("Добывается из Изморози"))))) {
+        if (lore == null || lore.isEmpty()
+                || (lore.size() == 1 && defaultLore(kind, PlainTextComponentSerializer.plainText().serialize(lore.getFirst())))) {
             meta.lore(List.of(ProfileItems.text(description(kind), NamedTextColor.GRAY)));
         }
         boolean changed = !Objects.equals(before, meta);
@@ -128,7 +137,8 @@ final class WinterItems {
 
     boolean holdsTool(Player player) { return kind(player.getInventory().getItemInMainHand()) == Kind.TOOL; }
 
-    /** Ровно 4 прочности за усиленный прыжок, без случайного уменьшения от «Прочности». */
+    /** Ровно 4 прочности за прыжок от стены — единственный расход прочности изморози,
+     *  без случайного уменьшения от «Прочности». */
     boolean useClimb(Player player) {
         ItemStack held = player.getInventory().getItemInMainHand();
         if (kind(held) != Kind.TOOL) return false;

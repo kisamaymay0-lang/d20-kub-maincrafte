@@ -27,7 +27,7 @@ class WinterRulesTest {
     }
 
     @Test
-    void fourClimbingJumpsUseAllSixteenDurability() {
+    void fourWallJumpsUseAllSixteenDurability() {
         int damage = 0;
         for (int jump = 1; jump <= 4; jump++) {
             damage = WinterRules.afterClimb(damage);
@@ -39,49 +39,70 @@ class WinterRulesTest {
     }
 
     @Test
-    void initialGripRequiresThePressEdgeAndAirbornePlayer() {
-        assertTrue(WinterRules.canGrab(true, true, true, false, false));
-        assertFalse(WinterRules.canGrab(false, true, true, false, false));
-        assertFalse(WinterRules.canGrab(true, false, true, false, false));
-        assertFalse(WinterRules.canGrab(true, true, false, false, false));
-        assertFalse(WinterRules.canGrab(true, true, true, true, false));
-        assertFalse(WinterRules.canGrab(true, true, true, false, true));
+    void gripNeedsToolAirborneFallingPlayerWithClearance() {
+        assertTrue(WinterRules.canGrab(true, true, true, true, false, false, false));
+        assertFalse(WinterRules.canGrab(false, true, true, true, false, false, false)); // инструмент не в руке
+        assertFalse(WinterRules.canGrab(true, false, true, true, false, false, false)); // уже на земле
+        assertFalse(WinterRules.canGrab(true, true, false, true, false, false, false)); // не падаем
+        assertFalse(WinterRules.canGrab(true, true, true, false, false, false, false)); // под ногами блок
+        assertFalse(WinterRules.canGrab(true, true, true, true, true, false, false));   // идёт откат
+        assertFalse(WinterRules.canGrab(true, true, true, true, false, true, false));   // уже в зацепе
+        assertFalse(WinterRules.canGrab(true, true, true, true, false, false, true));   // заморожен рыбой
     }
 
     @Test
-    void heldSneakOnlyGrabsWhileFallingWithTheTool() {
-        assertTrue(WinterRules.canAutoGrab(true, true, true, false, false, true));
-        assertFalse(WinterRules.canAutoGrab(false, true, true, false, false, true));
-        assertFalse(WinterRules.canAutoGrab(true, false, true, false, false, true));
-        assertFalse(WinterRules.canAutoGrab(true, true, false, false, false, true));
-        assertFalse(WinterRules.canAutoGrab(true, true, true, true, false, true));
-        assertFalse(WinterRules.canAutoGrab(true, true, true, false, true, true));
-        assertFalse(WinterRules.canAutoGrab(true, true, true, false, false, false));
+    void wallJumpNeedsSecondCrouchInsideTheWindow() {
+        assertTrue(WinterRules.doubleTap(0, 14, WinterRules.WALL_JUMP_WINDOW_TICKS));
+        assertTrue(WinterRules.doubleTap(10, 20, WinterRules.WALL_JUMP_WINDOW_TICKS));
+        assertFalse(WinterRules.doubleTap(0, 15, WinterRules.WALL_JUMP_WINDOW_TICKS));
+        assertFalse(WinterRules.doubleTap(0, 100, WinterRules.WALL_JUMP_WINDOW_TICKS));
+        assertFalse(WinterRules.doubleTap(-1, 0, WinterRules.WALL_JUMP_WINDOW_TICKS)); // присед ещё не отпускали
     }
 
     @Test
-    void holdingJumpDoesNotRepeatedlySpendDurability() {
-        assertTrue(WinterRules.jumpPressed(false, true));
-        assertFalse(WinterRules.jumpPressed(true, true));
-        assertFalse(WinterRules.jumpPressed(true, false));
-        assertFalse(WinterRules.jumpPressed(false, false));
+    void harderBlocksBleedFallingSpeedFaster() {
+        assertEquals(0.90, WinterRules.hardFriction(0), 1e-9);
+        assertEquals(0.855, WinterRules.hardFriction(1.5), 1e-9);   // камень
+        assertEquals(0.55, WinterRules.hardFriction(50), 1e-9);     // обсидиан — предел
+        assertEquals(0.55, WinterRules.hardFriction(1000), 1e-9);
     }
 
     @Test
-    void automaticGripWaitsForDescentAfterTheJumpImpulse() {
-        assertFalse(WinterRules.descending(10, 10.1, 5));
-        assertFalse(WinterRules.descending(10, 10, 5));
-        assertFalse(WinterRules.descending(10, 9.9, 1));
-        assertTrue(WinterRules.descending(10, 9.9, 5));
+    void softBlocksSlideAtConstantSpeedWithoutLocks() {
+        assertEquals(0.5, WinterRules.softSlideSpeed(0), 1e-9);
+        assertEquals(0.435, WinterRules.softSlideSpeed(0.5), 1e-9); // земля, песок
+        assertEquals(0.3, WinterRules.softSlideSpeed(10), 1e-9);    // предел
+        assertTrue(WinterRules.softSlideSpeed(1) < WinterRules.softSlideSpeed(0));
     }
 
     @Test
-    void foodAndColdTimersAreIndependentAndHaveTheRequestedDurations() {
-        assertEquals(8 * 20, WinterRules.FISH_LOCK_TICKS);
-        assertEquals(4 * 20, WinterRules.SANDWICH_LOCK_TICKS);
-        assertEquals(10 * 20, WinterRules.COLD_TICKS);
-        assertTrue(WinterRules.CLIMB_VELOCITY > 0.42);
+    void theToolLocksInPlaceOnlyAfterTheFallIsNearlyStopped() {
+        assertTrue(WinterRules.locksInPlace(0));
+        assertTrue(WinterRules.locksInPlace(-0.079));
+        assertFalse(WinterRules.locksInPlace(-0.08));
+        assertFalse(WinterRules.locksInPlace(-0.5));
+        assertFalse(WinterRules.locksInPlace(0.2));
     }
+
+    @Test
+    void softSlideHalvesFallDamageAndCapsItAtThreeHearts() {
+        assertEquals(6.0, WinterRules.softFallDamage(30, 0.5, 6), 1e-9); // предел — 3 сердца
+        assertEquals(5.0, WinterRules.softFallDamage(10, 0.5, 6), 1e-9);
+        assertEquals(2.0, WinterRules.softFallDamage(3, 0.5, 6), 1e-9);  // округление как в моде
+        assertEquals(0.0, WinterRules.softFallDamage(0, 0.5, 6), 1e-9);
+        assertEquals(10.0, WinterRules.softFallDamage(10, 0.5, 0), 1e-9); // предел выключен
+        assertEquals(10.0, WinterRules.softFallDamage(10, 1.0, 6), 1e-9); // множитель 1.0
+    }
+
+    @Test
+    void configSecondsBecomeTicksAndAreClamped() {
+        assertEquals(14, WinterRules.ticks(0.7, 1, 100));
+        assertEquals(200, WinterRules.ticks(10, 0, 3600));
+        assertEquals(0, WinterRules.ticks(-5, 0, 600));
+        assertEquals(600, WinterRules.ticks(99999, 0, 600));
+        assertEquals(1, WinterRules.ticks(0, 1, 100));
+    }
+
     @Test
     void gripCorrectionPreservesTheLatestCameraAngles() {
         org.bukkit.Location anchor = new org.bukkit.Location(null, 10, 20, 30, 0, 0);

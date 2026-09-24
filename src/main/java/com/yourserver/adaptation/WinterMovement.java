@@ -1,24 +1,28 @@
 package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
+import org.bukkit.FluidCollisionMode;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
-import org.bukkit.event.player.PlayerInputEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
@@ -26,31 +30,73 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
-/** Зацеп и временная неподвижность. Обрабатываются только игроки с активным состоянием. */
+/**
+ * Зацеп по механике мода Gouge (https://modrinth.com/mod/gouge) и временная неподвижность.
+ *
+ * <p>ПКМ изморозью по стене в падении: инструмент врезается в грань и трение гасит падение.
+ * Твёрдый блок (тот, что требует верный инструмент для дропа) умножает скорость падения на
+ * {@code 0.90 - hardness * 0.03} каждый тик; когда скорость становится меньше 0.08, игрок
+ * замирает и висит, пока не истечёт время захвата — у изморози это 10 секунд, как у алмазной
+ * кирки в моде. Мягкий блок (земля, песок, дерево) не держит: игрок скользит вниз с постоянной
+ * скоростью, зато падение после такого скольжения слабее вдвое и не больше 3 сердец.
+ *
+ * <p>Двойной присед в окне 0.7 с — прыжок от стены: скорость {@code normal * 1.4 + 1.1 вверх}.
+ *
+ * <p>Отличия от мода: прочность изморози тратится ТОЛЬКО на прыжок (4 из 16) — ни удар о стену,
+ * ни вис, ни скольжение её не отнимают; чар Grip и Momentum здесь нет, поэтому время захвата
+ * и кулдаун проскальзывания заданы числами (и настраиваются в config.yml).
+ *
+ * <p>Высоту игрока при скольжении и вис ведёт плагин, а не клиент: у клиента своя гравитация,
+ * и измеренная по позиции скорость падения никогда не дошла бы до нуля. Поэтому трение и
+ * скорость скольжения считаются здесь, а PlayerMoveEvent дотягивает игрока до нужной высоты.
+ *
+ * <p>Обрабатываются только игроки с активным состоянием: без зацепа и заморозки задача ничего
+ * не делает.
+ */
 final class WinterMovement implements Listener {
-    private enum Grip { NONE, HANG, JUMP }
+    /** Зацеп: SLIDE — скольжение по твёрдому блоку, HANG — замок (трение погасило падение),
+     *  SOFT — скольжение по мягкому блоку без замка. */
+    private enum Grip { NONE, SLIDE, HANG, SOFT }
+
+    /** Настройки механики из config.yml; по умолчанию — значения gouge.toml. */
+    private record Tuning(double reach, double clearance, double drift, int hangTicks, int slipTicks,
+                          int jumpWindowTicks, int jumpCooldownTicks, double jumpForward, double jumpUp,
+                          double softFallDamage, double softFallDamageCap,
+                          Set<Material> alwaysHard, Set<Material> alwaysSoft) { }
+
     private static final class State {
         Grip grip = Grip.NONE;
         Block wall;
-        boolean jumpDown;
-        long launched;
-        Location correction;
+        BlockFace face;
+        Location driftAnchor;
         Location hangAnchor;
-        Location freezeAnchor;
-        boolean correcting;
-        long correctionTick;
+        long hangUntil;
+        long slipUntil;
+        long sneakRelease = -1;
+        long softFallUntil;
         double previousY;
+        boolean sliding;
+        double slideSpeed;
+        double targetY;
+        Location correction;
+        long correctionTick;
+        boolean correcting;
+        Location freezeAnchor;
         long frozenUntil;
         long coldUntil;
         boolean controlled;
@@ -60,7 +106,9 @@ final class WinterMovement implements Listener {
         int previousColdTicks;
         BlockDisplay iceLower, iceUpper;
     }
+
     private final WinterItems items;
+    private final Tuning tuning;
     private final BlockData ice;
     private final ItemStack rimeParticle;
     private final Map<UUID, State> states = new HashMap<>();
@@ -72,6 +120,7 @@ final class WinterMovement implements Listener {
 
     WinterMovement(JavaPlugin plugin, WinterItems items) {
         this.items = items;
+        tuning = tuning(plugin);
         ice = Bukkit.createBlockData(Material.ICE);
         rimeParticle = items.create(WinterItems.Kind.TOOL);
         walk = new NamespacedKey(plugin, "winter_saved_walk");
@@ -81,6 +130,33 @@ final class WinterMovement implements Listener {
         coldTicks = new NamespacedKey(plugin, "winter_saved_cold_ticks");
         for (Player player : Bukkit.getOnlinePlayers()) recover(player);
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
+    }
+
+    private static Tuning tuning(JavaPlugin plugin) {
+        var config = plugin.getConfig();
+        return new Tuning(
+                Math.clamp(config.getDouble("gouge.reach", WinterRules.GRAB_REACH), 0.5, 32.0),
+                Math.clamp(config.getDouble("gouge.min-fall-clearance", WinterRules.MIN_FALL_CLEARANCE), 0.0, 32.0),
+                Math.clamp(config.getDouble("gouge.max-drift", WinterRules.MAX_DRIFT), 0.0, 16.0),
+                WinterRules.ticks(config.getDouble("gouge.hang-seconds", WinterRules.HANG_TICKS / 20.0), 0, 3600),
+                WinterRules.ticks(config.getDouble("gouge.slip-cooldown-seconds", WinterRules.SLIP_COOLDOWN_TICKS / 20.0), 0, 600),
+                WinterRules.ticks(config.getDouble("gouge.wall-jump.window-seconds", WinterRules.WALL_JUMP_WINDOW_TICKS / 20.0), 1, 100),
+                WinterRules.ticks(config.getDouble("gouge.wall-jump.cooldown-seconds", WinterRules.WALL_JUMP_COOLDOWN_TICKS / 20.0), 0, 600),
+                Math.clamp(config.getDouble("gouge.wall-jump.forward-boost", WinterRules.WALL_JUMP_FORWARD_BOOST), 0.0, 5.0),
+                Math.clamp(config.getDouble("gouge.wall-jump.upward-boost", WinterRules.WALL_JUMP_UPWARD_BOOST), 0.0, 5.0),
+                Math.clamp(config.getDouble("gouge.soft-fall-damage", WinterRules.SOFT_FALL_DAMAGE), 0.0, 1.0),
+                Math.clamp(config.getDouble("gouge.soft-fall-damage-cap", WinterRules.SOFT_FALL_DAMAGE_CAP), 0.0, 40.0),
+                materials(plugin, "gouge.always-hard"),
+                materials(plugin, "gouge.always-soft"));
+    }
+
+    private static Set<Material> materials(JavaPlugin plugin, String path) {
+        Set<Material> result = new HashSet<>();
+        for (String name : plugin.getConfig().getStringList(path)) {
+            Material material = Material.matchMaterial(name);
+            if (material != null) result.add(material);
+        }
+        return result;
     }
 
     void freeze(Player player, boolean sandwich) {
@@ -96,6 +172,7 @@ final class WinterMovement implements Listener {
         state.frozenUntil = Math.max(state.frozenUntil, tick + (sandwich ? WinterRules.SANDWICH_LOCK_TICKS : WinterRules.FISH_LOCK_TICKS));
         state.coldUntil = Math.max(state.coldUntil, tick + WinterRules.COLD_TICKS);
         state.grip = Grip.NONE;
+        state.wall = null; state.face = null; state.hangAnchor = null; state.hangUntil = 0;
         control(player, state);
         player.lockFreezeTicks(true);
         player.setFreezeTicks(player.getMaxFreezeTicks()); // Ванильный FREEZE урон и иммунитеты остаются у Minecraft.
@@ -114,7 +191,8 @@ final class WinterMovement implements Listener {
         player.setWalkSpeed(0); player.setFlySpeed(0);
         // Заморозка запрещает движение и поворот, но не отключает гравитацию:
         // съевший рыбу в воздухе падает, а не зависает на месте.
-        player.setGravity(state.frozenUntil > tick || state.grip == Grip.JUMP ? state.gravity : false);
+        // В зацепе вертикаль считает плагин — трение и скольжение гасят падение здесь.
+        player.setGravity(state.frozenUntil > tick ? state.gravity : false);
     }
 
     private void restoreControl(Player player, State state) {
@@ -132,10 +210,15 @@ final class WinterMovement implements Listener {
         state.coldUntil = 0;
     }
 
+    /** Отпустить зацеп: управление возвращается, а мягкое скольжение ещё несколько тиков
+     *  смягчает падение — приземление происходит уже после отпускания. */
     void release(Player player) {
         State state = states.get(player.getUniqueId());
-        if (state == null) return;
-        state.grip = Grip.NONE; state.wall = null;
+        if (state == null || state.grip == Grip.NONE) return;
+        if (state.grip == Grip.SOFT) state.softFallUntil = tick + WinterRules.SOFT_FALL_GRACE_TICKS;
+        state.grip = Grip.NONE; state.wall = null; state.face = null;
+        state.driftAnchor = null; state.hangAnchor = null; state.hangUntil = 0;
+        state.sliding = false; state.slideSpeed = 0;
         if (state.frozenUntil <= tick) restoreControl(player, state);
     }
 
@@ -145,86 +228,118 @@ final class WinterMovement implements Listener {
         State state = states.get(player.getUniqueId());
         if (state == null) return;
         state.frozenUntil = 0;
-        state.grip = Grip.NONE;
-        state.wall = null;
+        state.grip = Grip.NONE; state.wall = null; state.face = null;
+        state.driftAnchor = null; state.hangAnchor = null; state.hangUntil = 0;
         clearIce(state);
         restoreControl(player, state);
     }
 
-    private Block wall(Player player) {
-        double reach = player.getWidth() / 2 + 0.18;
-        Location feet = player.getLocation();
-        double[] heights = {Math.min(1, player.getHeight() * 0.55), player.getEyeHeight()};
-        for (double height : heights) {
-            Location origin = feet.clone().add(0, height, 0);
-            for (int x = -1; x <= 1; x++) for (int z = -1; z <= 1; z++) {
-                if (x == 0 && z == 0) continue;
-                var hit = player.getWorld().rayTraceBlocks(origin, new Vector(x, 0, z).normalize(), reach,
-                        org.bukkit.FluidCollisionMode.NEVER, true);
-                if (hit != null && hit.getHitBlock() != null) return hit.getHitBlock();
-            }
-        }
-        return null;
+    /** Луч взгляда до грани блока, а если он мимо — запасной горизонтальный луч.
+     *  Ровно так же ищет цель raycast в Gouge: смотреть можно и вверх по стене. */
+    private RayTraceResult sight(Player player) {
+        Location eye = player.getEyeLocation();
+        Vector look = eye.getDirection();
+        RayTraceResult hit = player.getWorld().rayTraceBlocks(eye, look, tuning.reach(), FluidCollisionMode.NEVER, true);
+        if (hit != null && hit.getHitBlock() != null) return hit;
+        Vector flat = look.clone().setY(0);
+        if (flat.lengthSquared() < 1e-6) return null;
+        hit = player.getWorld().rayTraceBlocks(eye, flat.normalize(), tuning.reach(), FluidCollisionMode.NEVER, true);
+        return hit != null && hit.getHitBlock() != null ? hit : null;
     }
 
-    private void latch(Player player, State state, Block wall) {
-        state.grip = Grip.HANG; state.wall = wall;
-        state.hangAnchor = player.getLocation().clone();
-        state.jumpDown = player.getCurrentInput().isJump();
+    /** Под ногами должен быть открытый воздух: обычный прыжок зацепа не даёт. */
+    private boolean clearance(Player player) {
+        if (tuning.clearance() <= 0) return true;
+        RayTraceResult hit = player.getWorld().rayTraceBlocks(player.getLocation(), new Vector(0, -1, 0),
+                tuning.clearance(), FluidCollisionMode.NEVER, true);
+        return hit == null || hit.getHitBlock() == null;
+    }
+
+    /** Ванильная прочность блока (destroy speed); у неразрушимых она отрицательная. */
+    private static double hardness(Block block) {
+        Material type = block.getType();
+        return type.isBlock() ? type.getHardness() : -1;
+    }
+
+    /** Твёрдый блок — тот, что требует верный инструмент для дропа, как в Gouge.
+     *  Списки в config.yml переопределяют это правило для любых блоков. */
+    private boolean hard(Block block) {
+        Material type = block.getType();
+        if (tuning.alwaysHard().contains(type)) return true;
+        if (tuning.alwaysSoft().contains(type)) return false;
+        return block.getBlockData().requiresCorrectToolForDrops();
+    }
+
+    /** ПКМ изморозью по стене в падении: инструмент врезается в грань. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void interact(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) return;
+        Action action = event.getAction();
+        if (action != Action.RIGHT_CLICK_BLOCK && action != Action.RIGHT_CLICK_AIR) return;
+        Player player = event.getPlayer();
+        State state = states.get(player.getUniqueId());
+        boolean airborne = !player.isOnGround() && !player.isFlying() && player.getGameMode() != GameMode.SPECTATOR;
+        if (!WinterRules.canGrab(items.holdsTool(player), airborne, player.getVelocity().getY() < 0, clearance(player),
+                state != null && state.slipUntil > tick, state != null && state.grip != Grip.NONE,
+                state != null && state.frozenUntil > tick)) return;
+        RayTraceResult hit = sight(player);
+        Block wall = hit == null ? null : hit.getHitBlock();
+        if (wall == null || wall.getType().isAir() || hardness(wall) < 0) return;
+        attach(player, states.computeIfAbsent(player.getUniqueId(), ignored -> new State()), wall, hit.getHitBlockFace());
+        event.setCancelled(true);
+    }
+
+    /** Зацепились: включаем удержание и запоминаем точку захвата для ограничения сноса. */
+    private void attach(Player player, State state, Block wall, BlockFace face) {
+        state.grip = Grip.SLIDE; // твёрдость блока и скорость падения уточнит первый же тик физики
+        state.wall = wall; state.face = face;
+        state.driftAnchor = player.getLocation().clone();
+        state.hangAnchor = null; state.hangUntil = 0;
+        state.sliding = false; state.slideSpeed = 0;
+        state.previousY = player.getLocation().getY();
         control(player, state);
-        player.setFallDistance(0); player.setVelocity(new Vector());
+        impact(player, wall);
     }
 
-    /** Падение с уже зажатым Shift: зацеп срабатывает сам, как только рядом появилась стена. */
-    private void autoGrab() {
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            if (player.isDead() || player.isFlying() || !player.isSneaking() || player.isOnGround()) continue;
-            State existing = states.get(player.getUniqueId());
-            if (!WinterRules.canAutoGrab(player.isSneaking(), !player.isOnGround() && !player.isFlying(),
-                    items.holdsTool(player), existing != null && existing.frozenUntil > tick,
-                    existing != null && existing.grip != Grip.NONE, player.getVelocity().getY() <= 0)) continue;
-            Block wall = wall(player);
-            if (wall == null) continue;
-            State state = states.computeIfAbsent(player.getUniqueId(), ignored -> new State());
-            if (state.grip == Grip.NONE && state.frozenUntil <= tick) latch(player, state, wall);
-        }
+    /** Звук и частицы удара о грань: звук блока плюс осколки самой изморози. */
+    private void impact(Player player, Block wall) {
+        Location at = nearestFace(wall, player.getEyeLocation());
+        player.getWorld().playSound(at, wall.getBlockData().getSoundGroup().getBreakSound(), 1.2f, 0.6f);
+        player.getWorld().spawnParticle(Particle.BLOCK, at, 18, 0.25, 0.25, 0.25, 0.0, wall.getBlockData());
+        player.getWorld().spawnParticle(Particle.ITEM, at, 12, 0.25, 0.25, 0.25, 0.05, rimeParticle);
     }
 
+    /** Второй присед в окне — прыжок от стены. Первое нажатие только отпускает присед и запоминает тик. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void sneak(PlayerToggleSneakEvent event) {
         Player player = event.getPlayer();
-        if (!event.isSneaking()) { release(player); return; }
-        State current = states.get(player.getUniqueId());
-        // Только НОВОЕ нажатие Shift в воздухе. Удержанный заранее Shift не даёт автозацеп.
-        if (player.isFlying() || player.isDead() || !WinterRules.canGrab(true, !player.isOnGround(), items.holdsTool(player),
-                current != null && current.frozenUntil > tick, current != null && current.grip != Grip.NONE)) return;
-        Block wall = wall(player);
-        if (wall != null) latch(player, states.computeIfAbsent(player.getUniqueId(), ignored -> new State()), wall);
-    }
-
-    @EventHandler
-    public void input(PlayerInputEvent event) {
-        Player player = event.getPlayer();
         State state = states.get(player.getUniqueId());
         if (state == null) return;
-        boolean jump = event.getInput().isJump();
-        boolean pressed = WinterRules.jumpPressed(state.jumpDown, jump);
-        state.jumpDown = jump;
-        if (!event.getInput().isSneak()) { release(player); return; }
-        if (!pressed || state.grip != Grip.HANG || state.frozenUntil > tick || !items.holdsTool(player)) return;
-        state.grip = Grip.JUMP; state.launched = tick; state.previousY = player.getLocation().getY();
-        control(player, state);
+        if (!event.isSneaking()) { state.sneakRelease = tick; return; }
+        if (state.grip == Grip.NONE || state.frozenUntil > tick) return;
+        if (!WinterRules.doubleTap(state.sneakRelease, tick, tuning.jumpWindowTicks())) return;
+        state.sneakRelease = -1;
+        wallJump(player, state);
+    }
+
+    /** Прыжок от стены: скорость normal*1.4 + 1.1 вверх (mod wallKick) и 4 прочности изморози. */
+    private void wallJump(Player player, State state) {
+        Block wall = state.wall;
+        BlockFace face = state.face;
+        Vector normal = face == null ? new Vector(0, 1, 0) : face.getDirection();
+        if (wall != null) iceBreakEffects(player, wall);
+        release(player);
+        state.slipUntil = Math.max(state.slipUntil, tick + tuning.jumpCooldownTicks());
         player.setFallDistance(0);
-        player.setVelocity(new Vector(0, WinterRules.CLIMB_VELOCITY, 0));
-        iceBreakEffects(player, state); // Осколки и звук ломающегося льда — только для красоты.
-        if (!items.useClimb(player)) release(player); // Последний прыжок остаётся, но сломанной киркой больше не зацепиться.
+        player.setVelocity(normal.multiply(tuning.jumpForward()).setY(tuning.jumpUp()));
+        // Прочность изморози тратится только на прыжок: 4 из 16, последний прыжок ломает инструмент.
+        items.useClimb(player);
     }
 
     /** Осколки текстуры самой изморози и звук в точке удара о стену. */
-    private void iceBreakEffects(Player player, State state) {
+    private void iceBreakEffects(Player player, Block wall) {
         Location at = player.getLocation().add(0, 1.1, 0);
-        Block wallBlock = state.wall;
-        if (wallBlock != null && !wallBlock.getType().isAir()) at = nearestFace(wallBlock, player.getEyeLocation());
+        if (!wall.getType().isAir()) at = nearestFace(wall, player.getEyeLocation());
         player.getWorld().playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.7f, 0.9f);
         // Частицы предмета изморози из руки, а не снега/льда.
         player.getWorld().spawnParticle(Particle.ITEM, at, 22, 0.35, 0.35, 0.35, 0.04, rimeParticle);
@@ -240,6 +355,101 @@ final class WinterMovement implements Listener {
         else if (ay >= az) face.setY(center.getY() - (dy < 0 ? -0.5 : 0.5));
         else face.setZ(center.getZ() - (dz < 0 ? -0.5 : 0.5));
         return face;
+    }
+
+    /** Один тик зацепа: держим грань в поле взгляда, считаем трение и скольжение. */
+    private void grip(Player player, State state) {
+        if (player.isDead() || player.isFlying() || player.getGameMode() == GameMode.SPECTATOR
+                || player.isOnGround() || !items.holdsTool(player)) { release(player); return; }
+        RayTraceResult hit = sight(player);
+        Block wall = hit == null ? null : hit.getHitBlock();
+        if (wall == null || wall.getType().isAir()) { release(player); return; } // грань ушла из-под взгляда
+        double hardness = hardness(wall);
+        if (hardness < 0) { release(player); return; } // неразрушимый блок не держит инструмент
+        state.wall = wall; state.face = hit.getHitBlockFace();
+        Location now = player.getLocation();
+        double verticalSpeed = now.getY() - state.previousY;
+        state.previousY = now.getY();
+        if (state.driftAnchor == null || !state.driftAnchor.getWorld().equals(now.getWorld())) state.driftAnchor = now.clone();
+        else {
+            double dx = now.getX() - state.driftAnchor.getX(), dz = now.getZ() - state.driftAnchor.getZ();
+            if (dx * dx + dz * dz > tuning.drift() * tuning.drift()) { release(player); return; } // снос в сторону
+        }
+        if (state.grip == Grip.HANG) { hangTick(player, state); return; }
+        if (hard(wall)) hardTick(player, state, hardness, verticalSpeed);
+        else softTick(player, state, hardness, verticalSpeed);
+    }
+
+    /** Вис: держим позицию (замок в PlayerMoveEvent), пока не истечёт время захвата. */
+    private void hangTick(Player player, State state) {
+        if (state.hangUntil <= tick) { slip(player, state); return; }
+        player.setFallDistance(0);
+        player.setGravity(false);
+        if (state.hangAnchor == null) state.hangAnchor = player.getLocation().clone();
+        if (tick % 20 == 10) player.getWorld().playSound(player.getLocation(), Sound.BLOCK_CHAIN_STEP, 0.4f, 0.8f);
+        if (player.getVelocity().lengthSquared() > 1e-8) player.setVelocity(new Vector());
+    }
+
+    /** Твёрдый блок: трение гасит падение, при полной остановке — замок до конца времени захвата. */
+    private void hardTick(Player player, State state, double hardness, double verticalSpeed) {
+        player.setFallDistance(0); // держит инструмент: падение не копится
+        // Первый тик берёт фактическую скорость падения, дальше скорость считает плагин:
+        // у клиента своя гравитация, и измеренная скорость никогда не дошла бы до нуля.
+        double raw = state.sliding ? state.slideSpeed : Math.min(verticalSpeed, 0);
+        if (WinterRules.locksInPlace(raw)) { lock(player, state); return; }
+        state.sliding = true;
+        state.slideSpeed = raw * WinterRules.hardFriction(hardness);
+        state.grip = Grip.SLIDE;
+        state.hangUntil = 0;
+        player.setGravity(false);
+        track(player, state);
+    }
+
+    /** Мягкий блок: замка нет, игрок скользит вниз с постоянной скоростью, но падает мягче. */
+    private void softTick(Player player, State state, double hardness, double verticalSpeed) {
+        double raw = state.sliding ? state.slideSpeed : Math.min(verticalSpeed, 0);
+        if (raw >= 0) {
+            // Мягкий блок не держит: пока падения нет, игрок падает сам, а зацеп ждёт.
+            state.grip = Grip.SOFT;
+            state.sliding = false;
+            player.setGravity(state.gravity);
+            return;
+        }
+        state.sliding = true;
+        state.slideSpeed = -WinterRules.softSlideSpeed(hardness);
+        state.grip = Grip.SOFT;
+        state.hangUntil = 0;
+        player.setGravity(false);
+        track(player, state);
+    }
+
+    /** Трение погасило падение: игрок замирает на месте и висит до конца времени захвата. */
+    private void lock(Player player, State state) {
+        state.grip = Grip.HANG;
+        state.sliding = false;
+        state.slideSpeed = 0;
+        state.hangAnchor = player.getLocation().clone();
+        state.hangUntil = tick + tuning.hangTicks();
+        player.setVelocity(new Vector());
+        player.getWorld().playSound(player.getLocation(), Sound.BLOCK_CHAIN_STEP, 0.5f, 0.9f);
+    }
+
+    /** Скольжение ведёт плагин: X/Z остаются за игроком, а высоту задаёт посчитанная скорость.
+     *  PlayerMoveEvent дотянет игрока до неё, поэтому клиентская гравитация ничего не решает. */
+    private void track(Player player, State state) {
+        state.targetY = player.getLocation().getY() + state.slideSpeed;
+        Vector velocity = player.getVelocity();
+        player.setVelocity(new Vector(velocity.getX() * WinterRules.HORIZONTAL_DAMPING, state.slideSpeed,
+                velocity.getZ() * WinterRules.HORIZONTAL_DAMPING));
+    }
+
+    /** Трение погасило падение, но время захвата истекло — изморозь соскальзывает. */
+    private void slip(Player player, State state) {
+        release(player);
+        state.slipUntil = tick + tuning.slipTicks();
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 1.0f, 1.4f);
+        player.getWorld().spawnParticle(Particle.CRIT, player.getLocation().add(0, 1, 0), 30, 0.3, 0.3, 0.3, 0.2);
+        player.sendActionBar("§bИзморозь соскользнула со стены");
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -272,6 +482,12 @@ final class WinterMovement implements Listener {
             Location corrected = WinterRules.anchoredLook(state.hangAnchor, event.getTo());
             state.correction = corrected.clone(); state.correctionTick = tick;
             event.setTo(corrected);
+        } else if (state.sliding && (state.grip == Grip.SLIDE || state.grip == Grip.SOFT) && !event.isCancelled()
+                && Math.abs(event.getTo().getY() - state.targetY) > 1e-6) {
+            // Скольжение: высоту задаёт плагин, X/Z и камера остаются за игроком.
+            Location corrected = event.getTo().clone();
+            corrected.setY(state.targetY);
+            event.setTo(corrected);
         }
     }
 
@@ -285,18 +501,7 @@ final class WinterMovement implements Listener {
                 if (!player.isFreezeTickingLocked()) player.lockFreezeTicks(true);
                 if (player.getFreezeTicks() != player.getMaxFreezeTicks()) player.setFreezeTicks(player.getMaxFreezeTicks());
             } else if (state.coldUntil != 0) restoreCold(player, state);
-            if (state.grip != Grip.NONE && (!player.isSneaking() || !items.holdsTool(player) || player.isFlying())) release(player);
-            if (state.grip == Grip.HANG) {
-                if (player.isOnGround() || state.wall == null || state.wall.getType().isAir()
-                        || (tick % 4 == 0 && wall(player) == null)) release(player);
-            } else if (state.grip == Grip.JUMP) {
-                double y = player.getLocation().getY();
-                if (WinterRules.descending(state.previousY, y, tick - state.launched)) {
-                    Block nextWall = wall(player);
-                    if (nextWall != null) latch(player, state, nextWall); else release(player);
-                } else if (player.isOnGround() || tick - state.launched > 80) release(player);
-                state.previousY = y;
-            }
+            if (state.grip != Grip.NONE) grip(player, state);
             if (state.frozenUntil > tick) {
                 // Пока заморозка действует: на земле держим позицию, в воздухе разрешаем
                 // падение (гравитация) и следуем якорем за игроком, гася только горизонталь.
@@ -313,19 +518,15 @@ final class WinterMovement implements Listener {
                     holdFrozenPosition(player, state);
                     if (player.getVelocity().lengthSquared() > 1e-8) player.setVelocity(new Vector());
                 }
-            } else if (state.grip == Grip.HANG) {
-                player.setFallDistance(0);
-                if (player.getVelocity().lengthSquared() > 1e-8) player.setVelocity(new Vector());
-            } else if (state.grip == Grip.JUMP) {
-                Vector velocity = player.getVelocity();
-                if (Math.abs(velocity.getX()) + Math.abs(velocity.getZ()) > 1e-8) player.setVelocity(new Vector(0, velocity.getY(), 0));
-            } else restoreControl(player, state);
-            if (state.frozenUntil > tick) updateIce(player, state);
-            else clearIce(state);
-            if (state.grip == Grip.NONE && state.frozenUntil <= tick && state.coldUntil == 0) states.remove(player.getUniqueId(), state);
+                updateIce(player, state);
+            } else {
+                clearIce(state);
+                if (state.grip == Grip.NONE) restoreControl(player, state);
+            }
+            if (state.grip == Grip.NONE && state.frozenUntil <= tick && state.coldUntil == 0
+                    && state.softFallUntil <= tick && state.slipUntil <= tick) states.remove(entry.getKey(), state);
         }
         slide();
-        autoGrab();
     }
 
     /** «Керлинг» изморозью: пока действует скольжение, гасим трение земли,
@@ -416,6 +617,9 @@ final class WinterMovement implements Listener {
         State state = states.remove(player.getUniqueId());
         if (state != null) {
             clearIce(state);
+            state.grip = Grip.NONE; state.wall = null; state.face = null;
+            state.driftAnchor = null; state.hangAnchor = null; state.hangUntil = 0;
+            state.sliding = false; state.slideSpeed = 0;
             restoreControl(player, state);
             if (state.coldUntil != 0) restoreCold(player, state);
         }
@@ -463,12 +667,19 @@ final class WinterMovement implements Listener {
      *  ванильного «мороза» (FREEZE), которым сама изморозь и бьёт: можно взорвать
      *  динамит вплотную или упасть в лаву — урон придёт только от заморозки.
      *  Исключение — удар изморозью по замороженному: урона нет, но лёд разбивается,
-     *  игрок отталкивается и скользит по блокам, как по льду. */
+     *  игрок отталкивается и скользит по блокам, как по льду.
+     *  Падение после мягкого скольжения слабее вдвое и не больше 3 сердец, как в Gouge. */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void damage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
         State state = states.get(player.getUniqueId());
-        if (state == null || state.frozenUntil <= tick) return;
+        if (state == null) return;
+        if (event.getCause() == DamageCause.FALL && state.softFallUntil >= tick) {
+            event.setDamage(WinterRules.softFallDamage(event.getDamage(), tuning.softFallDamage(), tuning.softFallDamageCap()));
+            state.softFallUntil = 0;
+            return;
+        }
+        if (state.frozenUntil <= tick) return;
         if (event.getCause() != DamageCause.FREEZE) {
             event.setCancelled(true);
             if (event instanceof EntityDamageByEntityEvent byEntity
