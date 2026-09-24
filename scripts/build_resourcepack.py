@@ -196,13 +196,22 @@ def main() -> None:
         # из bundled-копии), поэтому копия в resources обязана совпадать.
         BUNDLED.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ARCHIVE, BUNDLED)
-    assert BUNDLED.read_bytes() == ARCHIVE.read_bytes(), "Bundled resource pack is stale"
-    with ZipFile(ARCHIVE) as archive:
+    # Эталон для сверки — архив в корне репозитория, но он тут не хранится:
+    # игрокам уходит bundled-копия из jar. Если корневой копии нет, сверяем
+    # именно её — она обязана совпадать с resourcepack/.
+    assert BUNDLED.is_file(), "Bundled resource pack is missing: run the script without --check"
+    if ARCHIVE.is_file():
+        assert BUNDLED.read_bytes() == ARCHIVE.read_bytes(), "Bundled resource pack is stale"
+        reference = ARCHIVE
+    else:
+        reference = BUNDLED
+    with ZipFile(reference) as archive:
         assert len(archive.namelist()) == len(files), "Duplicate or unexpected ZIP entries"
         assert set(archive.namelist()) == set(files), "Stale resource pack archive"
         for name, contents in files.items():
             assert archive.read(name) == contents, f"Stale resource pack file: {name}"
-    print(f"OK: {len(files)} files, note_block multipart is non-overlapping; ZIP matches resourcepack/")
+    print(f"OK: {len(files)} files, note_block multipart is non-overlapping; "
+          f"ZIP {'matches' if reference is ARCHIVE else '(bundled copy) matches'} resourcepack/")
 
 
 if __name__ == "__main__":
