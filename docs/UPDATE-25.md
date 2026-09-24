@@ -219,8 +219,15 @@ gouge:
 
 ## Проверка
 
-Сборка и юнит-тесты — шаг `Build with Maven` в CI (`mvn clean verify`) плюс
-`Validate resource pack`. Формулы, диапазоны и порядок проверок сверены с исходниками
-мода (`GougePhysics`, `GougeConfig`, `GougeItemMixin`, `GougeFallDamageMixin`), а
-поведение ванильных проверок перемещения — с исходниками сервера 1.21.4
-(`ServerGamePacketListenerImpl`, `Entity#getGravity`).
+CI зелёный: `Validate resource pack`, `Validate shipped resource pack`, `Build with Maven`,
+`Report unit tests` — **198 тестов, 0 падений**; артефакт сборки `f8-plugin-10.23`
+(в нём банка, `docs/f8resurspack-fixed.zip` и `docs/craftengine-blocks/`).
+Тесты скольжения проверяют вход по падению с минимумом, «дрифт длинный и плавный»
+(53 тика и 36 блоков по камню, шаг торможения меньше 0.045 за тик), трение сильнее в начале
+и мягче у низа, «даже короткое падение едет десять блоков», мягкий блок против твёрдого,
+обсидиан, потолок расхода прочности, перезарядку, матрицы зацепа и самозахвата.
+
+Формулы, диапазоны и порядок проверок сверены с исходниками мода (`GougePhysics`,
+`GougeConfig`, `GougeItemMixin`, `GougeFallDamageMixin`), а поведение ванильных проверок
+перемещения и кулдауна предмета — с исходниками сервера 1.21.4
+(`ServerGamePacketListenerImpl`, `Entity#getGravity`, `ServerPlayerGameMode#useItem`).
