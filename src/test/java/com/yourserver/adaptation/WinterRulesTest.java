@@ -90,8 +90,9 @@ class WinterRulesTest {
         assertEquals(5.0, WinterRules.softFallDamage(10, 0.5, 6), 1e-9);
         assertEquals(2.0, WinterRules.softFallDamage(3, 0.5, 6), 1e-9);  // округление как в моде
         assertEquals(0.0, WinterRules.softFallDamage(0, 0.5, 6), 1e-9);
-        assertEquals(10.0, WinterRules.softFallDamage(10, 0.5, 0), 1e-9); // предел выключен
-        assertEquals(10.0, WinterRules.softFallDamage(10, 1.0, 6), 1e-9); // множитель 1.0
+        assertEquals(5.0, WinterRules.softFallDamage(10, 0.5, 0), 1e-9);  // предел выключен, множитель остался
+        assertEquals(6.0, WinterRules.softFallDamage(10, 1.0, 6), 1e-9);  // предел работает при любом множителе
+        assertEquals(10.0, WinterRules.softFallDamage(10, 1.0, 0), 1e-9); // ни множителя, ни предела
     }
 
     @Test

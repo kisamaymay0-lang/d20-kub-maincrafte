@@ -24,10 +24,11 @@ final class WinterRules {
     static final double MIN_FALL_CLEARANCE = 1.5;      // mechanics.min_fall_distance
     static final double MAX_DRIFT = 1.5;               // mechanics.max_drift
     static final int HANG_TICKS = 200;                 // pickaxes.diamond_pickaxe.hang_time = 10 с
-    static final int SLIP_COOLDOWN_TICKS = 0;          // mechanics.slip_cooldown; чар Grip и Momentum здесь нет
+    static final int SLIP_COOLDOWN_TICKS = 100;        // mechanics.slip_cooldown = 5 с (модовое значение);
+                                                       // в config.yml стоит 0 — чар Momentum, который срезал бы
+                                                       // паузу, здесь нет, и она мешала бы связывать прыжки
     static final int SOFT_FALL_GRACE_TICKS = 5;        // окно после мягкого скольжения, в котором падение мягче
     static final int WALL_JUMP_WINDOW_TICKS = 14;      // wall_jump.time_window = 0.7 с
-    static final int WALL_JUMP_COOLDOWN_TICKS = 0;     // в моде прыжок тоже запускает slip_cooldown
     static final double WALL_JUMP_FORWARD_BOOST = 1.4; // wall_jump.forward_boost
     static final double WALL_JUMP_UPWARD_BOOST = 1.1;  // wall_jump.upward_boost
     static final double SOFT_FALL_DAMAGE = 0.5;        // mechanics.soft_fall_damage

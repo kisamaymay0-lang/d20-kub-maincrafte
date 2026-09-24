@@ -75,7 +75,7 @@ final class WinterMovement implements Listener {
 
     /** Настройки механики из config.yml; по умолчанию — значения gouge.toml. */
     private record Tuning(double reach, double clearance, double drift, int hangTicks, int slipTicks,
-                          int jumpWindowTicks, int jumpCooldownTicks, double jumpForward, double jumpUp,
+                          int jumpWindowTicks, double jumpForward, double jumpUp,
                           double softFallDamage, double softFallDamageCap,
                           Set<Material> alwaysHard, Set<Material> alwaysSoft) { }
 
@@ -141,7 +141,6 @@ final class WinterMovement implements Listener {
                 WinterRules.ticks(config.getDouble("gouge.hang-seconds", WinterRules.HANG_TICKS / 20.0), 0, 3600),
                 WinterRules.ticks(config.getDouble("gouge.slip-cooldown-seconds", WinterRules.SLIP_COOLDOWN_TICKS / 20.0), 0, 600),
                 WinterRules.ticks(config.getDouble("gouge.wall-jump.window-seconds", WinterRules.WALL_JUMP_WINDOW_TICKS / 20.0), 1, 100),
-                WinterRules.ticks(config.getDouble("gouge.wall-jump.cooldown-seconds", WinterRules.WALL_JUMP_COOLDOWN_TICKS / 20.0), 0, 600),
                 Math.clamp(config.getDouble("gouge.wall-jump.forward-boost", WinterRules.WALL_JUMP_FORWARD_BOOST), 0.0, 5.0),
                 Math.clamp(config.getDouble("gouge.wall-jump.upward-boost", WinterRules.WALL_JUMP_UPWARD_BOOST), 0.0, 5.0),
                 Math.clamp(config.getDouble("gouge.soft-fall-damage", WinterRules.SOFT_FALL_DAMAGE), 0.0, 1.0),
@@ -178,6 +177,17 @@ final class WinterMovement implements Listener {
         player.setFreezeTicks(player.getMaxFreezeTicks()); // Ванильный FREEZE урон и иммунитеты остаются у Minecraft.
         player.setFallDistance(0);
         player.setVelocity(new Vector());
+    }
+
+    /** Начать зацеп: исходные скорости и гравитацию запоминаем, но ходьбу не трогаем —
+     *  в зацепе игрок может смещаться вдоль стены, а снос ограничивает max_drift. */
+    private void grabControl(Player player, State state) {
+        if (!state.controlled) {
+            state.walkSpeed = player.getWalkSpeed(); state.flySpeed = player.getFlySpeed();
+            state.gravity = player.hasGravity();
+            state.controlled = true;
+        }
+        player.setGravity(false);
     }
 
     private void control(Player player, State state) {
@@ -279,7 +289,9 @@ final class WinterMovement implements Listener {
         Player player = event.getPlayer();
         State state = states.get(player.getUniqueId());
         boolean airborne = !player.isOnGround() && !player.isFlying() && player.getGameMode() != GameMode.SPECTATOR;
-        if (!WinterRules.canGrab(items.holdsTool(player), airborne, player.getVelocity().getY() < 0, clearance(player),
+        // Падение: скорость вниз или уже накопленная высота падения (mod: deltaMovement.y < 0).
+        boolean falling = player.getVelocity().getY() < 0 || player.getFallDistance() > 0;
+        if (!WinterRules.canGrab(items.holdsTool(player), airborne, falling, clearance(player),
                 state != null && state.slipUntil > tick, state != null && state.grip != Grip.NONE,
                 state != null && state.frozenUntil > tick)) return;
         RayTraceResult hit = sight(player);
@@ -297,7 +309,7 @@ final class WinterMovement implements Listener {
         state.hangAnchor = null; state.hangUntil = 0;
         state.sliding = false; state.slideSpeed = 0;
         state.previousY = player.getLocation().getY();
-        control(player, state);
+        grabControl(player, state);
         impact(player, wall);
     }
 
@@ -329,9 +341,13 @@ final class WinterMovement implements Listener {
         Vector normal = face == null ? new Vector(0, 1, 0) : face.getDirection();
         if (wall != null) iceBreakEffects(player, wall);
         release(player);
-        state.slipUntil = Math.max(state.slipUntil, tick + tuning.jumpCooldownTicks());
+        // В моде wallKick тоже запускает slip_cooldown: чар Momentum там его срезает, здесь его нет.
+        state.slipUntil = Math.max(state.slipUntil, tick + tuning.slipTicks());
         player.setFallDistance(0);
         player.setVelocity(normal.multiply(tuning.jumpForward()).setY(tuning.jumpUp()));
+        Location at = wall == null ? player.getLocation() : nearestFace(wall, player.getEyeLocation());
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_KNOCKBACK, 1.0f, 1.2f);
+        player.getWorld().spawnParticle(Particle.CRIT, at, 15, 0.2, 0.2, 0.2, 0.25);
         // Прочность изморози тратится только на прыжок: 4 из 16, последний прыжок ломает инструмент.
         items.useClimb(player);
     }
@@ -403,6 +419,7 @@ final class WinterMovement implements Listener {
         state.hangUntil = 0;
         player.setGravity(false);
         track(player, state);
+        slideFx(player, state);
     }
 
     /** Мягкий блок: замка нет, игрок скользит вниз с постоянной скоростью, но падает мягче. */
@@ -421,6 +438,17 @@ final class WinterMovement implements Listener {
         state.hangUntil = 0;
         player.setGravity(false);
         track(player, state);
+        slideFx(player, state);
+    }
+
+    /** Осколки у грани, пока инструмент скользит: у мода spawnJuice играет каждые 5 тиков. */
+    private void slideFx(Player player, State state) {
+        if (tick % 5 != 0) return;
+        Block wall = state.wall;
+        if (wall == null || wall.getType().isAir()) return;
+        Location at = nearestFace(wall, player.getEyeLocation());
+        player.getWorld().spawnParticle(Particle.CRIT, at, 2, 0.05, 0.05, 0.05, 0.05);
+        player.getWorld().spawnParticle(Particle.BLOCK, at, 4, 0.05, 0.3, 0.05, 0.08, wall.getBlockData());
     }
 
     /** Трение погасило падение: игрок замирает на месте и висит до конца времени захвата. */
