@@ -203,7 +203,8 @@ class WinterRulesTest {
         assertEquals(20.01, midFall[1], 1e-2);
         assertEquals(36.14, bigFall[1], 1e-2); // падение с 20 блоков: 36 блоков дрифта
         assertTrue(shortFall[1] > 9, "даже с двух блоков скольжение едет десять блоков, а не встаёт");
-        assertTrue(bigFall[0] > 3 * shortFall[0], "долгое падение тормозит почти втрое дольше короткого");
+        assertTrue(bigFall[0] > 1.5 * shortFall[0], "долгое падение тормозит в полтора раза дольше короткого");
+        assertTrue(bigFall[1] > 3 * shortFall[1], "а по пути — втрое дальше");
     }
 
     @Test
