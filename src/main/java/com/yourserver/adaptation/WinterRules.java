@@ -35,19 +35,25 @@ final class WinterRules {
     static final double SOFT_FALL_DAMAGE = 0.5;        // mechanics.soft_fall_damage
     static final double SOFT_FALL_DAMAGE_CAP = 6.0;    // mechanics.soft_fall_damage_cap = 3 сердца
 
-    /* Скольжение: скорость входа, торможение и «ползущая» скорость — всё от прочности блока. */
-    static final double HORIZONTAL_DAMPING = 0.5;      // mod HORIZONTAL_DAMPING: снос в сторону за тик
-    static final double GRAVITY_DRAG = 0.98;           // ванильное вертикальное трение: фактическая скорость = заданная * 0.98
-    static final double SLIDE_ENTRY_SPEED = 0.55;      // быстрее этого скольжение не начинается
-    static final double SLIDE_FRICTION_BASE = 0.80;    // -20% скорости за тик на мягком блоке
-    static final double SLIDE_FRICTION_HARDNESS = 0.02;
-    static final double SLIDE_FRICTION_MIN = 0.55;
-    static final double SLIDE_FRICTION_MAX = 0.92;
-    static final double SLIDE_CREEP_SPEED = 0.55;      // «ползущая» скорость мягкого блока
-    static final double SLIDE_CREEP_HARDNESS = 0.08;   // каждый пункт прочности отнимает её у блока
-    static final double SLIDE_CREEP_MIN = 0.05;        // обсидиан: почти держит, но не замирает в воздухе
-    static final double SLIDE_DAMAGE_MIN_SPEED = 0.35; // «быстрое» скольжение — то, что стирает инструмент
-    static final int SLIDE_DAMAGE_PER_BLOCK = 1;       // прочности за блок такого скольжения
+    /* Скольжение: скорость входа даёт падение, дальше трение блока отнимает её каждый тик.
+       Твёрдый блок держит крепче — трение сильнее, поэтому скольжение гаснет почти в ноль;
+       мягкий блок инструмент не держит: тормозит он слабее и «ползущую» скорость оставляет
+       высокой, чтобы игрок продолжал сползать. В обоих случаях замедление плавное, и чем
+       выше было падение, тем дольше оно длится. */
+    static final double SLIDE_ENTRY_SPEED = 1.5;             // предел скорости входа: её даёт высота падения
+    static final double SLIDE_HARD_FRICTION = 0.10;          // сколько скорости твёрдый блок отнимает за тик
+    static final double SLIDE_HARD_FRICTION_HARDNESS = 0.02; // чем прочнее блок, тем сильнее трение
+    static final double SLIDE_HARD_FRICTION_MAX = 0.35;      // предел: обсидиан гасит почти всё сразу
+    static final double SLIDE_HARD_FLOOR_SPEED = 0.05;       // ниже твёрдый блок не отдаёт: 1 блок в секунду
+    static final double SLIDE_SOFT_FRICTION = 0.09;          // мягкий блок тормозит слабее
+    static final double SLIDE_SOFT_FLOOR_SPEED = 0.30;       // и не держит: сползание продолжается
+
+    /* Ванильная механика: скорость падения растёт как (v + 0.08) * 0.98, а заданная скорость
+       доходит до клиента умноженной на 0.98 — отсюда множитель в velocityForSpeed. */
+    static final double HORIZONTAL_DAMPING = 0.5;            // mod HORIZONTAL_DAMPING: снос в сторону за тик
+    static final double GRAVITY_DRAG = 0.98;
+    static final double SLIDE_DAMAGE_MIN_SPEED = 0.35;       // «быстрое» скольжение — то, что стирает инструмент
+    static final int SLIDE_DAMAGE_PER_BLOCK = 1;             // прочности за блок такого скольжения
 
     private WinterRules() { }
 
@@ -74,24 +80,24 @@ final class WinterRules {
     /** Ещё взлетаем (например, только что прыгнули от стены) — цепляться рано. */
     static boolean notRising(double verticalSpeed) { return verticalSpeed <= AUTO_GRAB_MAX_RISE; }
 
-    /** Торможение за тик: прочный блок гасит скорость сильнее мягкого. */
-    static double slideFriction(double hardness, double base, double scale, double min, double max) {
-        return Math.clamp(base - hardness * scale, Math.min(min, max), Math.max(min, max));
+    /** Скорость входа в скольжение: её даёт падение — чем выше падал, тем быстрее начнёшь. */
+    static double slideEntry(double fallSpeed, double floorSpeed, double maxSpeed) {
+        return Math.clamp(Math.max(fallSpeed, floorSpeed), floorSpeed, Math.max(floorSpeed, maxSpeed));
     }
 
-    /** «Ползущая» скорость блока: ниже неё скольжение не гаснет, иначе игрок завис бы в воздухе. */
-    static double slideCreep(double hardness, double base, double scale, double min) {
-        return Math.max(base - hardness * scale, min);
+    /** Трение блока за тик: твёрдый держит крепче и тем крепче, чем прочнее сам блок. */
+    static double slideFriction(double hardness, double base, double scale, double max) {
+        return Math.min(base + hardness * scale, Math.max(base, max));
     }
 
-    /** Первый тик скольжения: скорость падения, но не выше входа и не ниже ползущей. */
-    static double slideEntry(double fallSpeed, double creep, double entrySpeed) {
-        return Math.clamp(Math.max(fallSpeed, creep), creep, Math.max(creep, entrySpeed));
+    /** Тик скольжения: трение отнимает скорость, но ниже «ползущей» блок её не отдаёт. */
+    static double slideStep(double speed, double floorSpeed, double friction) {
+        return Math.max(floorSpeed, speed - friction);
     }
 
-    /** Тик скольжения: скорость тянется к ползущей и никогда её не пересекает. */
-    static double slideStep(double speed, double creep, double friction) {
-        return creep + (speed - creep) * friction;
+    /** «Ползущая» скорость блока: у мягкого она высокая — инструмент мягкое не держит. */
+    static double slideFloor(boolean soft, double hardFloorSpeed, double softFloorSpeed) {
+        return soft ? softFloorSpeed : hardFloorSpeed;
     }
 
     /** Быстрое скольжение — то, за которое инструмент стирается. */

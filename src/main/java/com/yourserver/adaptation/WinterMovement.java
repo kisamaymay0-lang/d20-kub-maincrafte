@@ -49,11 +49,12 @@ import java.util.UUID;
  * Зацеп по механике мода Gouge (https://modrinth.com/mod/gouge) и временная неподвижность.
  *
  * <p>ПКМ изморозью по стене в падении: инструмент врезается в грань, и игрок скользит вдоль
- * неё. Скольжение начинается со скорости падения и гаснет тем сильнее, чем прочнее блок
- * (песок почти не тормозит, обсидиан почти держит), но никогда не замирает в воздухе:
- * у каждого блока есть своя «ползущая» скорость. Присед на твёрдом блоке останавливает
- * игрока совсем, на мягком — не спасает; пробел на зажатом приседе выбрасывает игрока
- * от стены с силой обычного прыжка.
+ * неё. Скорость входа — та, с которой игрок подлетел к стене, поэтому чем выше было падение,
+ * тем дольше длится торможение. Дальше трение отнимает скорость каждый тик: твёрдый блок
+ * держит крепче и гасит скольжение почти в ноль, мягкий только притормаживает и оставляет
+ * высокую «ползущую» скорость — игрок продолжает сползать. Присед на твёрдом блоке
+ * останавливает совсем, на мягком — не спасает; пробел на зажатом приседе выбрасывает
+ * игрока от стены с силой обычного прыжка.
  *
  * <p>Зацепиться можно и без ПКМ: подпрыгнуть у стены и зажать присед — «прыгнул с пола,
  * зажал Shift и полез вверх». Пока инструмент скользит быстро, он стирается по 1 прочности
@@ -75,9 +76,9 @@ final class WinterMovement implements Listener {
     private record Tuning(double reach, double clearance, double drift, int hangTicks, int slipTicks,
                           double jumpForward, double jumpUp,
                           double softFallDamage, double softFallDamageCap,
-                          double slideEntry, double frictionBase, double frictionScale,
-                          double frictionMin, double frictionMax,
-                          double creepBase, double creepScale, double creepMin,
+                          double slideEntry, double hardFriction, double hardFrictionScale,
+                          double hardFrictionMax, double hardFloor,
+                          double softFriction, double softFloor,
                           double slideDamageSpeed, int slideDamagePerBlock,
                           Set<Material> alwaysHard, Set<Material> alwaysSoft) { }
 
@@ -146,13 +147,12 @@ final class WinterMovement implements Listener {
                 Math.clamp(config.getDouble("gouge.soft-fall-damage", WinterRules.SOFT_FALL_DAMAGE), 0.0, 1.0),
                 Math.clamp(config.getDouble("gouge.soft-fall-damage-cap", WinterRules.SOFT_FALL_DAMAGE_CAP), 0.0, 40.0),
                 Math.clamp(config.getDouble("gouge.slide.entry-speed", WinterRules.SLIDE_ENTRY_SPEED), 0.05, 3.0),
-                Math.clamp(config.getDouble("gouge.slide.friction-base", WinterRules.SLIDE_FRICTION_BASE), 0.0, 1.0),
-                Math.clamp(config.getDouble("gouge.slide.friction-hardness", WinterRules.SLIDE_FRICTION_HARDNESS), 0.0, 0.1),
-                Math.clamp(config.getDouble("gouge.slide.friction-min", WinterRules.SLIDE_FRICTION_MIN), 0.0, 1.0),
-                Math.clamp(config.getDouble("gouge.slide.friction-max", WinterRules.SLIDE_FRICTION_MAX), 0.0, 1.0),
-                Math.clamp(config.getDouble("gouge.slide.creep-speed", WinterRules.SLIDE_CREEP_SPEED), 0.01, 3.0),
-                Math.clamp(config.getDouble("gouge.slide.creep-hardness", WinterRules.SLIDE_CREEP_HARDNESS), 0.0, 0.5),
-                Math.clamp(config.getDouble("gouge.slide.creep-min", WinterRules.SLIDE_CREEP_MIN), 0.01, 3.0),
+                Math.clamp(config.getDouble("gouge.slide.hard-friction", WinterRules.SLIDE_HARD_FRICTION), 0.0, 1.0),
+                Math.clamp(config.getDouble("gouge.slide.hard-friction-hardness", WinterRules.SLIDE_HARD_FRICTION_HARDNESS), 0.0, 0.5),
+                Math.clamp(config.getDouble("gouge.slide.hard-friction-max", WinterRules.SLIDE_HARD_FRICTION_MAX), 0.0, 1.0),
+                Math.clamp(config.getDouble("gouge.slide.hard-floor-speed", WinterRules.SLIDE_HARD_FLOOR_SPEED), 0.0, 3.0),
+                Math.clamp(config.getDouble("gouge.slide.soft-friction", WinterRules.SLIDE_SOFT_FRICTION), 0.0, 1.0),
+                Math.clamp(config.getDouble("gouge.slide.soft-floor-speed", WinterRules.SLIDE_SOFT_FLOOR_SPEED), 0.0, 3.0),
                 Math.clamp(config.getDouble("gouge.slide-durability.min-speed", WinterRules.SLIDE_DAMAGE_MIN_SPEED), 0.0, 3.0),
                 Math.clamp(config.getInt("gouge.slide-durability.per-block", WinterRules.SLIDE_DAMAGE_PER_BLOCK), 0, 64),
                 materials(plugin, "gouge.always-hard"),
@@ -450,19 +450,23 @@ final class WinterMovement implements Listener {
         if (tick % 20 == 10) player.getWorld().playSound(player.getLocation(), Sound.BLOCK_CHAIN_STEP, 0.4f, 0.8f);
     }
 
-    /** Скольжение: скорость гаснет тем сильнее, чем прочнее блок, но не до нуля — «быстро,
-     *  медленнее, ещё медленнее» — и за быстрые блоки инструмент стирается. */
+    /** Скольжение: скорость входа даёт падение, дальше трение блока отнимает её каждый тик —
+     *  «быстро, медленнее, ещё медленнее». Твёрдый блок тормозит сильнее и почти останавливает
+     *  игрока, мягкий только притормаживает, а ползущая скорость у него выше. */
     private void wallSlide(Player player, State state, double hardness) {
         state.holding = false; state.hangUntil = 0;
         if (!state.hardWall) state.softFallUntil = tick + WinterRules.SOFT_FALL_GRACE_TICKS;
-        double creep = WinterRules.slideCreep(hardness, tuning.creepBase(), tuning.creepScale(), tuning.creepMin());
+        double floor = WinterRules.slideFloor(!state.hardWall, tuning.hardFloor(), tuning.softFloor());
         if (!state.entered) {
+            // Скорость входа — та, с которой игрок подлетел к стене: выше падал, дольше тормозить.
             state.entered = true;
-            state.slideSpeed = WinterRules.slideEntry(fallSpeed(player), creep, tuning.slideEntry());
+            state.slideSpeed = WinterRules.slideEntry(fallSpeed(player), floor, tuning.slideEntry());
         } else {
-            double friction = WinterRules.slideFriction(hardness, tuning.frictionBase(), tuning.frictionScale(),
-                    tuning.frictionMin(), tuning.frictionMax());
-            state.slideSpeed = WinterRules.slideStep(state.slideSpeed, creep, friction);
+            double friction = state.hardWall
+                    ? WinterRules.slideFriction(hardness, tuning.hardFriction(), tuning.hardFrictionScale(),
+                            tuning.hardFrictionMax())
+                    : tuning.softFriction();
+            state.slideSpeed = WinterRules.slideStep(state.slideSpeed, floor, friction);
         }
         state.grip = Grip.SLIDE;
         gripControl(player, state);
