@@ -25,28 +25,31 @@ final class WinterRules {
     static final double MAX_DRIFT = 1.5;               // mechanics.max_drift
     static final int HANG_TICKS = 200;                 // pickaxes.diamond_pickaxe.hang_time = 10 с;
                                                        // в config.yml по умолчанию 0 — держит без ограничения
-    static final int SLIP_COOLDOWN_TICKS = 100;        // mechanics.slip_cooldown = 5 с (модовое значение);
-                                                       // в config.yml стоит 0 — чар Momentum, который срезал бы
-                                                       // паузу, здесь нет, и она мешала бы связывать прыжки
     static final int SOFT_FALL_GRACE_TICKS = 5;        // окно после скольжения по мягкому блоку
     static final double AUTO_GRAB_MAX_RISE = 0.0;      // пока взлетаем, присед ещё не цепляется: зацеп по апогею
     static final double WALL_JUMP_FORWARD_BOOST = 0.2; // от стены — скорость ходьбы, а не модовые 1.4
-    static final double WALL_JUMP_UPWARD_BOOST = 0.42; // вверх — ровно сила обычного прыжка игрока
+    static final double WALL_JUMP_UPWARD_BOOST = 0.55; // вверх — больше обычного прыжка (0.42): чтобы
+                                                       // заново цепляться выше и карабкаться вверх
     static final double SOFT_FALL_DAMAGE = 0.5;        // mechanics.soft_fall_damage
     static final double SOFT_FALL_DAMAGE_CAP = 6.0;    // mechanics.soft_fall_damage_cap = 3 сердца
 
-    /* Скольжение: скорость входа даёт падение, дальше трение блока отнимает её каждый тик.
-       Твёрдый блок держит крепче — трение сильнее, поэтому скольжение гаснет почти в ноль;
-       мягкий блок инструмент не держит: тормозит он слабее и «ползущую» скорость оставляет
-       высокой, чтобы игрок продолжал сползать. В обоих случаях замедление плавное, и чем
-       выше было падение, тем дольше оно длится. */
+    /* Скольжение: скорость входа даёт падение, дальше трение блока отнимает её каждый тик,
+       причём тем сильнее, чем сильнее игрок замедлился — торможение идёт фазами: сначала
+       почти не мешает, к концу держит крепко. Твёрдый блок держит крепче мягкого, поэтому
+       скольжение гаснет почти в ноль; у мягкого «ползущая» скорость высокая, и сползание
+       продолжается. Присед не останавливает совсем, а переводит на тихий шаг —
+       hold-floor-speed: старую минимальную скорость скольжения. */
     static final double SLIDE_ENTRY_SPEED = 1.5;             // предел скорости входа: её даёт высота падения
-    static final double SLIDE_HARD_FRICTION = 0.10;          // сколько скорости твёрдый блок отнимает за тик
+    static final double SLIDE_HARD_FRICTION = 0.06;          // трение твёрдого блока в начале скольжения
+    static final double SLIDE_HARD_FRICTION_RAMP = 0.10;     // и надбавка к нему у «ползущей» скорости
     static final double SLIDE_HARD_FRICTION_HARDNESS = 0.02; // чем прочнее блок, тем сильнее трение
-    static final double SLIDE_HARD_FRICTION_MAX = 0.35;      // предел: обсидиан гасит почти всё сразу
-    static final double SLIDE_HARD_FLOOR_SPEED = 0.05;       // ниже твёрдый блок не отдаёт: 1 блок в секунду
-    static final double SLIDE_SOFT_FRICTION = 0.09;          // мягкий блок тормозит слабее
+    static final double SLIDE_HARD_FRICTION_MAX = 0.35;      // предел: обсидиан гасит почти сразу
+    static final double SLIDE_HARD_FLOOR_SPEED = 0.12;       // минимальная скорость скольжения (2.4 блока в секунду)
+    static final double SLIDE_HOLD_FLOOR_SPEED = 0.05;       // на приседе инструмент сползает тише: 1 блок в секунду
+    static final double SLIDE_SOFT_FRICTION = 0.06;          // мягкий блок тормозит слабее
+    static final double SLIDE_SOFT_FRICTION_RAMP = 0.05;
     static final double SLIDE_SOFT_FLOOR_SPEED = 0.30;       // и не держит: сползание продолжается
+    static final int SLIDE_COOLDOWN_TICKS = 80;              // откат изморози после скольжения — 4 секунды
 
     /* Ванильная механика: скорость падения растёт как (v + 0.08) * 0.98, а заданная скорость
        доходит до клиента умноженной на 0.98 — отсюда множитель в velocityForSpeed. */
@@ -85,9 +88,17 @@ final class WinterRules {
         return Math.clamp(Math.max(fallSpeed, floorSpeed), floorSpeed, Math.max(floorSpeed, maxSpeed));
     }
 
-    /** Трение блока за тик: твёрдый держит крепче и тем крепче, чем прочнее сам блок. */
-    static double slideFriction(double hardness, double base, double scale, double max) {
+    /** Трение твёрдого блока в начале скольжения: чем прочнее блок, тем крепче он держит. */
+    static double slideFrictionBase(double hardness, double base, double scale, double max) {
         return Math.min(base + hardness * scale, Math.max(base, max));
+    }
+
+    /** Трение за тик: чем сильнее игрок замедлился, тем крепче держит блок — торможение идёт
+     *  фазами, от почти незаметного в начале до крепкого у «ползущей» скорости. */
+    static double slideFriction(double speed, double entrySpeed, double floorSpeed, double base, double ramp) {
+        double span = Math.max(entrySpeed - floorSpeed, 1e-6);
+        double progress = Math.clamp((entrySpeed - speed) / span, 0.0, 1.0);
+        return base + ramp * progress;
     }
 
     /** Тик скольжения: трение отнимает скорость, но ниже «ползущей» блок её не отдаёт. */
