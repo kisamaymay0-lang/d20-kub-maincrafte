@@ -7,6 +7,18 @@ import org.junit.jupiter.params.provider.CsvSource;
 import static org.junit.jupiter.api.Assertions.*;
 
 class WinterRulesTest {
+    /** «Ползущая» скорость блока при настройках по умолчанию. */
+    private static double creep(double hardness) {
+        return WinterRules.slideCreep(hardness, WinterRules.SLIDE_CREEP_SPEED,
+                WinterRules.SLIDE_CREEP_HARDNESS, WinterRules.SLIDE_CREEP_MIN);
+    }
+
+    /** Торможение блока за тик при настройках по умолчанию. */
+    private static double friction(double hardness) {
+        return WinterRules.slideFriction(hardness, WinterRules.SLIDE_FRICTION_BASE,
+                WinterRules.SLIDE_FRICTION_HARDNESS, WinterRules.SLIDE_FRICTION_MIN, WinterRules.SLIDE_FRICTION_MAX);
+    }
+
     @ParameterizedTest
     @CsvSource({"0,0.02", "1,0.03", "2,0.04", "3,0.05", "-1,0.02", "100,0.05"})
     void fishingOddsMatchLuckOfTheSea(int luck, double expected) {
@@ -30,12 +42,15 @@ class WinterRulesTest {
     void fourWallJumpsUseAllSixteenDurability() {
         int damage = 0;
         for (int jump = 1; jump <= 4; jump++) {
-            damage = WinterRules.afterClimb(damage);
+            damage = WinterRules.afterUse(damage, WinterRules.CLIMB_DAMAGE);
             assertEquals(jump * 4, damage);
             assertEquals(jump == 4, WinterRules.broken(damage));
         }
-        assertEquals(16, WinterRules.afterClimb(15));
-        assertEquals(16, WinterRules.afterClimb(16));
+        assertEquals(16, WinterRules.afterUse(15, 4));   // предел — вся прочность
+        assertEquals(16, WinterRules.afterUse(16, 4));
+        assertEquals(13, WinterRules.afterUse(12, 1));   // блок скольжения — 1 прочности
+        assertEquals(12, WinterRules.afterUse(12, 0));   // выключенный расход
+        assertEquals(12, WinterRules.afterUse(12, -5));
     }
 
     @Test
@@ -51,6 +66,20 @@ class WinterRulesTest {
     }
 
     @Test
+    void crouchGrabsAWallInTheAirButOnlyOnceWeStopRising() {
+        assertTrue(WinterRules.canAutoGrab(true, true, true, false, false, false));
+        assertFalse(WinterRules.canAutoGrab(false, true, true, false, false, false)); // инструмент не в руке
+        assertFalse(WinterRules.canAutoGrab(true, false, true, false, false, false)); // стоим на земле
+        assertFalse(WinterRules.canAutoGrab(true, true, false, false, false, false)); // ещё взлетаем
+        assertFalse(WinterRules.canAutoGrab(true, true, true, true, false, false));   // идёт откат
+        assertFalse(WinterRules.canAutoGrab(true, true, true, false, true, false));   // уже в зацепе
+        assertFalse(WinterRules.canAutoGrab(true, true, true, false, false, true));   // заморожен рыбой
+        assertTrue(WinterRules.notRising(0));
+        assertTrue(WinterRules.notRising(-0.4));
+        assertFalse(WinterRules.notRising(0.42)); // только что прыгнули от стены
+    }
+
+    @Test
     void wallJumpIsAsWeakAsAVanillaJump() {
         // Просили не модовые 1.1/1.4, а силу обычного прыжка: 0.42 вверх и лёгкий толчок.
         assertEquals(0.42, WinterRules.WALL_JUMP_UPWARD_BOOST, 1e-9);
@@ -58,28 +87,73 @@ class WinterRulesTest {
     }
 
     @Test
-    void harderBlocksBleedFallingSpeedFaster() {
-        assertEquals(0.90, WinterRules.hardFriction(0), 1e-9);
-        assertEquals(0.855, WinterRules.hardFriction(1.5), 1e-9);   // камень
-        assertEquals(0.55, WinterRules.hardFriction(50), 1e-9);     // обсидиан — предел
-        assertEquals(0.55, WinterRules.hardFriction(1000), 1e-9);
+    void harderBlocksSlideSlowerAndHoldBetter() {
+        assertEquals(0.51, creep(0.5), 1e-9);   // земля, песок
+        assertEquals(0.43, creep(1.5), 1e-9);   // камень
+        assertEquals(0.31, creep(3.0), 1e-9);   // железная руда
+        assertEquals(0.05, creep(50), 1e-9);    // обсидиан — предел
+        assertTrue(creep(0.5) > creep(1.5));
+        assertTrue(creep(1.5) > creep(50));
+        assertEquals(0.79, friction(0.5), 1e-9);
+        assertEquals(0.77, friction(1.5), 1e-9);
+        assertEquals(0.55, friction(50), 1e-9); // предел торможения
+        assertEquals(0.55, friction(1000), 1e-9);
+        assertTrue(friction(50) < friction(0.5));
     }
 
     @Test
-    void softBlocksSlideAtConstantSpeedWithoutLocks() {
-        assertEquals(0.5, WinterRules.softSlideSpeed(0), 1e-9);
-        assertEquals(0.435, WinterRules.softSlideSpeed(0.5), 1e-9); // земля, песок
-        assertEquals(0.3, WinterRules.softSlideSpeed(10), 1e-9);    // предел
-        assertTrue(WinterRules.softSlideSpeed(1) < WinterRules.softSlideSpeed(0));
+    void slideStartsFromTheFallAndSlowsDownWithoutStopping() {
+        // Первый тик: что было при падении, но не выше входа и не ниже ползущей скорости.
+        assertEquals(0.55, WinterRules.slideEntry(2.0, 0.43, 0.55), 1e-9);
+        assertEquals(0.55, WinterRules.slideEntry(0.55, 0.43, 0.55), 1e-9);
+        assertEquals(0.43, WinterRules.slideEntry(0.1, 0.43, 0.55), 1e-9);
+        assertEquals(0.31, WinterRules.slideEntry(0, 0.31, 0.55), 1e-9);
+
+        double speed = WinterRules.slideEntry(1.0, creep(1.5), 0.55);
+        double previous = speed;
+        for (int tick = 1; tick <= 200; tick++) {
+            speed = WinterRules.slideStep(speed, creep(1.5), friction(1.5));
+            assertTrue(speed <= previous, "скорость не растёт: «быстро, медленнее, ещё медленнее»");
+            assertTrue(speed >= creep(1.5) - 1e-9, "скольжение не замирает в воздухе");
+            previous = speed;
+        }
+        assertEquals(0.43, speed, 1e-3); // в итоге выходит на ползущую скорость блока
     }
 
     @Test
-    void theToolLocksInPlaceOnlyAfterTheFallIsNearlyStopped() {
-        assertTrue(WinterRules.locksInPlace(0));
-        assertTrue(WinterRules.locksInPlace(-0.079));
-        assertFalse(WinterRules.locksInPlace(-0.08));
-        assertFalse(WinterRules.locksInPlace(-0.5));
-        assertFalse(WinterRules.locksInPlace(0.2));
+    void sandSlidesFartherThanStoneInTheSameTime() {
+        double sand = 0.55, stone = 0.55;
+        for (int tick = 1; tick <= 20; tick++) {
+            sand = WinterRules.slideStep(sand, creep(0.5), friction(0.5));
+            stone = WinterRules.slideStep(stone, creep(1.5), friction(1.5));
+            assertTrue(sand > stone, "мягкий блок скользит быстрее твёрдого");
+        }
+    }
+
+    @Test
+    void fastSlideWearsTheToolPerBlockAndNeverInCreative() {
+        assertTrue(WinterRules.slideWears(0.5, 0.35));
+        assertTrue(WinterRules.slideWears(0.35, 0.35));
+        assertFalse(WinterRules.slideWears(0.3, 0.35));  // медленное скольжение прочность не тратит
+        assertFalse(WinterRules.slideWears(0.0, 0.35));  // вис прочности не тратит
+
+        assertEquals(3, WinterRules.durabilityForSlide(3.7, 1)); // целые блоки
+        assertEquals(0, WinterRules.durabilityForSlide(0.9, 1));
+        assertEquals(4, WinterRules.durabilityForSlide(2.0, 2)); // настройка «за блок»
+        assertEquals(3, WinterRules.whole(3.9));
+        assertEquals(0, WinterRules.whole(0.5));
+        assertEquals(0, WinterRules.whole(-2));
+
+        // 16 блоков быстрого скольжения стирают изморозь до конца — как 4 прыжка.
+        assertEquals(WinterRules.DURABILITY, WinterRules.durabilityForSlide(16, 1));
+    }
+
+    @Test
+    void slidingSpeedCompensatesVanillaVerticalDrag() {
+        // Ванильное трение умножает скорость на 0.98, поэтому задаём её с запасом:
+        // 0.5 блока за тик должны получаться именно 0.5.
+        assertEquals(0.5, WinterRules.velocityForSpeed(0.5) * WinterRules.GRAVITY_DRAG, 1e-9);
+        assertTrue(WinterRules.velocityForSpeed(0.5) > 0.5);
     }
 
     @Test
@@ -98,22 +172,9 @@ class WinterRulesTest {
         assertEquals(14, WinterRules.ticks(0.7, 1, 100));
         assertEquals(200, WinterRules.ticks(10, 0, 3600));
         assertEquals(0, WinterRules.ticks(-5, 0, 600));
+        assertEquals(0, WinterRules.ticks(0, 0, 3600));   // вис без ограничения
         assertEquals(600, WinterRules.ticks(99999, 0, 600));
         assertEquals(1, WinterRules.ticks(0, 1, 100));
-    }
-
-    @Test
-    void gripCorrectionPreservesTheLatestCameraAngles() {
-        org.bukkit.Location anchor = new org.bukkit.Location(null, 10, 20, 30, 0, 0);
-        org.bukkit.Location attempt = new org.bukkit.Location(null, 10.2, 19.9, 30.1, 125, -45);
-        var corrected = WinterRules.anchoredLook(anchor, attempt);
-        assertEquals(10, corrected.getX());
-        assertEquals(20, corrected.getY());
-        assertEquals(30, corrected.getZ());
-        assertEquals(125, corrected.getYaw());
-        assertEquals(-45, corrected.getPitch());
-        assertEquals(0, anchor.getYaw());
-        assertEquals(10.2, attempt.getX());
     }
 
     @Test

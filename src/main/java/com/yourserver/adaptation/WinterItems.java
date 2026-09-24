@@ -6,6 +6,7 @@ import io.papermc.paper.datacomponent.DataComponentTypes;
 import org.bukkit.inventory.RecipeChoice;
 import java.util.ArrayList;
 import java.util.Objects;
+import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
@@ -64,7 +65,7 @@ final class WinterItems {
 
     private static String description(Kind kind) {
         return switch (kind) {
-            case TOOL -> "ПКМ по стене в падении — зацеп, Shift + пробел — прыжок от стены.";
+            case TOOL -> "Особый предмет рыбалки в зимних биомах.";
             case RAW, DEPLETED -> "Рыба с неведомых земель.";
             case ROE -> "Добывается из Изморози (shift + ПКМ)";
             case SANDWICH -> "Сытный, как золотая морковка";
@@ -76,9 +77,14 @@ final class WinterItems {
         return kind == Kind.TOOL ? "Особый предмет рыбалки в зимних биомах." : null;
     }
 
+    /** Описания изморози, которые когда-то выдавала механика зацепа: их возвращаем к прежнему. */
+    private static final java.util.Set<String> RIME_LORE = java.util.Set.of(
+            "ПКМ по стене в падении — зацеп, двойной присед — прыжок от стены.",
+            "ПКМ по стене в падении — зацеп, Shift + пробел — прыжок от стены.");
+
     private static boolean defaultLore(Kind kind, String plain) {
         return plain.equals(description(kind)) || plain.equals(legacyDescription(kind))
-                || (kind == Kind.TOOL && plain.equals("ПКМ по стене в падении — зацеп, двойной присед — прыжок от стены."))
+                || (kind == Kind.TOOL && RIME_LORE.contains(plain))
                 || (kind == Kind.ROE && plain.equals("Добывается из Изморози"));
     }
 
@@ -138,14 +144,17 @@ final class WinterItems {
 
     boolean holdsTool(Player player) { return kind(player.getInventory().getItemInMainHand()) == Kind.TOOL; }
 
-    /** Ровно 4 прочности за прыжок от стены — единственный расход прочности изморози,
-     *  без случайного уменьшения от «Прочности». */
-    boolean useClimb(Player player) {
+    /** Расход прочности изморози: 4 за прыжок от стены, по 1 за блок быстрого скольжения.
+     *  В креативе инструмент не изнашивается, как и любая обычная кирка.
+     *  Возвращает false, если инструмент стёрся до конца (или его нет в руке). */
+    boolean useClimb(Player player, int amount) {
+        if (amount <= 0) return true;
+        if (player.getGameMode() == GameMode.CREATIVE) return true;
         ItemStack held = player.getInventory().getItemInMainHand();
         if (kind(held) != Kind.TOOL) return false;
         refresh(held);
         if (!(held.getItemMeta() instanceof Damageable meta)) return false;
-        int damage = WinterRules.afterClimb(meta.getDamage());
+        int damage = WinterRules.afterUse(meta.getDamage(), amount);
         if (WinterRules.broken(damage)) {
             player.getInventory().setItemInMainHand(create(Kind.RAW));
             player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.8f, 1.0f);
