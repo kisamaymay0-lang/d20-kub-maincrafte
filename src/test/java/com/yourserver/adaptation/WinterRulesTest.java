@@ -160,7 +160,9 @@ class WinterRulesTest {
         assertEquals(14, sand[0], 1e-9);
         assertEquals(11.61, sand[1], 1e-2);
         // Мягкий блок не держит: на ползущей скорости сползание продолжается, и оно быстрое.
-        assertTrue(floor(true) >= 6 * floor(false), "мягкий блок сползает в шесть раз быстрее твёрдого");
+        // Сравниваем с запасом на округление: 6 * 0.05 в двоичных дробях чуть больше 0.30.
+        assertEquals(6.0, floor(true) / floor(false), 1e-6);
+        assertTrue(floor(true) > floor(false) * 5.9, "мягкий блок сползает в шесть раз быстрее твёрдого");
     }
 
     @Test
