@@ -3,6 +3,7 @@ package com.yourserver.adaptation;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.UseCooldown;
 import org.bukkit.inventory.RecipeChoice;
 import java.util.ArrayList;
 import java.util.Objects;
@@ -34,10 +35,13 @@ final class WinterItems {
     }
     private final NamespacedKey kindKey;
     private final NamespacedKey toolKey;
+    /** Своя группа кулдауна: перезарядка касается только изморози, а не всех алмазных кирок. */
+    private final NamespacedKey cooldownKey;
 
     WinterItems(JavaPlugin plugin) {
         kindKey = new NamespacedKey(plugin, "winter_item");
         toolKey = new NamespacedKey(plugin, "winter_tool_id");
+        cooldownKey = new NamespacedKey(plugin, "rime_cooldown");
     }
 
     ItemStack create(Kind kind) {
@@ -59,7 +63,10 @@ final class WinterItems {
             food.setCanAlwaysEat(false); meta.setFood(food);
         }
         item.setItemMeta(meta);
-        if (kind == Kind.TOOL) item.unsetData(DataComponentTypes.ENCHANTABLE);
+        if (kind == Kind.TOOL) {
+            item.unsetData(DataComponentTypes.ENCHANTABLE);
+            item.setData(DataComponentTypes.USE_COOLDOWN, cooldown());
+        }
         return item;
     }
 
@@ -128,8 +135,21 @@ final class WinterItems {
         if (kind == Kind.TOOL && item.hasData(DataComponentTypes.ENCHANTABLE)) {
             item.unsetData(DataComponentTypes.ENCHANTABLE); changed = true;
         }
+        // Старым изморозям без группы кулдауна дописываем её, чтобы перезарядка не белила
+        // обычные алмазные кирки в инвентаре.
+        if (kind == Kind.TOOL && !item.hasData(DataComponentTypes.USE_COOLDOWN)) {
+            item.setData(DataComponentTypes.USE_COOLDOWN, cooldown()); changed = true;
+        }
         return changed;
     }
+
+    /** Кулдаун самой изморози: секунды ванильного использования нам не нужны — время задаёт
+     *  плагин (player.setCooldown), а группа нужна, чтобы белый таймер был только на изморози. */
+    private UseCooldown cooldown() {
+        return UseCooldown.useCooldown(0.1f).cooldownGroup(cooldownKey).build();
+    }
+
+    NamespacedKey cooldownGroup() { return cooldownKey; }
 
     Kind kind(ItemStack item) {
         if (item == null || item.getType().isAir()) return null;

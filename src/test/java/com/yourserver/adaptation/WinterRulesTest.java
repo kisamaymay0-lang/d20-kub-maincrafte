@@ -112,13 +112,15 @@ class WinterRulesTest {
 
     @Test
     void harderBlocksPutUpMoreFriction() {
-        assertEquals(0.07, baseFriction(0.5), 1e-9);   // земля, песок
-        assertEquals(0.09, baseFriction(1.5), 1e-9);   // камень
-        assertEquals(0.12, baseFriction(3.0), 1e-9);   // железная руда
-        assertEquals(0.35, baseFriction(50), 1e-9);    // обсидиан — предел
+        assertEquals(0.035, baseFriction(0.5), 1e-9);   // земля, песок
+        assertEquals(0.055, baseFriction(1.5), 1e-9);   // камень
+        assertEquals(0.085, baseFriction(3.0), 1e-9);   // железная руда
+        assertEquals(0.35, baseFriction(50), 1e-9);     // обсидиан — предел
         assertEquals(0.35, baseFriction(1000), 1e-9);
         assertTrue(baseFriction(50) > baseFriction(1.5));
-        assertTrue(WinterRules.SLIDE_SOFT_FRICTION < baseFriction(0.5)); // мягкий тормозит слабее
+        assertTrue(WinterRules.SLIDE_SOFT_FRICTION < baseFriction(1.5)); // мягкий блок тормозит слабее
+        assertTrue(WinterRules.SLIDE_SOFT_FRICTION + WinterRules.SLIDE_SOFT_FRICTION_RAMP
+                < baseFriction(1.5) + WinterRules.SLIDE_HARD_FRICTION_RAMP); // и в конце скольжения тоже
     }
 
     @Test
@@ -130,8 +132,8 @@ class WinterRulesTest {
         assertEquals(0.30, WinterRules.slideEntry(0, 0.30, 1.5), 1e-9);  // мягкий: ползущая выше
 
         // Трение отнимает скорость каждый тик, но ниже ползущей блок её не отдаёт.
-        assertEquals(0.91, WinterRules.slideStep(1.0, 0.12, 0.09), 1e-9);
-        assertEquals(0.12, WinterRules.slideStep(0.14, 0.12, 0.19), 1e-9);
+        assertEquals(0.945, WinterRules.slideStep(1.0, 0.12, 0.055), 1e-9);
+        assertEquals(0.12, WinterRules.slideStep(0.14, 0.12, 0.085), 1e-9);
 
         double speed = WinterRules.slideEntry(1.5, floor(false), 1.5);
         double previous = speed;
@@ -150,9 +152,9 @@ class WinterRulesTest {
         double atEntry = friction(1.5, false, 1.5);
         double middle = friction(0.8, false, 1.5);
         double nearFloor = friction(0.13, false, 1.5);
-        assertEquals(0.09, atEntry, 1e-9);
+        assertEquals(0.055, atEntry, 1e-9);
         assertTrue(atEntry < middle && middle < nearFloor, "трение растёт по мере замедления");
-        assertEquals(0.19, nearFloor, 1e-2);                         // base + ramp у ползущей скорости
+        assertEquals(0.085, nearFloor, 1e-2);                        // base + ramp у ползущей скорости
         assertEquals(atEntry + WinterRules.SLIDE_HARD_FRICTION_RAMP, friction(floor(false), false, 1.5), 1e-9);
 
         // И растёт оно плавно: за скольжение проходит больше десятка разных значений.
@@ -167,6 +169,21 @@ class WinterRulesTest {
     }
 
     @Test
+    void theFloorSpeedArrivesOnlyAroundTheSixteenthBlock() {
+        // Просили: минимальная скорость чувствуется только на 16-м блоке скольжения.
+        double[] stone = deceleration(1.50, false, 1.5);
+        assertTrue(stone[1] > 15.5 && stone[1] < 18.0, "камень: ползущая скорость приходит к 16-му блоку");
+        // И тормозит плавно: скорость падает мелкими шагами, а не рывком «быстро -> медленно».
+        double speed = 1.5, biggestDrop = 0, previous = speed;
+        for (int tick = 1; tick <= 21; tick++) {
+            speed = WinterRules.slideStep(speed, floor(false), friction(speed, false, 1.5));
+            biggestDrop = Math.max(biggestDrop, previous - speed);
+            previous = speed;
+        }
+        assertTrue(biggestDrop < 0.09, "самый резкий шаг торможения меньше десятой доли скорости за тик");
+    }
+
+    @Test
     void higherFallDeceleratesLonger() {
         // Чем выше падал, тем дольше тормозит: и по времени, и по пути.
         double[] shortFall = deceleration(0.52, false, 1.5);   // падение ~2 блока
@@ -175,12 +192,14 @@ class WinterRulesTest {
         assertTrue(shortFall[0] < midFall[0], "дольше по тикам");
         assertTrue(midFall[0] < bigFall[0], "дольше по тикам");
         assertTrue(shortFall[1] < midFall[1] && midFall[1] < bigFall[1], "дольше по пути");
-        assertEquals(3, shortFall[0], 1e-9);
-        assertEquals(7, midFall[0], 1e-9);
-        assertEquals(11, bigFall[0], 1e-9);
-        assertEquals(0.67, shortFall[1], 1e-2);
-        assertEquals(8.92, bigFall[1], 1e-2); // падение с 20 блоков: около 9 блоков скольжения
-        assertTrue(bigFall[0] > 3 * shortFall[0], "торможение дольше более чем втрое");
+        assertEquals(6, shortFall[0], 1e-9);
+        assertEquals(13, midFall[0], 1e-9);
+        assertEquals(21, bigFall[0], 1e-9);
+        assertEquals(1.54, shortFall[1], 1e-2);
+        assertEquals(6.83, midFall[1], 1e-2);
+        assertEquals(16.81, bigFall[1], 1e-2); // падение с 20 блоков: минимум скорости на 16-м блоке
+        assertTrue(shortFall[1] < 2.0, "короткое падение тормозит почти сразу");
+        assertTrue(bigFall[0] > 3 * shortFall[0], "долгое падение тормозит втрое дольше короткого");
     }
 
     @Test
@@ -189,8 +208,8 @@ class WinterRulesTest {
         double[] stone = deceleration(1.50, false, 1.5);
         assertTrue(sand[0] > stone[0], "мягкий блок тормозит дольше");
         assertTrue(sand[1] > stone[1], "и по пути тоже");
-        assertEquals(15, sand[0], 1e-9);
-        assertEquals(13.71, sand[1], 1e-2);
+        assertEquals(24, sand[0], 1e-9);
+        assertEquals(21.87, sand[1], 1e-2);
         // Мягкий блок не держит: ползущая скорость втрое больше, сползание продолжается.
         assertEquals(0.30, floor(true), 1e-9);
         assertEquals(0.12, floor(false), 1e-9);
@@ -200,8 +219,8 @@ class WinterRulesTest {
     @Test
     void obsidianStopsTheSlideAlmostImmediately() {
         double[] obsidian = deceleration(1.50, false, 50);
-        assertEquals(4, obsidian[0], 1e-9);          // против 11 тиков у камня
-        assertEquals(2.42, obsidian[1], 1e-2);       // и меньше трёх блоков пути
+        assertEquals(4, obsidian[0], 1e-9);          // против 21 тика у камня
+        assertEquals(2.49, obsidian[1], 1e-2);       // и меньше трёх блоков пути
         assertTrue(baseFriction(50) > baseFriction(1.5));
     }
 
@@ -215,19 +234,19 @@ class WinterRulesTest {
     }
 
     @Test
-    void slidingPutsTheRimeOnCooldownForFourSeconds() {
+    void slidingPutsTheRimeOnAFourSecondCooldown() {
         assertEquals(80, WinterRules.SLIDE_COOLDOWN_TICKS);
         assertEquals(80, WinterRules.ticks(4.0, 0, 600));
-        assertEquals(0, WinterRules.ticks(0, 0, 600));      // откат можно выключить
-        assertTrue(WinterRules.SLIDE_COOLDOWN_TICKS > 40, "откат заметный, но не модовые пять секунд");
+        assertEquals(0, WinterRules.ticks(0, 0, 600));      // перезарядку можно выключить
+        assertTrue(WinterRules.SLIDE_COOLDOWN_TICKS > 40, "перезарядка заметная, но не модовые пять секунд");
     }
 
     @Test
     void fastSlideWearsTheToolPerBlockAndNeverInCreative() {
-        assertTrue(WinterRules.slideWears(0.5, 0.35));
-        assertTrue(WinterRules.slideWears(0.35, 0.35));
-        assertFalse(WinterRules.slideWears(0.3, 0.35));  // медленное скольжение прочность не тратит
-        assertFalse(WinterRules.slideWears(0.0, 0.35));  // вис прочности не тратит
+        assertTrue(WinterRules.slideWears(1.2, WinterRules.SLIDE_DAMAGE_MIN_SPEED));
+        assertTrue(WinterRules.slideWears(0.8, WinterRules.SLIDE_DAMAGE_MIN_SPEED));
+        assertFalse(WinterRules.slideWears(0.7, WinterRules.SLIDE_DAMAGE_MIN_SPEED)); // медленное скольжение
+        assertFalse(WinterRules.slideWears(0.0, WinterRules.SLIDE_DAMAGE_MIN_SPEED)); // и присед не тратят
 
         assertEquals(3, WinterRules.durabilityForSlide(3.7, 1)); // целые блоки
         assertEquals(0, WinterRules.durabilityForSlide(0.9, 1));

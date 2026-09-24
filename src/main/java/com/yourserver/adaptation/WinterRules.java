@@ -34,20 +34,21 @@ final class WinterRules {
     static final double SOFT_FALL_DAMAGE_CAP = 6.0;    // mechanics.soft_fall_damage_cap = 3 сердца
 
     /* Скольжение: скорость входа даёт падение, дальше трение блока отнимает её каждый тик,
-       причём тем сильнее, чем сильнее игрок замедлился — торможение идёт фазами: сначала
-       почти не мешает, к концу держит крепко. Твёрдый блок держит крепче мягкого, поэтому
-       скольжение гаснет почти в ноль; у мягкого «ползущая» скорость высокая, и сползание
-       продолжается. Присед не останавливает совсем, а переводит на тихий шаг —
-       hold-floor-speed: старую минимальную скорость скольжения. */
+       причём тем сильнее, чем сильнее игрок замедлился — торможение идёт плавными фазами:
+       сначала почти не мешает, к концу держит крепко. Трение подобрано так, чтобы скорость
+       таяла постепенно: с падения в 20+ блоков минимальная скорость приходит только к
+       16-му блоку скольжения. Твёрдый блок держит крепче мягкого, поэтому скольжение гаснет
+       почти в ноль; у мягкого «ползущая» скорость высокая, и сползание продолжается.
+       Присед не останавливает совсем, а переводит на тихий шаг — hold-floor-speed. */
     static final double SLIDE_ENTRY_SPEED = 1.5;             // предел скорости входа: её даёт высота падения
-    static final double SLIDE_HARD_FRICTION = 0.06;          // трение твёрдого блока в начале скольжения
-    static final double SLIDE_HARD_FRICTION_RAMP = 0.10;     // и надбавка к нему у «ползущей» скорости
+    static final double SLIDE_HARD_FRICTION = 0.025;         // трение твёрдого блока в начале скольжения
+    static final double SLIDE_HARD_FRICTION_RAMP = 0.03;     // и надбавка к нему у «ползущей» скорости
     static final double SLIDE_HARD_FRICTION_HARDNESS = 0.02; // чем прочнее блок, тем сильнее трение
     static final double SLIDE_HARD_FRICTION_MAX = 0.35;      // предел: обсидиан гасит почти сразу
     static final double SLIDE_HARD_FLOOR_SPEED = 0.12;       // минимальная скорость скольжения (2.4 блока в секунду)
     static final double SLIDE_HOLD_FLOOR_SPEED = 0.05;       // на приседе инструмент сползает тише: 1 блок в секунду
-    static final double SLIDE_SOFT_FRICTION = 0.06;          // мягкий блок тормозит слабее
-    static final double SLIDE_SOFT_FRICTION_RAMP = 0.05;
+    static final double SLIDE_SOFT_FRICTION = 0.04;          // мягкий блок тормозит слабее
+    static final double SLIDE_SOFT_FRICTION_RAMP = 0.025;
     static final double SLIDE_SOFT_FLOOR_SPEED = 0.30;       // и не держит: сползание продолжается
     static final int SLIDE_COOLDOWN_TICKS = 80;              // откат изморози после скольжения — 4 секунды
 
@@ -55,7 +56,7 @@ final class WinterRules {
        доходит до клиента умноженной на 0.98 — отсюда множитель в velocityForSpeed. */
     static final double HORIZONTAL_DAMPING = 0.5;            // mod HORIZONTAL_DAMPING: снос в сторону за тик
     static final double GRAVITY_DRAG = 0.98;
-    static final double SLIDE_DAMAGE_MIN_SPEED = 0.35;       // «быстрое» скольжение — то, что стирает инструмент
+    static final double SLIDE_DAMAGE_MIN_SPEED = 0.8;        // «быстрое» скольжение — то, что стирает инструмент
     static final int SLIDE_DAMAGE_PER_BLOCK = 1;             // прочности за блок такого скольжения
 
     private WinterRules() { }

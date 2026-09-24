@@ -91,9 +91,9 @@ final class WinterMovement implements Listener {
         boolean hardWall;         // блок требует верный инструмент: на нём присед держит
         boolean entered;          // первый тик скольжения уже посчитан
         boolean holding;          // присед зажат: игрок стоит на инструменте
+        boolean used;             // инструмент уже поработал: за это будет перезарядка
         Location driftAnchor;
-        long hangUntil;           // конец виса (0 — без ограничения)
-        long slipUntil;
+        long hangUntil;           // конец удержания приседом (0 — без ограничения)
         long softFallUntil;
         double slideSpeed;        // скорость скольжения вниз, блоков за тик
         double slideCharge;       // накопленный расход прочности за скольжение
@@ -187,7 +187,7 @@ final class WinterMovement implements Listener {
         state.coldUntil = Math.max(state.coldUntil, tick + WinterRules.COLD_TICKS);
         state.grip = Grip.NONE;
         state.wall = null; state.face = null; state.hangUntil = 0;
-        state.holding = false; state.entered = false; state.slideSpeed = 0; state.slideCharge = 0;
+        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0;
         control(player, state);
         player.lockFreezeTicks(true);
         player.setFreezeTicks(player.getMaxFreezeTicks()); // Ванильный FREEZE урон и иммунитеты остаются у Minecraft.
@@ -245,16 +245,17 @@ final class WinterMovement implements Listener {
      *  смягчает падение — приземление происходит уже после отпускания. */
     void release(Player player) { release(player, false); }
 
-    /** Отпустить зацеп. После скольжения изморозь уходит на откат — кроме прыжка от стены
-     *  (иначе не получится карабкаться) и креатива (там откат не действует). */
+    /** Отпустить зацеп. После скольжения изморозь уходит на перезарядку — кроме прыжка
+     *  от стены (иначе не получится карабкаться) и креатива (там перезарядки нет). */
     private void release(Player player, boolean jumped) {
         State state = states.get(player.getUniqueId());
         if (state == null || state.grip == Grip.NONE) return;
-        if (!jumped && !creative(player)) state.slipUntil = tick + tuning.slideCooldownTicks();
+        boolean worked = state.used; // мгновенный срыв (смена слота, телепорт) перезарядки не даёт
+        if (!jumped && worked) recharge(player);
         if (!state.hardWall) state.softFallUntil = tick + WinterRules.SOFT_FALL_GRACE_TICKS;
         state.grip = Grip.NONE; state.wall = null; state.face = null;
         state.driftAnchor = null; state.hangUntil = 0;
-        state.holding = false; state.entered = false; state.slideSpeed = 0; state.slideCharge = 0;
+        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0;
         if (state.frozenUntil <= tick) restoreControl(player, state);
     }
 
@@ -266,7 +267,7 @@ final class WinterMovement implements Listener {
         state.frozenUntil = 0;
         state.grip = Grip.NONE; state.wall = null; state.face = null;
         state.driftAnchor = null; state.hangUntil = 0;
-        state.holding = false; state.entered = false; state.slideSpeed = 0; state.slideCharge = 0;
+        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0;
         clearIce(state);
         restoreControl(player, state);
     }
@@ -315,13 +316,12 @@ final class WinterMovement implements Listener {
         if (action != Action.RIGHT_CLICK_BLOCK && action != Action.RIGHT_CLICK_AIR) return;
         Player player = event.getPlayer();
         State state = states.get(player.getUniqueId());
-        boolean cooling = state != null && state.slipUntil > tick;
+        boolean cooling = rechargeTicks(player) > 0;
         // Падение: скорость вниз или уже накопленная высота падения (mod: deltaMovement.y < 0).
         boolean falling = player.getVelocity().getY() < 0 || player.getFallDistance() > 0;
-        if (cooling && items.holdsTool(player) && airborne(player)) {
-            // Откат после скольжения: говорим, сколько ещё ждать, чтобы зацеп не выглядел сломанным.
-            player.sendActionBar("§bИзморозь ещё не готова: "
-                    + ((state.slipUntil - tick + 19) / 20) + " с");
+        if (cooling && airborne(player)) {
+            // Перезарядка: говорим, сколько ещё ждать, чтобы зацеп не выглядел сломанным.
+            player.sendActionBar("§bИзморозь ещё не готова: " + ((rechargeTicks(player) + 19) / 20) + " с");
         }
         if (!WinterRules.canGrab(items.holdsTool(player), airborne(player), falling, clearance(player),
                 cooling, state != null && state.grip != Grip.NONE,
@@ -332,8 +332,21 @@ final class WinterMovement implements Listener {
         event.setCancelled(true);
     }
 
-    /** В креативе изморозь не изнашивается и откат после скольжения не действует. */
+    /** В креативе изморозь не изнашивается и перезарядки после скольжения нет. */
     private static boolean creative(Player player) { return player.getGameMode() == GameMode.CREATIVE; }
+
+    /** Перезарядка изморози — настоящий майнкрафтовый кулдаун: предмет белеет таймером
+     *  в инвентаре, и клиент сам не даёт им пользоваться, как зарядом ветра. Кулдаун висит
+     *  на группе изморози (её компонент use_cooldown), поэтому обычные кирки не белеют. */
+    private void recharge(Player player) {
+        if (creative(player) || tuning.slideCooldownTicks() <= 0) return;
+        player.setCooldown(items.cooldownGroup(), tuning.slideCooldownTicks());
+    }
+
+    /** Сколько тиков изморозь ещё не готова (0 — можно цепляться). Считаем только по ней. */
+    private int rechargeTicks(Player player) {
+        return items.holdsTool(player) ? player.getCooldown(items.cooldownGroup()) : 0;
+    }
 
     /** Игрок сам в воздухе: и зацеп по ПКМ, и самозахват начинаются только так. */
     private static boolean airborne(Player player) {
@@ -346,7 +359,7 @@ final class WinterMovement implements Listener {
     private void autoGrab(Player player) {
         if (!player.isSneaking() || !airborne(player)) return;
         State state = states.get(player.getUniqueId());
-        boolean cooling = state != null && state.slipUntil > tick;
+        boolean cooling = rechargeTicks(player) > 0;
         boolean gripping = state != null && state.grip != Grip.NONE;
         boolean frozen = state != null && (state.frozenUntil > tick || state.coldUntil > tick);
         if (!WinterRules.canAutoGrab(items.holdsTool(player), airborne(player),
@@ -361,7 +374,7 @@ final class WinterMovement implements Listener {
         state.grip = Grip.SLIDE;   // скорость падения и твёрдость уточнит первый же тик
         state.wall = hit.getHitBlock(); state.face = hit.getHitBlockFace();
         state.hardWall = hard(state.wall);
-        state.entered = false; state.holding = false; state.hangUntil = 0;
+        state.entered = false; state.holding = false; state.used = false; state.hangUntil = 0;
         state.slideSpeed = 0; state.slideCharge = 0;
         state.driftAnchor = player.getLocation().clone();
         gripControl(player, state);
@@ -460,6 +473,7 @@ final class WinterMovement implements Listener {
             if (state.hangUntil <= tick) { slip(player, state); return; }
         }
         state.holding = true;
+        state.used = true;
         state.entered = false;              // после приседа скольжение начнётся заново
         state.slideSpeed = tuning.holdFloor();
         gripControl(player, state);         // ходьба по нулям: игрок сползает, но не уходит вдоль стены
@@ -472,7 +486,7 @@ final class WinterMovement implements Listener {
      *  «быстро, медленнее, ещё медленнее». Твёрдый блок тормозит сильнее и почти останавливает
      *  игрока, мягкий только притормаживает, а ползущая скорость у него выше. */
     private void wallSlide(Player player, State state, double hardness) {
-        state.holding = false; state.hangUntil = 0;
+        state.holding = false; state.used = true; state.hangUntil = 0;
         if (!state.hardWall) state.softFallUntil = tick + WinterRules.SOFT_FALL_GRACE_TICKS;
         double floor = WinterRules.slideFloor(!state.hardWall, tuning.hardFloor(), tuning.softFloor());
         if (!state.entered) {
@@ -537,8 +551,7 @@ final class WinterMovement implements Listener {
 
     /** Время виса истекло — изморозь соскальзывает (в моде это конец hang_time). */
     private void slip(Player player, State state) {
-        release(player);
-        state.slipUntil = Math.max(state.slipUntil, tick + tuning.slideCooldownTicks());
+        release(player); // release вешает перезарядку изморози
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 1.0f, 1.4f);
         player.getWorld().spawnParticle(Particle.CRIT, player.getLocation().add(0, 1, 0), 30, 0.3, 0.3, 0.3, 0.2);
         player.sendActionBar("§bИзморозь соскользнула со стены");
@@ -602,7 +615,7 @@ final class WinterMovement implements Listener {
                 if (state.grip == Grip.NONE) restoreControl(player, state);
             }
             if (state.grip == Grip.NONE && state.frozenUntil <= tick && state.coldUntil == 0
-                    && state.softFallUntil <= tick && state.slipUntil <= tick) states.remove(entry.getKey(), state);
+                    && state.softFallUntil <= tick) states.remove(entry.getKey(), state);
         }
         // Самозахват приседом: у игроков без состояния зацеп тоже может начаться.
         for (Player player : Bukkit.getOnlinePlayers()) {
@@ -701,7 +714,7 @@ final class WinterMovement implements Listener {
             clearIce(state);
             state.grip = Grip.NONE; state.wall = null; state.face = null;
             state.driftAnchor = null; state.hangUntil = 0;
-            state.holding = false; state.entered = false; state.slideSpeed = 0; state.slideCharge = 0;
+            state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0;
             restoreControl(player, state);
             if (state.coldUntil != 0) restoreCold(player, state);
         }
