@@ -78,10 +78,11 @@ final class WinterMovement implements Listener {
     private record Tuning(double reach, double clearance, double drift, int hangTicks, int slideCooldownTicks,
                           double jumpForward, double jumpUp,
                           double softFallDamage, double softFallDamageCap,
-                          double slideEntry, double hardFriction, double hardFrictionRamp, double hardFrictionScale,
+                          double slideEntry, double slideMinEntry,
+                          double hardFriction, double hardFrictionRamp, double hardFrictionScale,
                           double hardFrictionMax, double hardFloor, double holdFloor,
                           double softFriction, double softFrictionRamp, double softFloor,
-                          double slideDamageSpeed, int slideDamagePerBlock,
+                          double slideDamageSpeed, int slideDamagePerBlock, int slideDamageMaxPerSlide,
                           Set<Material> alwaysHard, Set<Material> alwaysSoft) { }
 
     private static final class State {
@@ -97,6 +98,7 @@ final class WinterMovement implements Listener {
         long softFallUntil;
         double slideSpeed;        // скорость скольжения вниз, блоков за тик
         double slideCharge;       // накопленный расход прочности за скольжение
+        int slideWorn;            // сколько прочности уже отдано за это скольжение
         Location correction;
         long correctionTick;
         boolean correcting;
@@ -111,8 +113,9 @@ final class WinterMovement implements Listener {
         BlockDisplay iceLower, iceUpper;
     }
 
+    private final JavaPlugin plugin;
     private final WinterItems items;
-    private final Tuning tuning;
+    private Tuning tuning;
     private final BlockData ice;
     private final ItemStack rimeParticle;
     private final Map<UUID, State> states = new HashMap<>();
@@ -123,6 +126,7 @@ final class WinterMovement implements Listener {
     private long tick;
 
     WinterMovement(JavaPlugin plugin, WinterItems items) {
+        this.plugin = plugin;
         this.items = items;
         tuning = tuning(plugin);
         ice = Bukkit.createBlockData(Material.ICE);
@@ -136,8 +140,19 @@ final class WinterMovement implements Listener {
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
     }
 
+    /** Перечитать настройки зацепа (после /f8 reload). */
+    void reloadSettings() { tuning = tuning(plugin); }
+
     private static Tuning tuning(JavaPlugin plugin) {
         var config = plugin.getConfig();
+        // Старый config.yml хранит прежние, резкие числа скольжения: если файл не помечен
+        // актуальной версией, берём новые значения из кода, иначе владелец не увидит дрифта.
+        boolean current = config.getInt("gouge.config-version", 0) >= WinterRules.GOUGE_CONFIG_VERSION;
+        if (!current) {
+            plugin.getLogger().info("Числа зацепа изморози взяты из новой версии (плавный дрифт): "
+                    + "в config.yml нет gouge.config-version " + WinterRules.GOUGE_CONFIG_VERSION
+                    + ". Чтобы правки в файле применялись, добавьте эту строку в секцию gouge.");
+        }
         return new Tuning(
                 Math.clamp(config.getDouble("gouge.reach", WinterRules.GRAB_REACH), 0.5, 32.0),
                 Math.clamp(config.getDouble("gouge.min-fall-clearance", WinterRules.MIN_FALL_CLEARANCE), 0.0, 32.0),
@@ -149,19 +164,28 @@ final class WinterMovement implements Listener {
                 Math.clamp(config.getDouble("gouge.soft-fall-damage", WinterRules.SOFT_FALL_DAMAGE), 0.0, 1.0),
                 Math.clamp(config.getDouble("gouge.soft-fall-damage-cap", WinterRules.SOFT_FALL_DAMAGE_CAP), 0.0, 40.0),
                 Math.clamp(config.getDouble("gouge.slide.entry-speed", WinterRules.SLIDE_ENTRY_SPEED), 0.05, 3.0),
-                Math.clamp(config.getDouble("gouge.slide.hard-friction", WinterRules.SLIDE_HARD_FRICTION), 0.0, 1.0),
-                Math.clamp(config.getDouble("gouge.slide.hard-friction-ramp", WinterRules.SLIDE_HARD_FRICTION_RAMP), 0.0, 1.0),
-                Math.clamp(config.getDouble("gouge.slide.hard-friction-hardness", WinterRules.SLIDE_HARD_FRICTION_HARDNESS), 0.0, 0.5),
-                Math.clamp(config.getDouble("gouge.slide.hard-friction-max", WinterRules.SLIDE_HARD_FRICTION_MAX), 0.0, 1.0),
-                Math.clamp(config.getDouble("gouge.slide.hard-floor-speed", WinterRules.SLIDE_HARD_FLOOR_SPEED), 0.01, 3.0),
-                Math.clamp(config.getDouble("gouge.slide.hold-floor-speed", WinterRules.SLIDE_HOLD_FLOOR_SPEED), 0.0, 3.0),
-                Math.clamp(config.getDouble("gouge.slide.soft-friction", WinterRules.SLIDE_SOFT_FRICTION), 0.0, 1.0),
-                Math.clamp(config.getDouble("gouge.slide.soft-friction-ramp", WinterRules.SLIDE_SOFT_FRICTION_RAMP), 0.0, 1.0),
+                Math.clamp(fresh(current, config, "gouge.slide.min-entry-speed", WinterRules.SLIDE_MIN_ENTRY_SPEED), 0.0, 3.0),
+                Math.clamp(fresh(current, config, "gouge.slide.hard-friction", WinterRules.SLIDE_HARD_FRICTION), 0.0, 1.0),
+                Math.clamp(fresh(current, config, "gouge.slide.hard-friction-ramp", WinterRules.SLIDE_HARD_FRICTION_RAMP), 0.0, 1.0),
+                Math.clamp(fresh(current, config, "gouge.slide.hard-friction-hardness", WinterRules.SLIDE_HARD_FRICTION_HARDNESS), 0.0, 0.5),
+                Math.clamp(fresh(current, config, "gouge.slide.hard-friction-max", WinterRules.SLIDE_HARD_FRICTION_MAX), 0.0, 1.0),
+                Math.clamp(fresh(current, config, "gouge.slide.hard-floor-speed", WinterRules.SLIDE_HARD_FLOOR_SPEED), 0.01, 3.0),
+                Math.clamp(fresh(current, config, "gouge.slide.hold-floor-speed", WinterRules.SLIDE_HOLD_FLOOR_SPEED), 0.0, 3.0),
+                Math.clamp(fresh(current, config, "gouge.slide.soft-friction", WinterRules.SLIDE_SOFT_FRICTION), 0.0, 1.0),
+                Math.clamp(fresh(current, config, "gouge.slide.soft-friction-ramp", WinterRules.SLIDE_SOFT_FRICTION_RAMP), 0.0, 1.0),
                 Math.clamp(config.getDouble("gouge.slide.soft-floor-speed", WinterRules.SLIDE_SOFT_FLOOR_SPEED), 0.01, 3.0),
                 Math.clamp(config.getDouble("gouge.slide-durability.min-speed", WinterRules.SLIDE_DAMAGE_MIN_SPEED), 0.0, 3.0),
                 Math.clamp(config.getInt("gouge.slide-durability.per-block", WinterRules.SLIDE_DAMAGE_PER_BLOCK), 0, 64),
+                Math.clamp(config.getInt("gouge.slide-durability.max-per-slide", WinterRules.SLIDE_DAMAGE_MAX_PER_SLIDE), 0, 64),
                 materials(plugin, "gouge.always-hard"),
                 materials(plugin, "gouge.always-soft"));
+    }
+
+    /** Число скольжения из config.yml: у старого файла значения прежние и резкие,
+     *  поэтому такие ключи игнорируются в пользу новых из WinterRules. */
+    private static double fresh(boolean current, org.bukkit.configuration.file.FileConfiguration config,
+            String path, double fallback) {
+        return current ? config.getDouble(path, fallback) : fallback;
     }
 
     private static Set<Material> materials(JavaPlugin plugin, String path) {
@@ -187,7 +211,7 @@ final class WinterMovement implements Listener {
         state.coldUntil = Math.max(state.coldUntil, tick + WinterRules.COLD_TICKS);
         state.grip = Grip.NONE;
         state.wall = null; state.face = null; state.hangUntil = 0;
-        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0;
+        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
         control(player, state);
         player.lockFreezeTicks(true);
         player.setFreezeTicks(player.getMaxFreezeTicks()); // Ванильный FREEZE урон и иммунитеты остаются у Minecraft.
@@ -255,7 +279,7 @@ final class WinterMovement implements Listener {
         if (!state.hardWall) state.softFallUntil = tick + WinterRules.SOFT_FALL_GRACE_TICKS;
         state.grip = Grip.NONE; state.wall = null; state.face = null;
         state.driftAnchor = null; state.hangUntil = 0;
-        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0;
+        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
         if (state.frozenUntil <= tick) restoreControl(player, state);
     }
 
@@ -267,7 +291,7 @@ final class WinterMovement implements Listener {
         state.frozenUntil = 0;
         state.grip = Grip.NONE; state.wall = null; state.face = null;
         state.driftAnchor = null; state.hangUntil = 0;
-        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0;
+        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
         clearIce(state);
         restoreControl(player, state);
     }
@@ -375,7 +399,7 @@ final class WinterMovement implements Listener {
         state.wall = hit.getHitBlock(); state.face = hit.getHitBlockFace();
         state.hardWall = hard(state.wall);
         state.entered = false; state.holding = false; state.used = false; state.hangUntil = 0;
-        state.slideSpeed = 0; state.slideCharge = 0;
+        state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
         state.driftAnchor = player.getLocation().clone();
         gripControl(player, state);
         impact(player, state.wall);
@@ -492,7 +516,8 @@ final class WinterMovement implements Listener {
         if (!state.entered) {
             // Скорость входа — та, с которой игрок подлетел к стене: выше падал, дольше тормозить.
             state.entered = true;
-            state.slideSpeed = WinterRules.slideEntry(fallSpeed(player), floor, tuning.slideEntry());
+            state.slideSpeed = WinterRules.slideEntry(fallSpeed(player), floor, tuning.slideMinEntry(),
+                    tuning.slideEntry());
         } else {
             // Трение растёт по мере замедления: торможение идёт плавными фазами.
             double base = state.hardWall
@@ -517,14 +542,17 @@ final class WinterMovement implements Listener {
     /** Скорость падения на момент захвата: сервер её уже посчитал своей физикой. */
     private static double fallSpeed(Player player) { return Math.max(-player.getVelocity().getY(), 0); }
 
-    /** Быстрое скольжение стирает изморозь: по 1 прочности за блок, а в креативе — ничего. */
+    /** Быстрое скольжение стирает изморозь: по 1 прочности за блок, а в креативе — ничего.
+     *  За одно скольжение списывается не больше потолка, чтобы длинный дрифт не ломал
+     *  инструмент прямо в полёте: прочность тратится постепенно, от скольжения к скольжению. */
     private boolean wear(Player player, State state) {
         if (!WinterRules.slideWears(state.slideSpeed, tuning.slideDamageSpeed())) return true;
-        state.slideCharge += state.slideSpeed * tuning.slideDamagePerBlock();
-        int charge = WinterRules.whole(state.slideCharge);
+        state.slideCharge += state.slideSpeed;   // блоков быстрого скольжения
+        int charge = WinterRules.slideWear(state.slideCharge, tuning.slideDamagePerBlock(), state.slideWorn,
+                tuning.slideDamageMaxPerSlide());
         if (charge <= 0) return true;
         state.slideCharge -= charge;
-        if (items.useClimb(player, charge)) return true;
+        if (items.useClimb(player, charge)) { state.slideWorn += charge; return true; }
         player.sendActionBar("§bИзморозь стёрлась о стену"); // инструмент кончился — зацеп снимается
         release(player);
         return false;
@@ -714,7 +742,7 @@ final class WinterMovement implements Listener {
             clearIce(state);
             state.grip = Grip.NONE; state.wall = null; state.face = null;
             state.driftAnchor = null; state.hangUntil = 0;
-            state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0;
+            state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
             restoreControl(player, state);
             if (state.coldUntil != 0) restoreCold(player, state);
         }

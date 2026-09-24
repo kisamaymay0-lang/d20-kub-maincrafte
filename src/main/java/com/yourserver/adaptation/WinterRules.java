@@ -35,22 +35,28 @@ final class WinterRules {
 
     /* Скольжение: скорость входа даёт падение, дальше трение блока отнимает её каждый тик,
        причём тем сильнее, чем сильнее игрок замедлился — торможение идёт плавными фазами:
-       сначала почти не мешает, к концу держит крепко. Трение подобрано так, чтобы скорость
-       таяла постепенно: с падения в 20+ блоков минимальная скорость приходит только к
-       16-му блоку скольжения. Твёрдый блок держит крепче мягкого, поэтому скольжение гаснет
-       почти в ноль; у мягкого «ползущая» скорость высокая, и сползание продолжается.
+       сначала держит крепче, а к концу отпускает. Трение подобрано так, чтобы скорость таяла
+       дрифтом: с падения в 20+ блоков скольжение по камню идёт 2.6 секунды и 36 блоков, а
+       сама скорость меняется за тик меньше чем на 4 % — рывка не видно и не чувствуется.
+       Даже короткое падение начинает скользить: скорость входа не ниже min-entry-speed.
+       Твёрдый блок держит крепче мягкого, поэтому скольжение гаснет почти в ноль; у мягкого
+       «ползущая» скорость высокая, и сползание продолжается.
        Присед не останавливает совсем, а переводит на тихий шаг — hold-floor-speed. */
     static final double SLIDE_ENTRY_SPEED = 1.5;             // предел скорости входа: её даёт высота падения
-    static final double SLIDE_HARD_FRICTION = 0.025;         // трение твёрдого блока в начале скольжения
-    static final double SLIDE_HARD_FRICTION_RAMP = 0.03;     // и надбавка к нему у «ползущей» скорости
-    static final double SLIDE_HARD_FRICTION_HARDNESS = 0.02; // чем прочнее блок, тем сильнее трение
+    static final double SLIDE_MIN_ENTRY_SPEED = 0.7;         // и её минимум: дрифт начинается даже с двух блоков
+    static final double SLIDE_HARD_FRICTION = 0.006;         // трение твёрдого блока у «ползущей» скорости
+    static final double SLIDE_HARD_FRICTION_RAMP = 0.026;    // надбавка в начале скольжения: уходит по мере замедления
+    static final double SLIDE_HARD_FRICTION_HARDNESS = 0.006; // чем прочнее блок, тем сильнее трение
     static final double SLIDE_HARD_FRICTION_MAX = 0.35;      // предел: обсидиан гасит почти сразу
     static final double SLIDE_HARD_FLOOR_SPEED = 0.12;       // минимальная скорость скольжения (2.4 блока в секунду)
     static final double SLIDE_HOLD_FLOOR_SPEED = 0.05;       // на приседе инструмент сползает тише: 1 блок в секунду
-    static final double SLIDE_SOFT_FRICTION = 0.04;          // мягкий блок тормозит слабее
-    static final double SLIDE_SOFT_FRICTION_RAMP = 0.025;
+    static final double SLIDE_SOFT_FRICTION = 0.008;          // мягкий блок тормозит слабее
+    static final double SLIDE_SOFT_FRICTION_RAMP = 0.024;
     static final double SLIDE_SOFT_FLOOR_SPEED = 0.30;       // и не держит: сползание продолжается
     static final int SLIDE_COOLDOWN_TICKS = 80;              // откат изморози после скольжения — 4 секунды
+    /** Версия чисел зацепа в config.yml: по ней видно, что файл обновлён под дрифт
+     *  (в старом файле лежат прежние резкие значения — они не применяются). */
+    static final int GOUGE_CONFIG_VERSION = 3;
 
     /* Ванильная механика: скорость падения растёт как (v + 0.08) * 0.98, а заданная скорость
        доходит до клиента умноженной на 0.98 — отсюда множитель в velocityForSpeed. */
@@ -58,6 +64,8 @@ final class WinterRules {
     static final double GRAVITY_DRAG = 0.98;
     static final double SLIDE_DAMAGE_MIN_SPEED = 0.8;        // «быстрое» скольжение — то, что стирает инструмент
     static final int SLIDE_DAMAGE_PER_BLOCK = 1;             // прочности за блок такого скольжения
+    static final int SLIDE_DAMAGE_MAX_PER_SLIDE = 8;         // потолок за одно скольжение: дрифт
+                                                             // не должен ломать инструмент в полёте
 
     private WinterRules() { }
 
@@ -82,8 +90,9 @@ final class WinterRules {
     static boolean notRising(double verticalSpeed) { return verticalSpeed <= AUTO_GRAB_MAX_RISE; }
 
     /** Скорость входа в скольжение: её даёт падение — чем выше падал, тем быстрее начнёшь. */
-    static double slideEntry(double fallSpeed, double floorSpeed, double maxSpeed) {
-        return Math.clamp(Math.max(fallSpeed, floorSpeed), floorSpeed, Math.max(floorSpeed, maxSpeed));
+    static double slideEntry(double fallSpeed, double floorSpeed, double minSpeed, double maxSpeed) {
+        return Math.clamp(Math.max(fallSpeed, Math.max(floorSpeed, minSpeed)), floorSpeed,
+                Math.max(floorSpeed, maxSpeed));
     }
 
     /** Трение твёрдого блока в начале скольжения: чем прочнее блок, тем крепче он держит. */
@@ -91,12 +100,13 @@ final class WinterRules {
         return Math.min(base + hardness * scale, Math.max(base, max));
     }
 
-    /** Трение за тик: чем сильнее игрок замедлился, тем крепче держит блок — торможение идёт
-     *  фазами, от почти незаметного в начале до крепкого у «ползущей» скорости. */
+    /** Трение за тик: в начале скольжения блок держит крепче всего, а к «ползущей» скорости
+     *  хватка слабеет до base. Поэтому скорость тает плавным дрифтом: заметное торможение
+     *  приходится на быструю часть, а низ проходится мягко, без обрыва. */
     static double slideFriction(double speed, double entrySpeed, double floorSpeed, double base, double ramp) {
         double span = Math.max(entrySpeed - floorSpeed, 1e-6);
-        double progress = Math.clamp((entrySpeed - speed) / span, 0.0, 1.0);
-        return base + ramp * progress;
+        double grip = Math.clamp((speed - floorSpeed) / span, 0.0, 1.0);
+        return base + ramp * grip;
     }
 
     /** Тик скольжения: трение отнимает скорость, но ниже «ползущей» блок её не отдаёт. */
@@ -120,6 +130,13 @@ final class WinterRules {
 
     /** Прочности за накопленные блоки скольжения (для тестов и документации). */
     static int durabilityForSlide(double blocks, int perBlock) { return whole(blocks * perBlock); }
+
+    /** Сколько прочности списать сейчас: по perBlock за блок быстрого скольжения, но не больше
+     *  потолка за одно скольжение (длинный дрифт стирает инструмент постепенно, а не в ноль). */
+    static int slideWear(double charge, int perBlock, int alreadyWorn, int maxPerSlide) {
+        int left = Math.max(0, maxPerSlide - Math.max(0, alreadyWorn));
+        return Math.min(whole(Math.max(0, charge) * perBlock), left);
+    }
 
     /** Мягкое скольжение: падение слабее в softFallDamage раз и не больше cap (в очках урона, 2 = сердце). */
     static double softFallDamage(double damage, double multiplier, double cap) {

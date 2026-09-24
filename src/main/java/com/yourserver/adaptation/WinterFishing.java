@@ -167,6 +167,11 @@ final class WinterFishing implements Listener {
         }
     }
 
+    /** Перечитать настройки зацепа после /f8 reload: числа скольжения живут в памяти. */
+    void reloadSettings() {
+        movement.reloadSettings();
+    }
+
     void disable() {
         movement.disable();
         for (UUID owner : new ArrayList<>(replacements.keySet())) {

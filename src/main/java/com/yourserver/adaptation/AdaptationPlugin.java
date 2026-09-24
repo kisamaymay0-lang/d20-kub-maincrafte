@@ -230,12 +230,15 @@ public void onEnable() {
     /**
      * Перечитать config.yml и настройки подсистем (/f8 reload).
      * Настройки миниигры и кувшина читаются на ходу, поэтому им reload не нужен;
-     * созвездия держат копию настроек в памяти — их просим перечитаться.
+     * созвездия и зацеп изморози держат копию настроек в памяти — их просим перечитаться.
      */
     public String reloadPluginSettings() {
         reloadConfig();
         if (constellationManager != null) {
             constellationManager.reloadSettings();
+        }
+        if (winterFishing != null) {
+            winterFishing.reloadSettings();
         }
         return specialCatch == null ? "" : specialCatch.describe();
     }
