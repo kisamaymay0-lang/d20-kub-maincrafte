@@ -64,7 +64,7 @@ final class WinterItems {
 
     private static String description(Kind kind) {
         return switch (kind) {
-            case TOOL -> "ПКМ по стене в падении — зацеп, двойной присед — прыжок от стены.";
+            case TOOL -> "ПКМ по стене в падении — зацеп, Shift + пробел — прыжок от стены.";
             case RAW, DEPLETED -> "Рыба с неведомых земель.";
             case ROE -> "Добывается из Изморози (shift + ПКМ)";
             case SANDWICH -> "Сытный, как золотая морковка";
@@ -78,6 +78,7 @@ final class WinterItems {
 
     private static boolean defaultLore(Kind kind, String plain) {
         return plain.equals(description(kind)) || plain.equals(legacyDescription(kind))
+                || (kind == Kind.TOOL && plain.equals("ПКМ по стене в падении — зацеп, двойной присед — прыжок от стены."))
                 || (kind == Kind.ROE && plain.equals("Добывается из Изморози"));
     }
 

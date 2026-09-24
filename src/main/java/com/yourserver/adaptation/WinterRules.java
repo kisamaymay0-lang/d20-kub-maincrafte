@@ -28,9 +28,8 @@ final class WinterRules {
                                                        // в config.yml стоит 0 — чар Momentum, который срезал бы
                                                        // паузу, здесь нет, и она мешала бы связывать прыжки
     static final int SOFT_FALL_GRACE_TICKS = 5;        // окно после мягкого скольжения, в котором падение мягче
-    static final int WALL_JUMP_WINDOW_TICKS = 14;      // wall_jump.time_window = 0.7 с
-    static final double WALL_JUMP_FORWARD_BOOST = 1.4; // wall_jump.forward_boost
-    static final double WALL_JUMP_UPWARD_BOOST = 1.1;  // wall_jump.upward_boost
+    static final double WALL_JUMP_FORWARD_BOOST = 0.2; // от стены — скорость ходьбы, а не модовые 1.4
+    static final double WALL_JUMP_UPWARD_BOOST = 0.42; // вверх — ровно сила обычного прыжка игрока
     static final double SOFT_FALL_DAMAGE = 0.5;        // mechanics.soft_fall_damage
     static final double SOFT_FALL_DAMAGE_CAP = 6.0;    // mechanics.soft_fall_damage_cap = 3 сердца
     static final double HARD_FRICTION_BASE = 0.90;
@@ -56,11 +55,6 @@ final class WinterRules {
     static boolean canGrab(boolean tool, boolean airborne, boolean falling, boolean clearance,
             boolean cooling, boolean gripping, boolean frozen) {
         return tool && airborne && falling && clearance && !cooling && !gripping && !frozen;
-    }
-
-    /** Двойной присед: второй присед зажат в окне после отпускания (mod wall_jump.time_window). */
-    static boolean doubleTap(long releaseTick, long now, int windowTicks) {
-        return releaseTick >= 0 && now - releaseTick <= windowTicks;
     }
 
     /** Твёрдый блок гасит падение тем быстрее, чем он прочнее (mod: 0.90 - hardness * 0.03). */

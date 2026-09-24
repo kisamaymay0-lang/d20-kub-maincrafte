@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Validate and reproducibly build the resource pack; --check checks the existing ZIP."""
+"""Validate and reproducibly build the resource pack; --check checks the existing ZIP.
+
+The plugin does not ship or serve the pack: resourcepack/ is the source, the ZIP in the
+repository root is just a copy for the hosting/server.properties."""
 import argparse
 import json
-import shutil
 import struct
 import zlib
 from pathlib import Path
@@ -11,7 +13,6 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 ROOT = Path(__file__).resolve().parents[1]
 PACK = ROOT / "resourcepack"
 ARCHIVE = ROOT / "f8resurs-resourcepack.zip"
-BUNDLED = ROOT / "src" / "main" / "resources" / "f8resurs-resourcepack.zip"
 
 
 def rgba_rows(data: bytes) -> list[bytes]:
@@ -192,26 +193,19 @@ def main() -> None:
                 info.compress_type = ZIP_DEFLATED
                 info.external_attr = 0o644 << 16
                 archive.writestr(info, contents)
-        # Плагин раздаёт этот же архив клиентам при входе (SHA-1 считается
-        # из bundled-копии), поэтому копия в resources обязана совпадать.
-        BUNDLED.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ARCHIVE, BUNDLED)
-    # Эталон для сверки — архив в корне репозитория, но он тут не хранится:
-    # игрокам уходит bundled-копия из jar. Если корневой копии нет, сверяем
-    # именно её — она обязана совпадать с resourcepack/.
-    assert BUNDLED.is_file(), "Bundled resource pack is missing: run the script without --check"
-    if ARCHIVE.is_file():
-        assert BUNDLED.read_bytes() == ARCHIVE.read_bytes(), "Bundled resource pack is stale"
-        reference = ARCHIVE
-    else:
-        reference = BUNDLED
-    with ZipFile(reference) as archive:
+    # Архив в корне — просто копия пака для выдачи клиентам (хостинг,
+    # server.properties). Плагин его не носит, поэтому архива может и не быть:
+    # тогда проверяем только исходники в resourcepack/.
+    if not ARCHIVE.is_file():
+        print(f"OK: {len(files)} files, note_block multipart is non-overlapping; "
+              f"archive {ARCHIVE.name} is absent, checked sources only")
+        return
+    with ZipFile(ARCHIVE) as archive:
         assert len(archive.namelist()) == len(files), "Duplicate or unexpected ZIP entries"
         assert set(archive.namelist()) == set(files), "Stale resource pack archive"
         for name, contents in files.items():
             assert archive.read(name) == contents, f"Stale resource pack file: {name}"
-    print(f"OK: {len(files)} files, note_block multipart is non-overlapping; "
-          f"ZIP {'matches' if reference is ARCHIVE else '(bundled copy) matches'} resourcepack/")
+    print(f"OK: {len(files)} files, note_block multipart is non-overlapping; ZIP matches resourcepack/")
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
-import org.bukkit.event.player.PlayerToggleSneakEvent;
+import org.bukkit.event.player.PlayerInputEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
@@ -75,7 +75,7 @@ final class WinterMovement implements Listener {
 
     /** Настройки механики из config.yml; по умолчанию — значения gouge.toml. */
     private record Tuning(double reach, double clearance, double drift, int hangTicks, int slipTicks,
-                          int jumpWindowTicks, double jumpForward, double jumpUp,
+                          double jumpForward, double jumpUp,
                           double softFallDamage, double softFallDamageCap,
                           Set<Material> alwaysHard, Set<Material> alwaysSoft) { }
 
@@ -87,7 +87,6 @@ final class WinterMovement implements Listener {
         Location hangAnchor;
         long hangUntil;
         long slipUntil;
-        long sneakRelease = -1;
         long softFallUntil;
         double previousY;
         boolean sliding;
@@ -140,7 +139,6 @@ final class WinterMovement implements Listener {
                 Math.clamp(config.getDouble("gouge.max-drift", WinterRules.MAX_DRIFT), 0.0, 16.0),
                 WinterRules.ticks(config.getDouble("gouge.hang-seconds", WinterRules.HANG_TICKS / 20.0), 0, 3600),
                 WinterRules.ticks(config.getDouble("gouge.slip-cooldown-seconds", WinterRules.SLIP_COOLDOWN_TICKS / 20.0), 0, 600),
-                WinterRules.ticks(config.getDouble("gouge.wall-jump.window-seconds", WinterRules.WALL_JUMP_WINDOW_TICKS / 20.0), 1, 100),
                 Math.clamp(config.getDouble("gouge.wall-jump.forward-boost", WinterRules.WALL_JUMP_FORWARD_BOOST), 0.0, 5.0),
                 Math.clamp(config.getDouble("gouge.wall-jump.upward-boost", WinterRules.WALL_JUMP_UPWARD_BOOST), 0.0, 5.0),
                 Math.clamp(config.getDouble("gouge.soft-fall-damage", WinterRules.SOFT_FALL_DAMAGE), 0.0, 1.0),
@@ -321,20 +319,19 @@ final class WinterMovement implements Listener {
         player.getWorld().spawnParticle(Particle.ITEM, at, 12, 0.25, 0.25, 0.25, 0.05, rimeParticle);
     }
 
-    /** Второй присед в окне — прыжок от стены. Первое нажатие только отпускает присед и запоминает тик. */
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void sneak(PlayerToggleSneakEvent event) {
+    /** Присед зажат и нажат пробел — прыжок от стены. Без зацепа это обычный присед. */
+    @EventHandler
+    public void input(PlayerInputEvent event) {
         Player player = event.getPlayer();
         State state = states.get(player.getUniqueId());
-        if (state == null) return;
-        if (!event.isSneaking()) { state.sneakRelease = tick; return; }
-        if (state.grip == Grip.NONE || state.frozenUntil > tick) return;
-        if (!WinterRules.doubleTap(state.sneakRelease, tick, tuning.jumpWindowTicks())) return;
-        state.sneakRelease = -1;
+        if (state == null || state.grip == Grip.NONE || state.frozenUntil > tick) return;
+        if (!event.getInput().isJump()) return;
+        if (!event.getInput().isSneak() && !player.isSneaking()) return;
         wallJump(player, state);
     }
 
-    /** Прыжок от стены: скорость normal*1.4 + 1.1 вверх (mod wallKick) и 4 прочности изморози. */
+    /** Прыжок от стены: как обычный прыжок игрока — 0.42 вверх плюс небольшой
+     *  толчок от грани (mod wallKick, но сила уменьшена), и 4 прочности изморози. */
     private void wallJump(Player player, State state) {
         Block wall = state.wall;
         BlockFace face = state.face;

@@ -79,4 +79,3 @@ jobs:
         name: f8-plugin-10.22
         path: |
           target/*.jar
-          f8resurs-resourcepack.zip

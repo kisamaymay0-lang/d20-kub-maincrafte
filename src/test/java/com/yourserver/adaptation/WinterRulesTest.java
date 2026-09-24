@@ -51,12 +51,10 @@ class WinterRulesTest {
     }
 
     @Test
-    void wallJumpNeedsSecondCrouchInsideTheWindow() {
-        assertTrue(WinterRules.doubleTap(0, 14, WinterRules.WALL_JUMP_WINDOW_TICKS));
-        assertTrue(WinterRules.doubleTap(10, 20, WinterRules.WALL_JUMP_WINDOW_TICKS));
-        assertFalse(WinterRules.doubleTap(0, 15, WinterRules.WALL_JUMP_WINDOW_TICKS));
-        assertFalse(WinterRules.doubleTap(0, 100, WinterRules.WALL_JUMP_WINDOW_TICKS));
-        assertFalse(WinterRules.doubleTap(-1, 0, WinterRules.WALL_JUMP_WINDOW_TICKS)); // присед ещё не отпускали
+    void wallJumpIsAsWeakAsAVanillaJump() {
+        // Просили не модовые 1.1/1.4, а силу обычного прыжка: 0.42 вверх и лёгкий толчок.
+        assertEquals(0.42, WinterRules.WALL_JUMP_UPWARD_BOOST, 1e-9);
+        assertTrue(WinterRules.WALL_JUMP_FORWARD_BOOST <= 0.3);
     }
 
     @Test
