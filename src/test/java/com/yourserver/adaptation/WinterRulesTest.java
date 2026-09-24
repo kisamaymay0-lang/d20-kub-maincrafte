@@ -1,8 +1,6 @@
 package com.yourserver.adaptation;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -38,12 +36,6 @@ class WinterRulesTest {
             ticks++;
         }
         return new double[]{ticks, distance};
-    }
-
-    @ParameterizedTest
-    @CsvSource({"0,0.02", "1,0.03", "2,0.04", "3,0.05", "-1,0.02", "100,0.05"})
-    void fishingOddsMatchLuckOfTheSea(int luck, double expected) {
-        assertEquals(expected, WinterRules.catchChance(luck), 1e-9);
     }
 
     @Test

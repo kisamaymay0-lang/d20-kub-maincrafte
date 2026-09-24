@@ -72,9 +72,12 @@ def validate() -> dict[str, bytes]:
         if name.endswith(".json"):
             json.loads(contents)
 
-    # Медный блок — нота 24 (14 инструментов). Кувшин: пустой — нота 24 + флейта,
-    # наполненный — ноты 1..9 (нота = количество жидкости = сигнал компаратора)
-    # + банджо. Каждый блок-стейт нот-блока матчится ровно одним кейсом.
+    # Нота 24 больше не принадлежит медному блоку: с 10.21 медный нотный блок —
+    # кастомный блок CraftEngine, и настроенный до ноты 24 обычный нотный блок
+    # не должен ни выглядеть, ни считаться медным. Кувшин: пустой — нота 24 +
+    # флейта, наполненный — ноты 1..9 (нота = количество жидкости = сигнал
+    # компаратора) + банджо. Каждый блок-стейт нот-блока матчится ровно одним
+    # кейсом.
     instruments = {"harp", "basedrum", "snare", "hat", "bass", "bell", "guitar", "chime",
                    "xylophone", "iron_xylophone", "cow_bell", "didgeridoo", "bit", "pling", "flute", "banjo"}
     vanilla = "minecraft:block/note_block"
@@ -93,11 +96,12 @@ def validate() -> dict[str, bytes]:
             f"Note {note} must stay vanilla for every instrument except banjo"
         assert case["apply"]["model"] == vanilla
 
-    copper = cases[10]
-    copper_instruments = set(copper["when"]["instrument"].split("|"))
-    assert copper["when"]["note"] == "24" and copper_instruments == instruments - {"flute", "banjo"}, \
-        "Copper covers note=24 for all instruments except the jug's two"
-    assert copper["apply"]["model"] == "f8resurs:block/copper_note_block"
+    plain = cases[10]
+    plain_instruments = set(plain["when"]["instrument"].split("|"))
+    assert plain["when"]["note"] == "24" and plain_instruments == instruments - {"flute", "banjo"}, \
+        "Note 24 must stay covered for all instruments except the jug's two"
+    assert plain["apply"]["model"] == vanilla, \
+        "Note 24 is an ordinary note block now: the copper block is a custom "        "CraftEngine block, and tuning a note block to 24 must not fake one"
 
     jug_empty = cases[11]
     assert jug_empty["when"] == {"note": "24", "instrument": "flute"}
@@ -156,6 +160,21 @@ def validate() -> dict[str, bytes]:
         assert f"assets/f8resurs/models/item/{jug}.json" in files
         assert f"assets/f8resurs/models/block/{jug}.json" in files
 
+    # 10.11: носитель кувшина — техническая плита петрифайд-дуба. Она не сплошная,
+    # поэтому соседние блоки рядом с кувшином больше не «пропадают» (нет щелей).
+    # Проверка необязательная: файл появляется в паке после обновления до 10.11.
+    slab_host = "assets/minecraft/blockstates/petrified_oak_slab.json"
+    if slab_host in files:
+        host = json.loads(files[slab_host])["variants"]
+        assert set(host) == {"type=bottom", "type=top", "type=double"}, \
+            "Carrier slab must define exactly the three vanilla slab states"
+        assert host["type=bottom"]["model"] == "f8resurs:block/ancient_jug", \
+            "Empty jug (bottom slab) must use the empty jug model"
+        assert host["type=top"]["model"] == "f8resurs:block/ancient_jug_filled", \
+            "Filled jug (top slab) must use the filled jug model"
+        assert host["type=double"]["model"] == "minecraft:block/oak_planks", \
+            "A double slab keeps the vanilla model: it is solid and would hide neighbour faces"
+
     # Both beams must be flat and unshaded: no rod base, side faces or AO.
     for beam in ("star_beam", "star_beam_preview"):
         model = json.loads(files[f"assets/f8resurs/models/item/{beam}.json"])
@@ -193,12 +212,13 @@ def main() -> None:
                 info.compress_type = ZIP_DEFLATED
                 info.external_attr = 0o644 << 16
                 archive.writestr(info, contents)
-    # Архив в корне — просто копия пака для выдачи клиентам (хостинг,
-    # server.properties). Плагин его не носит, поэтому архива может и не быть:
-    # тогда проверяем только исходники в resourcepack/.
+    # Плагин пак не раздаёт: архив в корне репозитория — просто копия для
+    # сервера (server.properties: resource-pack), а сам пак ведётся отдельно.
+    # Поэтому архив сверяем только когда он лежит на месте: если его переименовали
+    # или убрали, это решение владельца пака, а не поломка сборки.
     if not ARCHIVE.is_file():
         print(f"OK: {len(files)} files, note_block multipart is non-overlapping; "
-              f"archive {ARCHIVE.name} is absent, checked sources only")
+              f"archive {ARCHIVE.name} is absent, skipped")
         return
     with ZipFile(ARCHIVE) as archive:
         assert len(archive.namelist()) == len(files), "Duplicate or unexpected ZIP entries"

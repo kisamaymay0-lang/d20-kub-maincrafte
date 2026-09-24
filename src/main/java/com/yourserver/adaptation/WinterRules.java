@@ -61,9 +61,6 @@ final class WinterRules {
 
     private WinterRules() { }
 
-    /** 2% без «Удачи моря», +1% за уровень (I–III) до максимума 5%. */
-    static double catchChance(int luck) { return 0.02 + 0.01 * Math.clamp(luck, 0, 3); }
-
     /** Секунды конфига в тики с ограничением: значения вне диапазона заменяются границей. */
     static int ticks(double seconds, int min, int max) { return Math.clamp((int) Math.round(seconds * 20), min, max); }
 
