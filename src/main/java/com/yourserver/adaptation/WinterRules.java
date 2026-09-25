@@ -56,6 +56,8 @@ final class WinterRules {
     static final double SLIDE_HARD_FLOOR_SPEED = 0.12;       // минимальная скорость скольжения (2.4 блока в секунду)
     static final double SLIDE_DRIFT_DECELERATION = 0.04;     // режим дрифта (шифт): скорость падает ровно
                                                              // на столько за тик — плавно и предсказуемо
+    static final double SLIDE_DRIFT_FLOOR_SPEED = 0.05;      // закреп на твёрдом блоке тормозит совсем
+                                                             // тихо — 1 блок в секунду, как прежний шифт
     static final double SLIDE_SOFT_FRICTION = 0.008;          // мягкий блок тормозит слабее
     static final double SLIDE_SOFT_FRICTION_RAMP = 0.024;
     static final double SLIDE_SOFT_FLOOR_SPEED = 0.30;       // и не держит: сползание продолжается
@@ -134,6 +136,13 @@ final class WinterRules {
     /** «Ползущая» скорость блока: у мягкого она высокая — инструмент мягкое не держит. */
     static double slideFloor(boolean soft, double hardFloorSpeed, double softFloorSpeed) {
         return soft ? softFloorSpeed : hardFloorSpeed;
+    }
+
+    /** Предел закрепа (зажатый шифт): по твёрдому блоку инструмент держит совсем крепко и отпускает
+     *  игрока на самую тихую скорость, по мягкому — прежняя «ползущая» скорость блока: мягкое
+     *  изморозь не держит, и замедлять там нечего. */
+    static double driftFloor(boolean soft, double hardDriftFloor, double softFloorSpeed) {
+        return soft ? softFloorSpeed : hardDriftFloor;
     }
 
     /** Быстрое скольжение — то, за которое инструмент стирается. */

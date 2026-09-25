@@ -238,26 +238,43 @@ class WinterRulesTest {
     void shiftTurnsTheSlideIntoAControlledDrift() {
         // Присед включает режим дрифта: скорость падает ровно на одну и ту же величину за тик.
         assertEquals(0.04, WinterRules.SLIDE_DRIFT_DECELERATION, 1e-9);
-        assertEquals(1.46, WinterRules.slideDrift(1.50, 0.12, 0.04), 1e-9);
-        assertEquals(0.12, WinterRules.slideDrift(0.13, 0.12, 0.04), 1e-9);  // ниже предела не падает
+        assertEquals(1.46, WinterRules.slideDrift(1.50, 0.05, 0.04), 1e-9);
+        assertEquals(0.05, WinterRules.slideDrift(0.06, 0.05, 0.04), 1e-9);  // ниже предела не падает
         assertEquals(0.30, WinterRules.slideDrift(0.30, 0.30, 0.04), 1e-9); // мягкий блок держит на 0.30
-        assertEquals(1.50, WinterRules.slideDrift(1.50, 0.12, 0), 1e-9);    // дрифт можно и выключить
+        assertEquals(1.50, WinterRules.slideDrift(1.50, 0.05, 0), 1e-9);    // дрифт можно и выключить
 
-        // Доезжает до предела быстрее обычного скольжения, и тормозит ровно, без рывка на низах.
+        // Закреп по твёрдому блоку тормозит до прежней скорости шифта — 1 блок в секунду,
+        // а по мягкому предел не трогаем: там всё та же «ползущая» скорость скольжения.
+        assertEquals(0.05, WinterRules.SLIDE_DRIFT_FLOOR_SPEED, 1e-9);
+        assertEquals(0.05, WinterRules.driftFloor(false, WinterRules.SLIDE_DRIFT_FLOOR_SPEED, 0.30), 1e-9);
+        assertEquals(0.30, WinterRules.driftFloor(true, WinterRules.SLIDE_DRIFT_FLOOR_SPEED, 0.30), 1e-9);
+        assertTrue(WinterRules.SLIDE_DRIFT_FLOOR_SPEED < WinterRules.SLIDE_HARD_FLOOR_SPEED,
+                "закреп медленнее обычного скольжения по твёрдому блоку");
+        assertTrue(WinterRules.SLIDE_DRIFT_FLOOR_SPEED < WinterRules.SLIDE_DAMAGE_MIN_SPEED,
+                "на закрепе прочность не тратится");
+
+        // Тормозит ровно, без рывка на низах, и доезжает до своего предела.
         double speed = 1.5;
         int ticks = 0;
-        while (!WinterRules.atSlideFloor(speed, 0.12) && ticks < 600) {
-            speed = WinterRules.slideDrift(speed, 0.12, WinterRules.SLIDE_DRIFT_DECELERATION);
+        while (!WinterRules.atSlideFloor(speed, WinterRules.SLIDE_DRIFT_FLOOR_SPEED) && ticks < 600) {
+            speed = WinterRules.slideDrift(speed, WinterRules.SLIDE_DRIFT_FLOOR_SPEED,
+                    WinterRules.SLIDE_DRIFT_DECELERATION);
             ticks++;
         }
-        assertEquals(35, ticks);
-        assertTrue(ticks < 53, "шифт тормозит быстрее, чем скольжение само по себе");
-        assertEquals(0.12, speed, 1e-9);
+        assertEquals(37, ticks);
+        assertEquals(0.05, speed, 1e-9);
+        double softSpeed = 1.5;
+        int softTicks = 0;
+        while (!WinterRules.atSlideFloor(softSpeed, 0.30) && softTicks < 600) {
+            softSpeed = WinterRules.slideDrift(softSpeed, 0.30, WinterRules.SLIDE_DRIFT_DECELERATION);
+            softTicks++;
+        }
+        assertEquals(30, softTicks); // по мягкому блоку закреп тормозит меньше: там предел выше
 
         // На пределе прыжок разрешён, а пока идёт торможение — нет: это и показывает дымка.
-        assertTrue(WinterRules.atSlideFloor(0.12, 0.12));
+        assertTrue(WinterRules.atSlideFloor(0.05, 0.05));
         assertTrue(WinterRules.atSlideFloor(0.30, 0.30));
-        assertFalse(WinterRules.atSlideFloor(0.20, 0.12));
+        assertFalse(WinterRules.atSlideFloor(0.10, 0.05));
         assertFalse(WinterRules.atSlideFloor(0.36, 0.30));
     }
 

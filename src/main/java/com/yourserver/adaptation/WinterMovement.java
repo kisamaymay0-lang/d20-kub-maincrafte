@@ -80,7 +80,7 @@ final class WinterMovement implements Listener {
                           double softFallDamage, double softFallDamageCap,
                           double slideEntry, double slideMinEntry,
                           double hardFriction, double hardFrictionRamp, double hardFrictionScale,
-                          double hardFrictionMax, double hardFloor, double driftDeceleration,
+                          double hardFrictionMax, double hardFloor, double driftDeceleration, double driftFloor,
                           double softFriction, double softFrictionRamp, double softFloor,
                           double slideDamageSpeed, int slideDamagePerBlock, int slideDamageMaxPerSlide,
                           Set<Material> alwaysHard, Set<Material> alwaysSoft) { }
@@ -172,6 +172,7 @@ final class WinterMovement implements Listener {
                 Math.clamp(fresh(current, config, "gouge.slide.hard-friction-max", WinterRules.SLIDE_HARD_FRICTION_MAX), 0.0, 1.0),
                 Math.clamp(fresh(current, config, "gouge.slide.hard-floor-speed", WinterRules.SLIDE_HARD_FLOOR_SPEED), 0.01, 3.0),
                 Math.clamp(fresh(current, config, "gouge.slide.drift-deceleration", WinterRules.SLIDE_DRIFT_DECELERATION), 0.0, 3.0),
+                Math.clamp(config.getDouble("gouge.slide.drift-floor-speed", WinterRules.SLIDE_DRIFT_FLOOR_SPEED), 0.0, 3.0),
                 Math.clamp(fresh(current, config, "gouge.slide.soft-friction", WinterRules.SLIDE_SOFT_FRICTION), 0.0, 1.0),
                 Math.clamp(fresh(current, config, "gouge.slide.soft-friction-ramp", WinterRules.SLIDE_SOFT_FRICTION_RAMP), 0.0, 1.0),
                 Math.clamp(config.getDouble("gouge.slide.soft-floor-speed", WinterRules.SLIDE_SOFT_FLOOR_SPEED), 0.01, 3.0),
@@ -424,11 +425,7 @@ final class WinterMovement implements Listener {
         if (state == null || state.grip == Grip.NONE || state.frozenUntil > tick) return;
         if (!event.getInput().isJump()) return;
         if (!event.getInput().isSneak() && !player.isSneaking()) return;
-        double floor = slideFloor(state);
-        if (!WinterRules.atSlideFloor(state.slideSpeed, floor)) {
-            player.sendActionBar("§bДрифт: тормози шифтом — пробел подбросит, когда скорость упадёт");
-            return;
-        }
+        if (!WinterRules.atSlideFloor(state.slideSpeed, driftFloor(state))) return;
         wallJump(player, state);
     }
 
@@ -499,10 +496,10 @@ final class WinterMovement implements Listener {
     }
 
     /** Режим дрифта (зажат присед): инструмент тормозит ровно — скорость падает на одну и ту же
-     *  величину за тик, пока не дойдёт до предела блока. Пока идёт такое торможение, у грани
-     *  летит дымка от трения; на пределе дымка пропадает, изморозь держит, и пробел подбрасывает
-     *  игрока вверх — оттуда он цепляется заново выше. В креативе и на мягких блоках поведение
-     *  то же, просто предел у мягкого блока выше (0.30).
+     *  величину за тик, пока не дойдёт до предела закрепа. По твёрдому блоку предел очень низкий
+     *  (прежняя скорость шифта), по мягкому — как у скольжения (0.30): мягкое изморозь не держит.
+     *  Пока идёт торможение, у грани летит дымка от трения; на пределе дымка пропадает, изморозь
+     *  держит, и пробел подбрасывает игрока вверх — оттуда он цепляется заново выше.
      *  hang-seconds больше нуля ограничивает дрифт, как время кирки в моде; 0 — без предела. */
     private void drift(Player player, State state) {
         if (tuning.hangTicks() > 0) {
@@ -511,7 +508,7 @@ final class WinterMovement implements Listener {
         }
         state.drifting = true;
         state.used = true;
-        double floor = slideFloor(state);
+        double floor = driftFloor(state);
         if (!state.hardWall) state.softFallUntil = tick + WinterRules.SOFT_FALL_GRACE_TICKS;
         if (!state.entered) {
             // Зацепились сразу с зажатым приседом: скорость входа та же, что у скольжения.
@@ -532,14 +529,21 @@ final class WinterMovement implements Listener {
         scrapeFx(player, state, true);
     }
 
-    /** Ползущая скорость блока, к которой тормозит дрифт. */
+    /** Ползущая скорость блока, к которой тормозит обычное скольжение. */
     private double slideFloor(State state) {
         return WinterRules.slideFloor(!state.hardWall, tuning.hardFloor(), tuning.softFloor());
     }
 
+    /** Предел закрепа: по твёрдому блоку инструмент держит очень крепко (прежняя скорость шифта),
+     *  по мягкому — та же скорость, что у скольжения: мягкое изморозь не держит. */
+    private double driftFloor(State state) {
+        return WinterRules.driftFloor(!state.hardWall, tuning.driftFloor(), tuning.softFloor());
+    }
+
     /** Дымка от трения: пока инструмент тормозит, у грани идут белые клубы — по ним игрок видит,
      *  что ещё дрифтит. Как только скорость дошла до предела, дымка пропадает, летит короткий
-     *  клуб «готово» и в строке подсказка: значит, пробелом можно прыгнуть вверх. */
+     *  клуб «готово»: значит, инструмент держит и пробелом можно прыгнуть вверх.
+     *  Текстом об этом не пишем — индикатор только визуальный. */
     private void driftFx(Player player, State state, double floor) {
         Block wall = state.wall;
         Location at = wall == null ? player.getLocation().add(0, 1, 0)
@@ -548,7 +552,6 @@ final class WinterMovement implements Listener {
             if (!state.driftReady) {
                 state.driftReady = true;
                 player.getWorld().spawnParticle(Particle.CLOUD, at, 8, 0.18, 0.25, 0.18, 0.02);
-                player.sendActionBar("§bИзморозь держит: пробел — прыжок вверх");
             }
             return;
         }
