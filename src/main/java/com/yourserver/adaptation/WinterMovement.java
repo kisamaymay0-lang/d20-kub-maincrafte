@@ -495,8 +495,10 @@ final class WinterMovement implements Listener {
         return dx * dx + dz * dz > tuning.drift() * tuning.drift();
     }
 
-    /** Режим дрифта (зажат присед): инструмент тормозит ровно — скорость падает на одну и ту же
-     *  величину за тик, пока не дойдёт до предела закрепа. По твёрдому блоку предел очень низкий
+    /** Режим дрифта (зажат присед) — это сброс скорости, а не отдельный полёт: игрок входит
+     *  в закреп на своей же скорости, и если она уже у предела (прыгнул с пола и зацепился),
+     *  ничего не тормозит и пробел доступен сразу. Если игрок летит быстро, инструмент тормозит
+     *  ровно — скорость падает на одну и ту же величину за тик, пока не дойдёт до предела закрепа. По твёрдому блоку предел очень низкий
      *  (прежняя скорость шифта), по мягкому — как у скольжения (0.30): мягкое изморозь не держит.
      *  Пока идёт торможение, у грани летит дымка от трения; на пределе дымка пропадает, изморозь
      *  держит, и пробел подбрасывает игрока вверх — оттуда он цепляется заново выше.
@@ -511,10 +513,11 @@ final class WinterMovement implements Listener {
         double floor = driftFloor(state);
         if (!state.hardWall) state.softFallUntil = tick + WinterRules.SOFT_FALL_GRACE_TICKS;
         if (!state.entered) {
-            // Зацепились сразу с зажатым приседом: скорость входа та же, что у скольжения.
+            // Зацепились с зажатым приседом: скорость входа — ровно та, что была у игрока.
+            // Дрифт только сбрасывает скорость, поэтому вниз не разгоняем: зацепился с пола —
+            // сразу закреп на минимуме, без рывка. До предела — и значит, пробел уже работает.
             state.entered = true;
-            state.slideSpeed = WinterRules.slideEntry(fallSpeed(player), floor, tuning.slideMinEntry(),
-                    tuning.slideEntry());
+            state.slideSpeed = WinterRules.driftEntry(fallSpeed(player), floor, tuning.slideEntry());
         } else {
             state.slideSpeed = WinterRules.slideDrift(state.slideSpeed, floor, tuning.driftDeceleration());
         }

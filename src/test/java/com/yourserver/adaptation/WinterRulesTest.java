@@ -271,6 +271,25 @@ class WinterRulesTest {
         }
         assertEquals(30, softTicks); // по мягкому блоку закреп тормозит меньше: там предел выше
 
+        // Вход в закреп — это не разгон вниз: берём ровно скорость игрока, но не ниже предела
+        // закрепа (иначе он сразу же закрепится) и не выше предела скольжения.
+        assertEquals(0.05, WinterRules.driftEntry(0.03, 0.05, 1.5), 1e-9);  // прыгнул с пола — рывка нет
+        assertEquals(0.05, WinterRules.driftEntry(0.0, 0.05, 1.5), 1e-9);
+        assertEquals(0.90, WinterRules.driftEntry(0.90, 0.05, 1.5), 1e-9);  // упал на 6 блоков
+        assertEquals(1.50, WinterRules.driftEntry(2.40, 0.05, 1.5), 1e-9);  // предел скольжения
+        assertEquals(0.30, WinterRules.driftEntry(0.03, 0.30, 1.5), 1e-9);  // мягкий блок: свой предел
+        assertTrue(WinterRules.driftEntry(0.03, 0.05, 1.5) < WinterRules.SLIDE_MIN_ENTRY_SPEED,
+                "закреп не разгоняет до скорости скольжения — иначе это и есть рывок вниз");
+
+        // Дрифт умеет только сбрасывать скорость: ни на одном тике она не растёт.
+        double driftSpeed = WinterRules.driftEntry(0.03, 0.05, 1.5);
+        for (int tick = 1; tick <= 60; tick++) {
+            double next = WinterRules.slideDrift(driftSpeed, 0.05, WinterRules.SLIDE_DRIFT_DECELERATION);
+            assertTrue(next <= driftSpeed, "дрифт только сбрасывает скорость");
+            driftSpeed = next;
+        }
+        assertEquals(0.05, driftSpeed, 1e-9);
+
         // На пределе прыжок разрешён, а пока идёт торможение — нет: это и показывает дымка.
         assertTrue(WinterRules.atSlideFloor(0.05, 0.05));
         assertTrue(WinterRules.atSlideFloor(0.30, 0.30));
