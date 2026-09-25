@@ -80,7 +80,7 @@ final class WinterMovement implements Listener {
                           double softFallDamage, double softFallDamageCap,
                           double slideEntry, double slideMinEntry,
                           double hardFriction, double hardFrictionRamp, double hardFrictionScale,
-                          double hardFrictionMax, double hardFloor, double holdFloor,
+                          double hardFrictionMax, double hardFloor, double driftDeceleration,
                           double softFriction, double softFrictionRamp, double softFloor,
                           double slideDamageSpeed, int slideDamagePerBlock, int slideDamageMaxPerSlide,
                           Set<Material> alwaysHard, Set<Material> alwaysSoft) { }
@@ -91,7 +91,8 @@ final class WinterMovement implements Listener {
         BlockFace face;
         boolean hardWall;         // блок требует верный инструмент: на нём присед держит
         boolean entered;          // первый тик скольжения уже посчитан
-        boolean holding;          // присед зажат: игрок стоит на инструменте
+        boolean drifting;         // режим дрифта: присед зажат, инструмент тормозит до предела
+        boolean driftReady;       // дрифт закончился: скорость на пределе, можно прыгать
         boolean used;             // инструмент уже поработал: за это будет перезарядка
         Location driftAnchor;
         long hangUntil;           // конец удержания приседом (0 — без ограничения)
@@ -170,7 +171,7 @@ final class WinterMovement implements Listener {
                 Math.clamp(fresh(current, config, "gouge.slide.hard-friction-hardness", WinterRules.SLIDE_HARD_FRICTION_HARDNESS), 0.0, 0.5),
                 Math.clamp(fresh(current, config, "gouge.slide.hard-friction-max", WinterRules.SLIDE_HARD_FRICTION_MAX), 0.0, 1.0),
                 Math.clamp(fresh(current, config, "gouge.slide.hard-floor-speed", WinterRules.SLIDE_HARD_FLOOR_SPEED), 0.01, 3.0),
-                Math.clamp(fresh(current, config, "gouge.slide.hold-floor-speed", WinterRules.SLIDE_HOLD_FLOOR_SPEED), 0.0, 3.0),
+                Math.clamp(fresh(current, config, "gouge.slide.drift-deceleration", WinterRules.SLIDE_DRIFT_DECELERATION), 0.0, 3.0),
                 Math.clamp(fresh(current, config, "gouge.slide.soft-friction", WinterRules.SLIDE_SOFT_FRICTION), 0.0, 1.0),
                 Math.clamp(fresh(current, config, "gouge.slide.soft-friction-ramp", WinterRules.SLIDE_SOFT_FRICTION_RAMP), 0.0, 1.0),
                 Math.clamp(config.getDouble("gouge.slide.soft-floor-speed", WinterRules.SLIDE_SOFT_FLOOR_SPEED), 0.01, 3.0),
@@ -211,7 +212,7 @@ final class WinterMovement implements Listener {
         state.coldUntil = Math.max(state.coldUntil, tick + WinterRules.COLD_TICKS);
         state.grip = Grip.NONE;
         state.wall = null; state.face = null; state.hangUntil = 0;
-        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
+        state.drifting = false; state.driftReady = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
         control(player, state);
         player.lockFreezeTicks(true);
         player.setFreezeTicks(player.getMaxFreezeTicks()); // Ванильный FREEZE урон и иммунитеты остаются у Minecraft.
@@ -245,7 +246,7 @@ final class WinterMovement implements Listener {
      *  «игрок висит в воздухе» никогда не доходит до кика за полёт. */
     private void gripControl(Player player, State state) {
         storeControl(player, state);
-        player.setWalkSpeed(state.holding ? 0 : state.walkSpeed);
+        player.setWalkSpeed(state.drifting ? 0 : state.walkSpeed);
         player.setFlySpeed(state.flySpeed);
         player.setGravity(false);
     }
@@ -279,7 +280,7 @@ final class WinterMovement implements Listener {
         if (!state.hardWall) state.softFallUntil = tick + WinterRules.SOFT_FALL_GRACE_TICKS;
         state.grip = Grip.NONE; state.wall = null; state.face = null;
         state.driftAnchor = null; state.hangUntil = 0;
-        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
+        state.drifting = false; state.driftReady = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
         if (state.frozenUntil <= tick) restoreControl(player, state);
     }
 
@@ -291,7 +292,7 @@ final class WinterMovement implements Listener {
         state.frozenUntil = 0;
         state.grip = Grip.NONE; state.wall = null; state.face = null;
         state.driftAnchor = null; state.hangUntil = 0;
-        state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
+        state.drifting = false; state.driftReady = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
         clearIce(state);
         restoreControl(player, state);
     }
@@ -398,7 +399,7 @@ final class WinterMovement implements Listener {
         state.grip = Grip.SLIDE;   // скорость падения и твёрдость уточнит первый же тик
         state.wall = hit.getHitBlock(); state.face = hit.getHitBlockFace();
         state.hardWall = hard(state.wall);
-        state.entered = false; state.holding = false; state.used = false; state.hangUntil = 0;
+        state.entered = false; state.drifting = false; state.driftReady = false; state.used = false; state.hangUntil = 0;
         state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
         state.driftAnchor = player.getLocation().clone();
         gripControl(player, state);
@@ -413,7 +414,9 @@ final class WinterMovement implements Listener {
         player.getWorld().spawnParticle(Particle.ITEM, at, 12, 0.25, 0.25, 0.25, 0.05, rimeParticle);
     }
 
-    /** Присед зажат и нажат пробел — прыжок от стены. Без зацепа это обычный присед. */
+    /** Присед зажат и нажат пробел — прыжок от стены. Прыгнуть можно только когда дрифт
+     *  доехал до предела (дымка пропала): до этого изморозь ещё тормозит, и пробел лишь
+     *  подсказывает, что скорость должна упасть. Без зацепа это обычный присед. */
     @EventHandler
     public void input(PlayerInputEvent event) {
         Player player = event.getPlayer();
@@ -421,11 +424,16 @@ final class WinterMovement implements Listener {
         if (state == null || state.grip == Grip.NONE || state.frozenUntil > tick) return;
         if (!event.getInput().isJump()) return;
         if (!event.getInput().isSneak() && !player.isSneaking()) return;
+        double floor = slideFloor(state);
+        if (!WinterRules.atSlideFloor(state.slideSpeed, floor)) {
+            player.sendActionBar("§bДрифт: тормози шифтом — пробел подбросит, когда скорость упадёт");
+            return;
+        }
         wallJump(player, state);
     }
 
-    /** Прыжок от стены: как обычный прыжок игрока — 0.42 вверх плюс небольшой
-     *  толчок от грани (mod wallKick, но сила уменьшена), и 4 прочности изморози. */
+    /** Прыжок от стены: только вверх, без толчка в сторону, — так игрок остаётся у грани
+     *  и может зацепиться заново выше. Стоит 4 прочности изморози (16 в сумме, хватает на 4 прыжка). */
     private void wallJump(Player player, State state) {
         Block wall = state.wall;
         BlockFace face = state.face;
@@ -433,6 +441,7 @@ final class WinterMovement implements Listener {
         if (wall != null) iceBreakEffects(player, wall);
         release(player, true); // прыжок откат не даёт: иначе не получится карабкаться вверх
         player.setFallDistance(0);
+        // Толчок в сторону по умолчанию нулевой (jump-forward = 0) — прыжок только вверх.
         player.setVelocity(normal.multiply(tuning.jumpForward()).setY(tuning.jumpUp()));
         Location at = wall == null ? player.getLocation() : nearestFace(wall, player.getEyeLocation());
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_KNOCKBACK, 1.0f, 1.2f);
@@ -472,8 +481,9 @@ final class WinterMovement implements Listener {
         state.wall = hit.getHitBlock(); state.face = hit.getHitBlockFace();
         state.hardWall = hard(state.wall);
         if (drifted(player, state)) { release(player); return; } // снос в сторону
-        // Присед: на твёрдом блоке инструмент держит игрока, на мягком скольжение идёт своим ходом.
-        if (player.isSneaking() && state.hardWall) hold(player, state);
+        // Присед включает режим дрифта: инструмент тормозит скольжение до предела, и на этом
+        // пределе пробелом можно прыгнуть вверх. Без приседа — обычное скольжение с трением.
+        if (player.isSneaking()) drift(player, state);
         else wallSlide(player, state, hardness);
     }
 
@@ -488,31 +498,73 @@ final class WinterMovement implements Listener {
         return dx * dx + dz * dz > tuning.drift() * tuning.drift();
     }
 
-    /** Присед: инструмент держит крепко, но не намертво — игрок медленно сползает вниз
-     *  на hold-floor-speed (это прежняя минимальная скорость скольжения).
-     *  hang-seconds больше нуля ограничивает такое удержание, как время кирки в моде; 0 — без предела. */
-    private void hold(Player player, State state) {
+    /** Режим дрифта (зажат присед): инструмент тормозит ровно — скорость падает на одну и ту же
+     *  величину за тик, пока не дойдёт до предела блока. Пока идёт такое торможение, у грани
+     *  летит дымка от трения; на пределе дымка пропадает, изморозь держит, и пробел подбрасывает
+     *  игрока вверх — оттуда он цепляется заново выше. В креативе и на мягких блоках поведение
+     *  то же, просто предел у мягкого блока выше (0.30).
+     *  hang-seconds больше нуля ограничивает дрифт, как время кирки в моде; 0 — без предела. */
+    private void drift(Player player, State state) {
         if (tuning.hangTicks() > 0) {
-            if (!state.holding) state.hangUntil = tick + tuning.hangTicks();
+            if (!state.drifting) state.hangUntil = tick + tuning.hangTicks();
             if (state.hangUntil <= tick) { slip(player, state); return; }
         }
-        state.holding = true;
+        state.drifting = true;
         state.used = true;
-        state.entered = false;              // после приседа скольжение начнётся заново
-        state.slideSpeed = tuning.holdFloor();
-        gripControl(player, state);         // ходьба по нулям: игрок сползает, но не уходит вдоль стены
-        player.setFallDistance(0);
-        player.setVelocity(new Vector(0, -WinterRules.velocityForSpeed(tuning.holdFloor()), 0));
+        double floor = slideFloor(state);
+        if (!state.hardWall) state.softFallUntil = tick + WinterRules.SOFT_FALL_GRACE_TICKS;
+        if (!state.entered) {
+            // Зацепились сразу с зажатым приседом: скорость входа та же, что у скольжения.
+            state.entered = true;
+            state.slideSpeed = WinterRules.slideEntry(fallSpeed(player), floor, tuning.slideMinEntry(),
+                    tuning.slideEntry());
+        } else {
+            state.slideSpeed = WinterRules.slideDrift(state.slideSpeed, floor, tuning.driftDeceleration());
+        }
+        state.grip = Grip.SLIDE;
+        gripControl(player, state);         // ходьба по нулям: игрок тормозит вдоль грани, а не уходит от неё
+        if (state.hardWall) player.setFallDistance(0); // инструмент держит: падение не копится
+        Vector velocity = player.getVelocity();
+        player.setVelocity(new Vector(velocity.getX() * WinterRules.HORIZONTAL_DAMPING,
+                -WinterRules.velocityForSpeed(state.slideSpeed),
+                velocity.getZ() * WinterRules.HORIZONTAL_DAMPING));
+        driftFx(player, state, floor);
         scrapeFx(player, state, true);
+    }
+
+    /** Ползущая скорость блока, к которой тормозит дрифт. */
+    private double slideFloor(State state) {
+        return WinterRules.slideFloor(!state.hardWall, tuning.hardFloor(), tuning.softFloor());
+    }
+
+    /** Дымка от трения: пока инструмент тормозит, у грани идут белые клубы — по ним игрок видит,
+     *  что ещё дрифтит. Как только скорость дошла до предела, дымка пропадает, летит короткий
+     *  клуб «готово» и в строке подсказка: значит, пробелом можно прыгнуть вверх. */
+    private void driftFx(Player player, State state, double floor) {
+        Block wall = state.wall;
+        Location at = wall == null ? player.getLocation().add(0, 1, 0)
+                : nearestFace(wall, player.getEyeLocation());
+        if (WinterRules.atSlideFloor(state.slideSpeed, floor)) {
+            if (!state.driftReady) {
+                state.driftReady = true;
+                player.getWorld().spawnParticle(Particle.CLOUD, at, 8, 0.18, 0.25, 0.18, 0.02);
+                player.sendActionBar("§bИзморозь держит: пробел — прыжок вверх");
+            }
+            return;
+        }
+        state.driftReady = false;
+        if (tick % 2 != 0) return;
+        player.getWorld().spawnParticle(Particle.CLOUD, at, 2, 0.12, 0.22, 0.12, 0.01);
+        player.getWorld().spawnParticle(Particle.WHITE_ASH, at, 1, 0.1, 0.18, 0.1, 0.01);
     }
 
     /** Скольжение: скорость входа даёт падение, дальше трение блока отнимает её каждый тик —
      *  «быстро, медленнее, ещё медленнее». Твёрдый блок тормозит сильнее и почти останавливает
      *  игрока, мягкий только притормаживает, а ползущая скорость у него выше. */
     private void wallSlide(Player player, State state, double hardness) {
-        state.holding = false; state.used = true; state.hangUntil = 0;
+        state.drifting = false; state.driftReady = false; state.used = true; state.hangUntil = 0;
         if (!state.hardWall) state.softFallUntil = tick + WinterRules.SOFT_FALL_GRACE_TICKS;
-        double floor = WinterRules.slideFloor(!state.hardWall, tuning.hardFloor(), tuning.softFloor());
+        double floor = slideFloor(state);
         if (!state.entered) {
             // Скорость входа — та, с которой игрок подлетел к стене: выше падал, дольше тормозить.
             state.entered = true;
@@ -560,12 +612,12 @@ final class WinterMovement implements Listener {
 
     /** Звук и осколки блока у грани, пока инструмент скользит или сползает: у мода это
      *  spawnJuice — звук самого блока плюс его частицы. Чем быстрее скольжение, тем громче. */
-    private void scrapeFx(Player player, State state, boolean holding) {
+    private void scrapeFx(Player player, State state, boolean braking) {
         Block wall = state.wall;
         if (wall == null || wall.getType().isAir()) return;
         Location at = nearestFace(wall, player.getEyeLocation());
         SoundGroup sounds = wall.getBlockData().getSoundGroup();
-        if (holding) {
+        if (braking) {
             if (tick % 12 == 0) player.getWorld().playSound(at, sounds.getHitSound(), 0.3f, 1.1f);
         } else if (tick % 4 == 0) {
             double ratio = Math.clamp(state.slideSpeed / Math.max(tuning.slideEntry(), 1e-6), 0.0, 1.0);
@@ -742,7 +794,7 @@ final class WinterMovement implements Listener {
             clearIce(state);
             state.grip = Grip.NONE; state.wall = null; state.face = null;
             state.driftAnchor = null; state.hangUntil = 0;
-            state.holding = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
+            state.drifting = false; state.driftReady = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
             restoreControl(player, state);
             if (state.coldUntil != 0) restoreCold(player, state);
         }

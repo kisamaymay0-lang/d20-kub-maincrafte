@@ -27,7 +27,8 @@ final class WinterRules {
                                                        // в config.yml по умолчанию 0 — держит без ограничения
     static final int SOFT_FALL_GRACE_TICKS = 5;        // окно после скольжения по мягкому блоку
     static final double AUTO_GRAB_MAX_RISE = 0.0;      // пока взлетаем, присед ещё не цепляется: зацеп по апогею
-    static final double WALL_JUMP_FORWARD_BOOST = 0.2; // от стены — скорость ходьбы, а не модовые 1.4
+    static final double WALL_JUMP_FORWARD_BOOST = 0.0; // только вверх: от стены не толкаем,
+                                                       // иначе игрок сразу отлетает и не карабкается
     static final double WALL_JUMP_UPWARD_BOOST = 0.55; // вверх — больше обычного прыжка (0.42): чтобы
                                                        // заново цепляться выше и карабкаться вверх
     static final double SOFT_FALL_DAMAGE = 0.5;        // mechanics.soft_fall_damage
@@ -41,7 +42,11 @@ final class WinterRules {
        Даже короткое падение начинает скользить: скорость входа не ниже min-entry-speed.
        Твёрдый блок держит крепче мягкого, поэтому скольжение гаснет почти в ноль; у мягкого
        «ползущая» скорость высокая, и сползание продолжается.
-       Присед не останавливает совсем, а переводит на тихий шаг — hold-floor-speed. */
+       Присед включает режим дрифта: скорость падает ровно на slide-drift-deceleration за тик
+       до «ползущей» скорости, а на ней изморозь держит — оттуда можно прыгнуть вверх
+       (см. slideDrift и atSlideFloor). */
+    /** Версия чисел зацепа в config.yml: по ней видно, что файл обновлён под дрифт
+     *  и режим дрифта шифтом (в старом файле лежат прежние числа — они не применяются). */
     static final double SLIDE_ENTRY_SPEED = 1.5;             // предел скорости входа: её даёт высота падения
     static final double SLIDE_MIN_ENTRY_SPEED = 0.7;         // и её минимум: дрифт начинается даже с двух блоков
     static final double SLIDE_HARD_FRICTION = 0.006;         // трение твёрдого блока у «ползущей» скорости
@@ -49,14 +54,13 @@ final class WinterRules {
     static final double SLIDE_HARD_FRICTION_HARDNESS = 0.006; // чем прочнее блок, тем сильнее трение
     static final double SLIDE_HARD_FRICTION_MAX = 0.35;      // предел: обсидиан гасит почти сразу
     static final double SLIDE_HARD_FLOOR_SPEED = 0.12;       // минимальная скорость скольжения (2.4 блока в секунду)
-    static final double SLIDE_HOLD_FLOOR_SPEED = 0.05;       // на приседе инструмент сползает тише: 1 блок в секунду
+    static final double SLIDE_DRIFT_DECELERATION = 0.04;     // режим дрифта (шифт): скорость падает ровно
+                                                             // на столько за тик — плавно и предсказуемо
     static final double SLIDE_SOFT_FRICTION = 0.008;          // мягкий блок тормозит слабее
     static final double SLIDE_SOFT_FRICTION_RAMP = 0.024;
     static final double SLIDE_SOFT_FLOOR_SPEED = 0.30;       // и не держит: сползание продолжается
     static final int SLIDE_COOLDOWN_TICKS = 80;              // откат изморози после скольжения — 4 секунды
-    /** Версия чисел зацепа в config.yml: по ней видно, что файл обновлён под дрифт
-     *  (в старом файле лежат прежние резкие значения — они не применяются). */
-    static final int GOUGE_CONFIG_VERSION = 3;
+    static final int GOUGE_CONFIG_VERSION = 4;
 
     /* Ванильная механика: скорость падения растёт как (v + 0.08) * 0.98, а заданная скорость
        доходит до клиента умноженной на 0.98 — отсюда множитель в velocityForSpeed. */
@@ -102,7 +106,9 @@ final class WinterRules {
 
     /** Трение за тик: в начале скольжения блок держит крепче всего, а к «ползущей» скорости
      *  хватка слабеет до base. Поэтому скорость тает плавным дрифтом: заметное торможение
-     *  приходится на быструю часть, а низ проходится мягко, без обрыва. */
+     *  приходится на быструю часть, а низ проходится мягко, без обрыва.
+     *  В режиме дрифта (шифт) трение не считается: скорость падает ровно на одну и ту же
+     *  величину за тик — см. slideDrift. */
     static double slideFriction(double speed, double entrySpeed, double floorSpeed, double base, double ramp) {
         double span = Math.max(entrySpeed - floorSpeed, 1e-6);
         double grip = Math.clamp((speed - floorSpeed) / span, 0.0, 1.0);
@@ -112,6 +118,17 @@ final class WinterRules {
     /** Тик скольжения: трение отнимает скорость, но ниже «ползущей» блок её не отдаёт. */
     static double slideStep(double speed, double floorSpeed, double friction) {
         return Math.max(floorSpeed, speed - friction);
+    }
+
+    /** Режим дрифта (зажат шифт): скорость падает ровно на deceleration за тик и никогда
+     *  не проваливается ниже «ползущей» — торможение плавное, без рывка на последних тиках. */
+    static double slideDrift(double speed, double floorSpeed, double deceleration) {
+        return Math.max(floorSpeed, speed - Math.max(0, deceleration));
+    }
+
+    /** Дрифт закончился: скорость дошла до предела и инструмент держит — можно прыгать вверх. */
+    static boolean atSlideFloor(double speed, double floorSpeed) {
+        return speed <= floorSpeed + 1e-6;
     }
 
     /** «Ползущая» скорость блока: у мягкого она высокая — инструмент мягкое не держит. */

@@ -100,7 +100,8 @@ class WinterRulesTest {
         assertEquals(0.55, WinterRules.WALL_JUMP_UPWARD_BOOST, 1e-9);
         assertTrue(WinterRules.WALL_JUMP_UPWARD_BOOST > 0.42, "выше обычного прыжка");
         assertTrue(WinterRules.WALL_JUMP_UPWARD_BOOST < 0.7, "и всё ещё умеренный");
-        assertTrue(WinterRules.WALL_JUMP_FORWARD_BOOST <= 0.3);
+        // Прыжок только вверх: от грани не толкаем, иначе игрока относит и не выходит карабкаться.
+        assertEquals(0.0, WinterRules.WALL_JUMP_FORWARD_BOOST, 1e-9);
     }
 
     @Test
@@ -234,12 +235,30 @@ class WinterRulesTest {
     }
 
     @Test
-    void crouchKeepsCreepingInsteadOfStopping() {
-        // Присед больше не останавливает: игрок сползает на прежней минимальной скорости.
-        assertEquals(0.05, WinterRules.SLIDE_HOLD_FLOOR_SPEED, 1e-9);
-        assertTrue(WinterRules.SLIDE_HOLD_FLOOR_SPEED < WinterRules.SLIDE_HARD_FLOOR_SPEED);
-        // Сползание медленнее «быстрого» скольжения, поэтому прочность на нём не тратится.
-        assertTrue(WinterRules.SLIDE_HOLD_FLOOR_SPEED < WinterRules.SLIDE_DAMAGE_MIN_SPEED);
+    void shiftTurnsTheSlideIntoAControlledDrift() {
+        // Присед включает режим дрифта: скорость падает ровно на одну и ту же величину за тик.
+        assertEquals(0.04, WinterRules.SLIDE_DRIFT_DECELERATION, 1e-9);
+        assertEquals(1.46, WinterRules.slideDrift(1.50, 0.12, 0.04), 1e-9);
+        assertEquals(0.12, WinterRules.slideDrift(0.13, 0.12, 0.04), 1e-9);  // ниже предела не падает
+        assertEquals(0.30, WinterRules.slideDrift(0.30, 0.30, 0.04), 1e-9); // мягкий блок держит на 0.30
+        assertEquals(1.50, WinterRules.slideDrift(1.50, 0.12, 0), 1e-9);    // дрифт можно и выключить
+
+        // Доезжает до предела быстрее обычного скольжения, и тормозит ровно, без рывка на низах.
+        double speed = 1.5;
+        int ticks = 0;
+        while (!WinterRules.atSlideFloor(speed, 0.12) && ticks < 600) {
+            speed = WinterRules.slideDrift(speed, 0.12, WinterRules.SLIDE_DRIFT_DECELERATION);
+            ticks++;
+        }
+        assertEquals(35, ticks);
+        assertTrue(ticks < 53, "шифт тормозит быстрее, чем скольжение само по себе");
+        assertEquals(0.12, speed, 1e-9);
+
+        // На пределе прыжок разрешён, а пока идёт торможение — нет: это и показывает дымка.
+        assertTrue(WinterRules.atSlideFloor(0.12, 0.12));
+        assertTrue(WinterRules.atSlideFloor(0.30, 0.30));
+        assertFalse(WinterRules.atSlideFloor(0.20, 0.12));
+        assertFalse(WinterRules.atSlideFloor(0.36, 0.30));
     }
 
     @Test
