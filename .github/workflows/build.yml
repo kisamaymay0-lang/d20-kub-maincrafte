@@ -25,6 +25,60 @@ jobs:
     - name: Validate resource pack
       run: python3 scripts/build_resourcepack.py --check
 
+    # Готовый пак, который уходит игрокам вместе с банкой. Проверяем то, что
+    # ломалось по факту: pack.mcmeta в корне архива, определения предметов
+    # косметики, живой JSON и отсутствие блок-стейта узорчатой вазы.
+    - name: Validate shipped resource pack
+      run: |
+        python3 - <<'PY'
+        import json, sys, zipfile
+
+        archive = zipfile.ZipFile("docs/f8resurspack-fixed.zip")
+        names = archive.namelist()
+        problems = []
+        if "pack.mcmeta" not in names:
+            problems.append("pack.mcmeta must sit at the archive root")
+        blobs = {n: archive.read(n) for n in names}
+        for name, blob in blobs.items():
+            if name.endswith(".json"):
+                try:
+                    json.loads(blob)
+                except ValueError as error:
+                    problems.append(f"{name}: {error}")
+
+        def model_exists(ref):
+            if ref.startswith("minecraft:"):
+                return True
+            namespace, _, path = ref.partition(":")
+            return f"assets/{namespace}/models/{path}.json" in blobs
+
+        for name in [n for n in names if n.startswith("assets/f8resurs/items/")]:
+            model = json.loads(blobs[name]).get("model", {}).get("model", "")
+            if not model_exists(model):
+                problems.append(f"{name}: missing model {model}")
+        for name in [n for n in names if n.startswith("assets/f8resurs/models/")]:
+            model = json.loads(blobs[name])
+            parent = model.get("parent", "")
+            if parent and not model_exists(parent):
+                problems.append(f"{name}: missing parent {parent}")
+            for ref in model.get("textures", {}).values():
+                if isinstance(ref, str) and ref.startswith("f8resurs:"):
+                    texture = "assets/f8resurs/textures/" + ref.split(":", 1)[1] + ".png"
+                    if texture not in blobs:
+                        problems.append(f"{name}: missing texture {texture}")
+
+        for item in ("kosmetika1", "kosmetika2", "kosmetika3"):
+            if f"assets/f8resurs/items/{item}.json" not in blobs:
+                problems.append(f"missing item definition: {item}")
+        if "assets/minecraft/blockstates/decorated_pot.json" in blobs:
+            problems.append("decorated_pot blockstate must not ship: the pot body "
+                            "is drawn by a block entity renderer")
+        if problems:
+            print("\n".join(problems))
+            sys.exit(1)
+        print(f"OK: shipped pack has {len(names)} files")
+        PY
+
     - name: Build with Maven
       id: maven
       shell: bash
@@ -76,7 +130,8 @@ jobs:
       if: steps.maven.outputs.exit_code == '0'
       uses: actions/upload-artifact@v4
       with:
-        name: f8-plugin-10.1
+        name: f8-plugin-10.29
         path: |
           target/*.jar
-          f8resurs-resourcepack.zip
+          docs/f8resurspack-fixed.zip
+          docs/craftengine-blocks/**

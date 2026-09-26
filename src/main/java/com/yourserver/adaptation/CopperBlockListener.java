@@ -2,17 +2,14 @@ package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
-import org.bukkit.Instrument;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.Note;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.World;
 import org.bukkit.block.Block;
-import org.bukkit.block.data.type.NoteBlock;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -57,12 +54,14 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Медный нотный блок.
  *
- * В основе лежит обычный NOTE_BLOCK:
+ * Блок — кастомный блок CraftEngine {@code f8resurs:copper_note_block}:
  *  - запуск ТОЛЬКО по изменению физического питания с 0 на 1;
- *  - ванильная нота, в том числе от удара рукой, всегда заглушена;
- *  - Paper не посылает BlockRedstoneEvent для самого NOTE_BLOCK, поэтому
+ *  - Paper не посылает BlockRedstoneEvent для самого блока, поэтому
  *    заполненные блоки проверяются раз в тик (без загрузки чанков);
- *  - нота №24 (MARKER_NOTE) зарезервирована для модели поставленного блока.
+ *  - свой блок плагин узнаёт по id в CraftEngine, а не по состоянию носителя.
+ *    До 10.21 признаком была нота №24 обычного нотного блока, и любой
+ *    настроенный до ноты 24 нотный блок становился медным — теперь это
+ *    невозможно: медный нотный блок получается только крафтом.
  *
  * В слоте "таймера" (слот №10) может лежать:
  *  - пластинка — тогда блок работает как проигрыватель (см. ниже);
@@ -71,7 +70,6 @@ import java.util.concurrent.ThreadLocalRandom;
 public class CopperBlockListener implements Listener {
 
     private static final int TIMER_SLOT = 10;
-    private static final int MARKER_NOTE = 24;
     private static final double DISC_RANGE = 65.0;
     private static final long DEBOUNCE_MS = 400L;
 
@@ -96,6 +94,8 @@ public class CopperBlockListener implements Listener {
             new HashSet<>();
 
     private final NamespacedKey copperBlockKey;
+    /** Сказали ли уже, почему блок не ставится. */
+    private boolean placeWarned;
     private final Map<String, Location> powerTrackedBlocks = new HashMap<>();
     private final PowerEdgeTracker powerEdges = new PowerEdgeTracker();
     private BukkitTask powerTask;
@@ -144,15 +144,48 @@ public class CopperBlockListener implements Listener {
         loadAllBlocksFromFile();
         registerRecipe();
         powerTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickRedstone, 1L, 1L);
+        if (!CraftEngineCopper.available()) {
+            plugin.getLogger().warning("CraftEngine не найден: медный нотный блок — кастомный "
+                    + "блок, и без CraftEngine он не ставится вовсе. Поставьте CraftEngine с "
+                    + "https://modrinth.com/plugin/craftengine и скопируйте конфиги блоков в свой "
+                    + "пак (список и образец: " + CraftEngineSupport.CONFIG_DOC + ").");
+        }
     }
 
+    /**
+     * Крафт медного нотного блока — бесформенный: нотный блок, редстоун, алмаз
+     * и любая медная решётка, порядок в сетке не важен.
+     *
+     * До 10.20 вместо алмаза был кусочек меди.
+     */
     private void registerRecipe() {
         NamespacedKey key = new NamespacedKey(plugin, "copper_note_block");
         ShapelessRecipe recipe = new ShapelessRecipe(key, createCopperBlockItem());
-        recipe.addIngredient(Material.NOTE_BLOCK);
-        recipe.addIngredient(Material.COPPER_NUGGET);
-        recipe.addIngredient(Material.REDSTONE);
-        recipe.addIngredient(new RecipeChoice.MaterialChoice(List.of(
+        for (Material material : recipeSingles()) {
+            recipe.addIngredient(material);
+        }
+        recipe.addIngredient(new RecipeChoice.MaterialChoice(copperGrates()));
+        Bukkit.removeRecipe(key);
+        Bukkit.addRecipe(recipe);
+    }
+
+    /**
+     * Одиночные ингредиенты крафта: по одному каждого, плюс четвёртым слотом
+     * любая медная решётка из {@link #copperGrates()}.
+     *
+     * Метод возвращает просто список материалов, а не готовые
+     * {@code RecipeChoice.MaterialChoice}: конструктор {@code MaterialChoice}
+     * спрашивает у каждого материала {@code isAir()}, а это идёт в реестр
+     * {@code Registry.BLOCK} — без запущенного сервера он не существует. Так
+     * крафт можно проверить тестом.
+     */
+    static List<Material> recipeSingles() {
+        return List.of(Material.NOTE_BLOCK, Material.REDSTONE, Material.DIAMOND);
+    }
+
+    /** Решётки, которые годятся в крафт: все стадии окисления и все вощёные. */
+    static List<Material> copperGrates() {
+        return List.of(
                 Material.COPPER_GRATE,
                 Material.EXPOSED_COPPER_GRATE,
                 Material.WEATHERED_COPPER_GRATE,
@@ -160,10 +193,7 @@ public class CopperBlockListener implements Listener {
                 Material.WAXED_COPPER_GRATE,
                 Material.WAXED_EXPOSED_COPPER_GRATE,
                 Material.WAXED_WEATHERED_COPPER_GRATE,
-                Material.WAXED_OXIDIZED_COPPER_GRATE
-        )));
-        Bukkit.removeRecipe(key);
-        Bukkit.addRecipe(recipe);
+                Material.WAXED_OXIDIZED_COPPER_GRATE);
     }
 
     // ===== ПРЕДМЕТ БЛОКА =====
@@ -205,24 +235,17 @@ public class CopperBlockListener implements Listener {
                 .has(copperBlockKey, PersistentDataType.BYTE);
     }
 
+    /**
+     * Наш ли это медный нотный блок — только по id кастомного блока CraftEngine.
+     *
+     * Раньше признаком была нота №24 обычного нотного блока, и любой настроенный
+     * до ноты 24 нотный блок становился медным: открывал меню и дропал предмет
+     * медного блока при разрушении. Так медный блок можно было получить без
+     * крафта, поэтому путь по ноте убран целиком — ни в распознавании, ни в
+     * переносе.
+     */
     private boolean isCopperBlock(Block block) {
-        if (block == null
-                || block.getType() != Material.NOTE_BLOCK) {
-            return false;
-        }
-
-        if (!(block.getBlockData() instanceof NoteBlock noteBlock)) {
-            return false;
-        }
-
-        if (noteBlock.getNote().getId() != MARKER_NOTE) {
-            return false;
-        }
-
-        // Ноту 24 с инструментами флейта/банджо резервирует Древний кувшин.
-        Instrument instrument = noteBlock.getInstrument();
-        return instrument != AncientJug.EMPTY_INSTRUMENT
-                && instrument != AncientJug.FILLED_INSTRUMENT;
+        return CraftEngineCopper.isCopper(block);
     }
 
     private String getBlockKey(Block block) {
@@ -265,17 +288,40 @@ public class CopperBlockListener implements Listener {
 
         Block block = event.getBlockPlaced();
 
+        // Предмет — обычный нотный блок с подменённой моделью, поэтому клиент
+        // первым делом ставит именно нотный блок. Если кастомный блок не
+        // встанет, он так и остался бы стоять — обычным нотным блоком, который
+        // ещё и звенит. Отменяем.
         if (block.getType() != Material.NOTE_BLOCK) {
             return;
         }
 
-        NoteBlock data = (NoteBlock) block.getBlockData();
-        data.setNote(new Note(MARKER_NOTE));
-        // Медный блок всегда играет арфой: инструменты флейта/банджо при
-        // ноте 24 зарезервированы Древним кувшином (модель выбирает ресурспак).
-        data.setInstrument(Instrument.PIANO);
-        data.setPowered(false);
-        block.setBlockData(data, false);
+        if (!CraftEngineCopper.ready() || !CraftEngineCopper.place(block)) {
+            event.setCancelled(true);
+            event.getPlayer().sendMessage(org.bukkit.ChatColor.RED
+                    + "Медный нотный блок не ставится: CraftEngine не зарегистрировал блок "
+                    + CraftEngineCopper.ID + ". Причина — в консоли сервера.");
+            warnOnce();
+            return;
+        }
+
+        // Клиент предсказал нотный блок. Возвращаем ему настоящее состояние,
+        // чтобы модель появилась сразу.
+        event.getPlayer().sendBlockChange(block.getLocation(), block.getBlockData());
+    }
+
+    /** Один раз за запуск говорит, почему блок не ставится. */
+    private void warnOnce() {
+        if (placeWarned) {
+            return;
+        }
+        placeWarned = true;
+        String diagnosis = CraftEngineCopper.diagnosis();
+        plugin.getLogger().warning("CraftEngine не принял блок " + CraftEngineCopper.ID + ". "
+                + (diagnosis.isEmpty()
+                ? "Проверьте консоль CraftEngine; блоки, которые нужны плагину, описаны в "
+                        + CraftEngineSupport.CONFIG_DOC + "."
+                : diagnosis));
     }
 
     // ===== ОТКРЫТИЕ МЕНЮ =====
@@ -1015,8 +1061,8 @@ public class CopperBlockListener implements Listener {
             blockData.set("blocks." + key, null);
             block.removeMetadata("copper_playing", plugin);
             block.removeMetadata("last_copper_trigger", plugin);
-            // Сам MARKER_NOTE перемещает поршень вместе с BlockData.
-            // Данных в новом месте пока нет: блок гарантированно пустой.
+            // Поршень перемещает блок вместе с его состоянием. Данных в новом
+            // месте пока нет: блок гарантированно пустой.
             changed = true;
         }
         if (changed) {
@@ -1080,6 +1126,10 @@ public class CopperBlockListener implements Listener {
 
         blockData.set("blocks." + key, null);
         saveBlockData();
+
+        // Кастомный блок гасим сами: ванильное «поставить воздух» к блоку
+        // CraftEngine отношения не имеет.
+        CraftEngineCopper.remove(block);
     }
 
     // ===== ЗАГРУЗКА ИЗ ФАЙЛА =====

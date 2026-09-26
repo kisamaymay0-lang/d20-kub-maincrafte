@@ -66,7 +66,20 @@ public class F8Command implements CommandExecutor, Listener {
             String label,
             String[] args
     ) {
+        // /f8 reload — перечитать config.yml (доступно и из консоли).
+        if (args.length > 0 && args[0].equalsIgnoreCase("reload")) {
+            if (!sender.hasPermission("f8.admin")) {
+                sender.sendMessage("§cНедостаточно прав.");
+                return true;
+            }
+            String summary = plugin.reloadPluginSettings();
+            sender.sendMessage("§aНастройки f8-plugin перечитаны из config.yml.");
+            if (summary != null && !summary.isBlank()) sender.sendMessage(summary);
+            return true;
+        }
+
         if (!(sender instanceof Player player)) {
+            sender.sendMessage("§7Использование: /f8 reload — перечитать config.yml");
             return true;
         }
 
@@ -216,7 +229,8 @@ public class F8Command implements CommandExecutor, Listener {
 
     static final List<String> ITEM_CATALOG = List.of("water_flask", "poison_flask", "red_caviar", "black_caviar",
             "empty_cod", "empty_salmon", "caviar_sandwich_red", "caviar_sandwich_black",
-            "icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich", "ancient_jug");
+            "icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich", "ancient_jug",
+            "crab_claw");
 
     private ItemStack catalogItem(String id) {
         return switch (id) {
@@ -234,6 +248,7 @@ public class F8Command implements CommandExecutor, Listener {
             case "ice_caviar" -> winterFishing.items.create(WinterItems.Kind.ROE);
             case "ice_caviar_sandwich" -> winterFishing.items.create(WinterItems.Kind.SANDWICH);
             case "ancient_jug" -> ancientJug.createEmpty();
+            case "crab_claw" -> winterFishing.items.create(WinterItems.Kind.CLAW);
             default -> throw new IllegalArgumentException("Неизвестный предмет каталога");
         };
     }
@@ -241,7 +256,7 @@ public class F8Command implements CommandExecutor, Listener {
     private void openItemMenu(Player player) {
         Inventory inventory = Bukkit.createInventory(null, 36, ITEM_TITLE);
         fill(inventory);
-        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25};
+        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 30};
         for (int i = 0; i < ITEM_CATALOG.size(); i++) {
             String id = ITEM_CATALOG.get(i);
             inventory.setItem(slots[i], createTaggedItem(catalogItem(id), id));

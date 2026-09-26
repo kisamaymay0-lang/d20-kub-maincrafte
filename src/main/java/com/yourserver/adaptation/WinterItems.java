@@ -3,9 +3,11 @@ package com.yourserver.adaptation;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.UseCooldown;
 import org.bukkit.inventory.RecipeChoice;
 import java.util.ArrayList;
 import java.util.Objects;
+import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
@@ -26,17 +28,21 @@ final class WinterItems {
         RAW("rime", "Изморозь", Material.COD),
         DEPLETED("depleted_rime", "Опустошённая изморозь", Material.COD),
         ROE("ice_caviar", "Ледяная икра", Material.LIGHT_BLUE_DYE),
-        SANDWICH("ice_caviar_sandwich", "Бутерброд с ледяной икрой", Material.BREAD);
+        SANDWICH("ice_caviar_sandwich", "Бутерброд с ледяной икрой", Material.BREAD),
+        CLAW("crab_claw", "Клешня краба", Material.PRISMARINE_SHARD);
         final String id, title;
         final Material material;
         Kind(String id, String title, Material material) { this.id = id; this.title = title; this.material = material; }
     }
     private final NamespacedKey kindKey;
     private final NamespacedKey toolKey;
+    /** Своя группа кулдауна: перезарядка касается только изморози, а не всех алмазных кирок. */
+    private final NamespacedKey cooldownKey;
 
     WinterItems(JavaPlugin plugin) {
         kindKey = new NamespacedKey(plugin, "winter_item");
         toolKey = new NamespacedKey(plugin, "winter_tool_id");
+        cooldownKey = new NamespacedKey(plugin, "rime_cooldown");
     }
 
     ItemStack create(Kind kind) {
@@ -58,7 +64,10 @@ final class WinterItems {
             food.setCanAlwaysEat(false); meta.setFood(food);
         }
         item.setItemMeta(meta);
-        if (kind == Kind.TOOL) item.unsetData(DataComponentTypes.ENCHANTABLE);
+        if (kind == Kind.TOOL) {
+            item.unsetData(DataComponentTypes.ENCHANTABLE);
+            item.setData(DataComponentTypes.USE_COOLDOWN, cooldown());
+        }
         return item;
     }
 
@@ -68,7 +77,24 @@ final class WinterItems {
             case RAW, DEPLETED -> "Рыба с неведомых земель.";
             case ROE -> "Добывается из Изморози (shift + ПКМ)";
             case SANDWICH -> "Сытный, как золотая морковка";
+            case CLAW -> "Особый предмет рыбалки в болотах.";
         };
+    }
+
+    /** Прежние описания: их тоже заменяем на актуальные, чтобы выданные ранее вещи обновились. */
+    private static final java.util.Set<String> LEGACY_LORE = java.util.Set.of(
+            "Особый предмет рыбалки в зимних биомах.",             // изморозь до 10.22
+            "В руке дальность взаимодействия +3 блока, в правой руке копает инструментами из инвентаря.");
+
+    /** Описания изморози, которые когда-то выдавала механика зацепа: их возвращаем к прежнему. */
+    private static final java.util.Set<String> RIME_LORE = java.util.Set.of(
+            "ПКМ по стене в падении — зацеп, двойной присед — прыжок от стены.",
+            "ПКМ по стене в падении — зацеп, Shift + пробел — прыжок от стены.");
+
+    private static boolean defaultLore(Kind kind, String plain) {
+        return plain.equals(description(kind)) || LEGACY_LORE.contains(plain)
+                || (kind == Kind.TOOL && RIME_LORE.contains(plain))
+                || (kind == Kind.ROE && plain.equals("Добывается из Изморози"));
     }
 
     RecipeChoice.ExactChoice recipeInput(Kind kind) {
@@ -102,9 +128,8 @@ final class WinterItems {
             if (meta.hasEnchantmentGlintOverride() && meta.getEnchantmentGlintOverride()) meta.setEnchantmentGlintOverride(false);
         }
         var lore = meta.lore();
-        if (lore == null || lore.isEmpty() || (lore.size() == 1 && (
-                PlainTextComponentSerializer.plainText().serialize(lore.getFirst()).equals(description(kind))
-                || (kind == Kind.ROE && PlainTextComponentSerializer.plainText().serialize(lore.getFirst()).equals("Добывается из Изморози"))))) {
+        if (lore == null || lore.isEmpty()
+                || (lore.size() == 1 && defaultLore(kind, PlainTextComponentSerializer.plainText().serialize(lore.getFirst())))) {
             meta.lore(List.of(ProfileItems.text(description(kind), NamedTextColor.GRAY)));
         }
         boolean changed = !Objects.equals(before, meta);
@@ -112,8 +137,21 @@ final class WinterItems {
         if (kind == Kind.TOOL && item.hasData(DataComponentTypes.ENCHANTABLE)) {
             item.unsetData(DataComponentTypes.ENCHANTABLE); changed = true;
         }
+        // Старым изморозям без группы кулдауна дописываем её, чтобы перезарядка не белила
+        // обычные алмазные кирки в инвентаре.
+        if (kind == Kind.TOOL && !item.hasData(DataComponentTypes.USE_COOLDOWN)) {
+            item.setData(DataComponentTypes.USE_COOLDOWN, cooldown()); changed = true;
+        }
         return changed;
     }
+
+    /** Кулдаун самой изморози: секунды ванильного использования нам не нужны — время задаёт
+     *  плагин (player.setCooldown), а группа нужна, чтобы белый таймер был только на изморози. */
+    private UseCooldown cooldown() {
+        return UseCooldown.useCooldown(0.1f).cooldownGroup(cooldownKey).build();
+    }
+
+    NamespacedKey cooldownGroup() { return cooldownKey; }
 
     Kind kind(ItemStack item) {
         if (item == null || item.getType().isAir()) return null;
@@ -128,13 +166,17 @@ final class WinterItems {
 
     boolean holdsTool(Player player) { return kind(player.getInventory().getItemInMainHand()) == Kind.TOOL; }
 
-    /** Ровно 4 прочности за усиленный прыжок, без случайного уменьшения от «Прочности». */
-    boolean useClimb(Player player) {
+    /** Расход прочности изморози: 4 за прыжок от стены, по 1 за блок быстрого скольжения.
+     *  В креативе инструмент не изнашивается, как и любая обычная кирка.
+     *  Возвращает false, если инструмент стёрся до конца (или его нет в руке). */
+    boolean useClimb(Player player, int amount) {
+        if (amount <= 0) return true;
+        if (player.getGameMode() == GameMode.CREATIVE) return true;
         ItemStack held = player.getInventory().getItemInMainHand();
         if (kind(held) != Kind.TOOL) return false;
         refresh(held);
         if (!(held.getItemMeta() instanceof Damageable meta)) return false;
-        int damage = WinterRules.afterClimb(meta.getDamage());
+        int damage = WinterRules.afterUse(meta.getDamage(), amount);
         if (WinterRules.broken(damage)) {
             player.getInventory().setItemInMainHand(create(Kind.RAW));
             player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.8f, 1.0f);
