@@ -112,6 +112,23 @@ jobs:
         assert counts['tests'] > 0 and counts['failures'] == counts['errors'] == 0
         PYTEST
 
+    # Сборка под 26.2 держится на трёх вещах: JDK 25 и paper-api 26.2,
+    # к которым добавлен CraftEngine той же линии (26.8.x). Если кто-то
+    # откатит версию в pom или поменяет JDK, пусть сборка упадёт здесь,
+    # а не на живом сервере.
+    - name: Check server API target
+      run: |
+        java -version 2>&1 | tee java-version.txt
+        grep -q 'version "25' java-version.txt || {
+          echo "Сервер 26.2 требует Java 25, а в сборке стоит другая"; exit 1; }
+        mvn --batch-mode dependency:tree | tee dependencies.txt
+        grep -q 'io.papermc.paper:paper-api:jar:26\.2' dependencies.txt || {
+          echo "Сборка должна идти против paper-api 26.2 (Minecraft 26.2)"; exit 1; }
+        grep -q 'net.momirealms:craft-engine-bukkit:jar:26\.8' dependencies.txt || {
+          echo "CraftEngine должен быть линии 26.8.x — она собрана под Paper 26.2"; exit 1; }
+        if grep -q 'io.papermc.paper:paper-api:jar:1\.21' dependencies.txt; then
+          echo "В дереве зависимостей остался paper-api 1.21.x"; exit 1; fi
+
     - name: Emit Maven errors as annotations
       if: always() && steps.maven.outputs.exit_code != '' && steps.maven.outputs.exit_code != '0'
       shell: bash
