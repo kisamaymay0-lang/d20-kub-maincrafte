@@ -1,6 +1,7 @@
 package com.yourserver.adaptation;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,6 +23,20 @@ final class CrabClawRules {
     static final double REACH_BONUS = 3.0;
     /** Износ чужого инструмента за один блок: вдвое больше обычного. */
     static final int WEAR_PER_BLOCK = 2;
+    /** Сколько прочности чинит один опыт «Починки» — как в ванили. */
+    static final int MEND_PER_EXPERIENCE = 2;
+
+    /* Зачарования. Клешня берёт у инструментов всё, что решает, что выпадет из блока: «Удачу»
+       и «Шёлковое касание». Остальное она считает сама и потому не копирует: скорость —
+       «Эффективность» (она уже в правилах), износ — «Прочность», починку — «Починка».
+       Копировать их на клешню значило бы посчитать одно и то же дважды. Проклятия тоже
+       остаются на самом инструменте: он лежит в инвентаре и теряется сам. */
+    static final String FORTUNE = "minecraft:fortune";
+    static final String SILK_TOUCH = "minecraft:silk_touch";
+    static final String UNBREAKING = "minecraft:unbreaking";
+    static final String MENDING = "minecraft:mending";
+    /** Что клешня заимствует у инструмента. */
+    static final Set<String> LOOT_ENCHANTS = Set.of(FORTUNE, SILK_TOUCH);
 
     /** Порядок семейств в правилах клешни: у кого выше скорость на общих блоках, тот и раньше.
      *  Так ножницы рвут листву вмиг, а меч по той же листве копает в полтора раза быстрее руки. */
@@ -63,6 +78,9 @@ final class CrabClawRules {
 
     /** Правило, которое клешня отдаёт игре: набор блоков, скорость и дроп. */
     record Spec(Blocks blocks, double speed, boolean drops) { }
+
+    /** Зачарование инструмента: ванильный id и уровень. */
+    record Enchant(String id, int level) { }
 
     /** Правило в виде данных — для расчётов силы инструмента. */
     record Rule(Set<String> anchors, double speed, boolean drops) {
@@ -154,6 +172,64 @@ final class CrabClawRules {
             default -> { }
         }
         return List.copyOf(out);
+    }
+
+    /**
+     * Слить зачарования инструментов в один набор для клешни.
+     *
+     * Список идёт от главного инструмента к остальным, и главный задаёт характер добычи:
+     * «Удача» и «Шёлковое касание» спорят друг с другом (одно умножает дроп, другое выдаёт блок
+     * как есть), поэтому побеждает то, что стоит у главного, а второе не добавляется. Всё
+     * остальное складывается: у каждого зачарования берём самый высокий уровень.
+     */
+    static List<Enchant> merge(List<List<Enchant>> perTool) {
+        Map<String, Integer> merged = new LinkedHashMap<>();
+        for (List<Enchant> tool : perTool) {
+            for (Enchant enchant : tool) {
+                if (merged.containsKey(opposite(enchant.id()))) continue;   // шелк и удача спорят
+                merged.merge(enchant.id(), enchant.level(), Math::max);
+            }
+        }
+        List<Enchant> out = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : merged.entrySet()) {
+            out.add(new Enchant(entry.getKey(), entry.getValue()));
+        }
+        return List.copyOf(out);
+    }
+
+    /** Зачарование, с которым спорит это: «Удача» и «Шёлковое касание» вместе не уживаются. */
+    static String opposite(String id) {
+        if (FORTUNE.equals(id)) return SILK_TOUCH;
+        if (SILK_TOUCH.equals(id)) return FORTUNE;
+        return "";
+    }
+
+    /** Старшинство семейств: при равной силе главным считается тот инструмент, которым копают
+     *  чаще, — кирка, топор, лопата, тяпка, а ножницы и меч идут последними. */
+    static int rank(Family family) {
+        return switch (family) {
+            case PICKAXE -> 0;
+            case AXE -> 1;
+            case SHOVEL -> 2;
+            case HOE -> 3;
+            case SWORD -> 4;
+            case SHEARS -> 5;
+            case NONE -> 6;
+        };
+    }
+
+    /** Сколько прочности возьмёт блок с «Прочностью»: с шансом уровень/(уровень+1) износ
+     *  не тратится вовсе (в ванили «Прочность III» бережёт предмет в трёх случаях из четырёх). */
+    static int wear(int base, int unbreaking, double roll) {
+        if (base <= 0 || unbreaking <= 0) return Math.max(0, base);
+        double skip = (double) unbreaking / (unbreaking + 1);
+        return roll < skip ? 0 : base;
+    }
+
+    /** Сколько прочности останется после «Починки»: каждый опыт чинит две прочности. */
+    static int mend(int damage, int experience) {
+        if (experience <= 0) return Math.max(0, damage);
+        return Math.max(0, damage - experience * MEND_PER_EXPERIENCE);
     }
 
     /** Сила инструмента: сколько тяжёлых блоков он берёт с дропом. Первое подходящее правило решает. */

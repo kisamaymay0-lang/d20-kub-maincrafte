@@ -225,6 +225,77 @@ class CrabClawRulesTest {
     }
 
     @Test
+    void mergesEnchantmentsOfEveryToolKeepingTheStrongestLevel() {
+        List<CrabClawRules.Enchant> pickaxe = List.of(
+                new CrabClawRules.Enchant(CrabClawRules.FORTUNE, 2),
+                new CrabClawRules.Enchant(CrabClawRules.UNBREAKING, 1));
+        List<CrabClawRules.Enchant> axe = List.of(
+                new CrabClawRules.Enchant(CrabClawRules.UNBREAKING, 3),
+                new CrabClawRules.Enchant(CrabClawRules.SILK_TOUCH, 1));
+
+        List<CrabClawRules.Enchant> merged = CrabClawRules.merge(List.of(pickaxe, axe, List.of()));
+        assertEquals(2, merged.size());
+        assertEquals(2, level(merged, CrabClawRules.FORTUNE));
+        assertEquals(3, level(merged, CrabClawRules.UNBREAKING), "берём самый высокий уровень");
+        assertEquals(0, level(merged, CrabClawRules.SILK_TOUCH),
+                "пока главный инструмент с удачей, шелк к нему не примешивается");
+    }
+
+    @Test
+    void theMainToolDecidesBetweenFortuneAndSilkTouch() {
+        List<CrabClawRules.Enchant> silky = List.of(new CrabClawRules.Enchant(CrabClawRules.SILK_TOUCH, 1));
+        List<CrabClawRules.Enchant> lucky = List.of(new CrabClawRules.Enchant(CrabClawRules.FORTUNE, 3));
+
+        List<CrabClawRules.Enchant> silkFirst = CrabClawRules.merge(List.of(silky, lucky));
+        assertEquals(1, level(silkFirst, CrabClawRules.SILK_TOUCH));
+        assertEquals(0, level(silkFirst, CrabClawRules.FORTUNE));
+
+        List<CrabClawRules.Enchant> fortuneFirst = CrabClawRules.merge(List.of(lucky, silky));
+        assertEquals(3, level(fortuneFirst, CrabClawRules.FORTUNE));
+        assertEquals(0, level(fortuneFirst, CrabClawRules.SILK_TOUCH));
+        assertEquals("", CrabClawRules.opposite(CrabClawRules.UNBREAKING));
+    }
+
+    @Test
+    void pickaxeIsTheMainToolWhenToolsAreEquallyStrong() {
+        assertEquals(0, CrabClawRules.rank(CrabClawRules.Family.PICKAXE));
+        assertTrue(CrabClawRules.rank(CrabClawRules.Family.PICKAXE)
+                < CrabClawRules.rank(CrabClawRules.Family.AXE));
+        assertTrue(CrabClawRules.rank(CrabClawRules.Family.HOE)
+                < CrabClawRules.rank(CrabClawRules.Family.SHEARS));
+    }
+
+    @Test
+    void unbreakingSavesDurabilityWithVanillaChances() {
+        // «Прочность III» бережёт предмет в трёх случаях из четырёх.
+        assertEquals(0, CrabClawRules.wear(2, 3, 0.0));
+        assertEquals(0, CrabClawRules.wear(2, 3, 0.74));
+        assertEquals(2, CrabClawRules.wear(2, 3, 0.75));
+        assertEquals(2, CrabClawRules.wear(2, 3, 0.99));
+        assertEquals(0, CrabClawRules.wear(2, 1, 0.49));
+        assertEquals(2, CrabClawRules.wear(2, 1, 0.5));
+        assertEquals(2, CrabClawRules.wear(2, 0, 0.0), "без «Прочности» износ идёт как идёт");
+        assertEquals(0, CrabClawRules.wear(0, 0, 0.9));
+        assertEquals(0, CrabClawRules.wear(2, -1, 0.0));
+    }
+
+    @Test
+    void mendingTurnsExperienceIntoDurability() {
+        assertEquals(8, CrabClawRules.mend(10, 1), "очко опыта — две прочности");
+        assertEquals(0, CrabClawRules.mend(10, 5), "лишний опыт просто пропадает");
+        assertEquals(0, CrabClawRules.mend(0, 7));
+        assertEquals(4, CrabClawRules.mend(4, 0), "без «Починки» ничего не меняется");
+        assertTrue(CrabClawRules.LOOT_ENCHANTS.contains(CrabClawRules.FORTUNE));
+        assertTrue(CrabClawRules.LOOT_ENCHANTS.contains(CrabClawRules.SILK_TOUCH));
+        assertFalse(CrabClawRules.LOOT_ENCHANTS.contains(CrabClawRules.UNBREAKING));
+    }
+
+    private static int level(List<CrabClawRules.Enchant> enchants, String id) {
+        for (CrabClawRules.Enchant enchant : enchants) if (enchant.id().equals(id)) return enchant.level();
+        return 0;
+    }
+
+    @Test
     void fallbackBlocksNameTheirTagOrTheirBlocks() {
         CrabClawRules.Blocks tag = new CrabClawRules.Blocks("mineable/pickaxe", List.of());
         assertTrue(tag.names().isEmpty());

@@ -1,7 +1,9 @@
 package com.yourserver.adaptation;
 
 import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.ItemEnchantments;
 import io.papermc.paper.datacomponent.item.Tool;
+import io.papermc.paper.datacomponent.item.TooltipDisplay;
 import io.papermc.paper.registry.RegistryAccess;
 import io.papermc.paper.registry.RegistryKey;
 import io.papermc.paper.registry.TypedKey;
@@ -40,13 +42,16 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Клешня краба — улов болот (обычного и мангрового).
@@ -60,8 +65,15 @@ import java.util.Set;
  * у инструментов игрока: ванильный набор блоков плюс скорость и дроп этого инструмента. Поэтому
  * клешня копает ровно так, как копал бы он сам: игра считает и скорость, и дроп, и полосу копания
  * на клиенте, и защиту регионов (блок ломает сама игра, а не плагин). Нет подходящего инструмента —
- * компонента нет, и клешня копает как обычная рука. Инструмент, которым сломали блок, тратит вдвое
- * больше прочности; сама клешня не изнашивается.
+ * компонента нет, и клешня копает как обычная рука.
+ *
+ * <p>Зачарования инструментов клешня тоже учитывает. «Удачу» и «Шёлковое касание» она заимствует
+ * вместе с правилами — они решают, что выпадет из блока, — и держит у себя невидимо: без блеска
+ * и без строчек в подсказке, чтобы вид предмета остался прежним. «Прочность» считается при износе
+ * (шанс уровень/(уровень+1) не тратить ничего), «Починка» — когда из блока идёт опыт: орбиты
+ * не появляются, а инструмент чинится на две прочности за очко, как в ванили. «Эффективность»
+ * уже сидит в скорости правил, поэтому второй раз не копируется. Инструмент, которым сломали
+ * блок, тратит вдвое больше прочности; сама клешня не изнашивается.
  *
  * Сообщений в чат и над хотбаром механика не пишет: всё видно по игре.
  */
@@ -70,16 +82,17 @@ final class CrabClaw implements Listener {
     private static final int REFRESH_TICKS = 5;
 
     /** Правило, которое клешня отдаёт Minecraft: те же блоки, скорость и дроп, что у инструмента. */
-    private record Rule(RegistryKeySet<BlockType> blocks, Set<String> anchors,
-                        double speed, boolean drops, int slot) {
+    private record Rule(RegistryKeySet<BlockType> blocks, Set<String> anchors, double speed, boolean drops,
+                        int slot, int unbreaking, int mending) {
         CrabClawRules.Rule plain() {
             return new CrabClawRules.Rule(anchors, speed, drops);
         }
     }
 
     /** Взятый в займы инструмент: что он даёт клешне и в каком слоте лежит. */
-    private record Borrow(int slot, String material, CrabClawRules.Family family,
-                          List<Rule> rules, int efficiency) { }
+    private record Borrow(int slot, String material, CrabClawRules.Family family, List<Rule> rules,
+                          int efficiency, int score, List<CrabClawRules.Enchant> enchants,
+                          Map<String, Enchantment> sources) { }
 
     private final JavaPlugin plugin;
     private final WinterItems items;
@@ -174,16 +187,43 @@ final class CrabClaw implements Listener {
         ItemStack held = player.getInventory().getItemInMainHand();
         if (items.kind(held) != WinterItems.Kind.CLAW) return;
         Map<CrabClawRules.Family, Borrow> toolbox = toolbox(player);
+        List<Rule> rules = rules(toolbox);
+        Map<Enchantment, Integer> enchants = enchants(toolbox);
         String signature = signature(toolbox);
         ItemMeta meta = held.getItemMeta();
-        if (signature.equals(meta.getPersistentDataContainer().get(toolboxKey, PersistentDataType.STRING))) return;
-        List<Rule> rules = rules(toolbox);
+        boolean sameToolbox = signature.equals(meta.getPersistentDataContainer().get(toolboxKey, PersistentDataType.STRING));
+        if (sameToolbox && enchantsMatch(held, enchants)) return;
         meta.getPersistentDataContainer().set(toolboxKey, PersistentDataType.STRING, signature);
         ItemStack updated = held.clone();
         updated.setItemMeta(meta);
         if (rules.isEmpty()) updated.unsetData(DataComponentTypes.TOOL);
         else updated.setData(DataComponentTypes.TOOL, component(rules));
+        applyEnchants(updated, enchants);
         player.getInventory().setItemInMainHand(updated);
+    }
+
+    /** Невидимые зачарования клешни: блеск выключен, строчек в подсказке нет — вид предмета прежний. */
+    private void applyEnchants(ItemStack claw, Map<Enchantment, Integer> enchants) {
+        if (enchants.isEmpty()) {
+            claw.unsetData(DataComponentTypes.ENCHANTMENTS);
+            claw.unsetData(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE);
+            claw.unsetData(DataComponentTypes.TOOLTIP_DISPLAY);
+            return;
+        }
+        claw.setData(DataComponentTypes.ENCHANTMENTS, ItemEnchantments.itemEnchantments(enchants));
+        claw.setData(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, false);
+        claw.setData(DataComponentTypes.TOOLTIP_DISPLAY, TooltipDisplay.tooltipDisplay()
+                .hideTooltip(false)                                               // сама подсказка на месте
+                .addHiddenComponents(DataComponentTypes.ENCHANTMENTS)             // а строк зачарований нет
+                .build());
+    }
+
+    /** Совпадают ли зачарования клешни с теми, что положены по инвентарю: так мы чиним предмет,
+     *  если зачарования с него сняли (например, точильным камнем) или он их ещё не получал. */
+    private static boolean enchantsMatch(ItemStack claw, Map<Enchantment, Integer> desired) {
+        ItemEnchantments current = claw.getData(DataComponentTypes.ENCHANTMENTS);
+        Map<Enchantment, Integer> have = current == null ? Map.of() : current.enchantments();
+        return have.equals(desired);
     }
 
     /** Компонент инструмента: скорость копания, износ самой клешни — ноль (она не изнашивается). */
@@ -217,6 +257,7 @@ final class CrabClaw implements Listener {
             if (borrow == null) continue;
             out.append('|').append(family).append(' ').append(borrow.material())
                     .append(" эф").append(borrow.efficiency())
+                    .append("/").append(borrow.score())
                     .append(" x").append(borrow.rules().size())
                     .append('@').append(borrow.rules().stream().mapToDouble(Rule::speed).sum());
         }
@@ -224,6 +265,29 @@ final class CrabClaw implements Listener {
     }
 
     // ===== инструменты из инвентаря =====
+
+    /**
+     * Зачарования, которые клешня берёт у инструментов: «Удача» и «Шёлковое касание» — они решают,
+     * что выпадет. Инструменты идут от главного к остальным, поэтому спор удачи и шелка решает тот
+     * инструмент, которым копают чаще (и сильнее).
+     */
+    private Map<Enchantment, Integer> enchants(Map<CrabClawRules.Family, Borrow> toolbox) {
+        List<Borrow> ordered = new ArrayList<>(toolbox.values());
+        ordered.sort(Comparator.<Borrow>comparingInt(Borrow::score).reversed()
+                .thenComparingInt(borrow -> CrabClawRules.rank(borrow.family())));
+        List<List<CrabClawRules.Enchant>> perTool = new ArrayList<>();
+        Map<String, Enchantment> byId = new LinkedHashMap<>();
+        for (Borrow borrow : ordered) {
+            perTool.add(borrow.enchants());
+            for (CrabClawRules.Enchant enchant : borrow.enchants()) byId.putIfAbsent(enchant.id(), borrow.sources().get(enchant.id()));
+        }
+        Map<Enchantment, Integer> out = new LinkedHashMap<>();
+        for (CrabClawRules.Enchant enchant : CrabClawRules.merge(perTool)) {
+            Enchantment found = byId.get(enchant.id());
+            if (found != null) out.put(found, enchant.level());
+        }
+        return out;
+    }
 
     /** Лучший инструмент каждого семейства: сильнее по уровню, при равной силе — быстрее. */
     private Map<CrabClawRules.Family, Borrow> toolbox(Player player) {
@@ -243,9 +307,7 @@ final class CrabClaw implements Listener {
             found.put(borrow.family(), borrow);
             return;
         }
-        int score = score(borrow);
-        int best = score(current);
-        boolean wins = score > best || (score == best
+        boolean wins = borrow.score() > current.score() || (borrow.score() == current.score()
                 && CrabClawRules.topSpeed(plain(borrow)) > CrabClawRules.topSpeed(plain(current)));
         if (wins) found.put(borrow.family(), borrow);
     }
@@ -257,7 +319,17 @@ final class CrabClaw implements Listener {
         if (stack.getType().getMaxDurability() <= 0) return null;      // не инструмент — изнашивать нечего
         String material = stack.getType().name();
         CrabClawRules.Family family = CrabClawRules.family(material);
-        int efficiency = Math.max(0, stack.getEnchantmentLevel(Enchantment.EFFICIENCY));
+        ItemMeta tool = stack.getItemMeta();
+        int efficiency = Math.max(0, tool.getEnchantLevel(Enchantment.EFFICIENCY));
+        int unbreaking = Math.max(0, tool.getEnchantLevel(Enchantment.UNBREAKING));
+        int mending = Math.max(0, tool.getEnchantLevel(Enchantment.MENDING));
+        List<CrabClawRules.Enchant> enchants = new ArrayList<>();
+        Map<String, Enchantment> sources = new LinkedHashMap<>();
+        for (Map.Entry<Enchantment, Integer> enchant : tool.getEnchants().entrySet()) {
+            String id = enchant.getKey().getKey().toString();
+            sources.put(id, enchant.getKey());
+            if (CrabClawRules.LOOT_ENCHANTS.contains(id)) enchants.add(new CrabClawRules.Enchant(id, enchant.getValue()));
+        }
         double bonus = efficiency > 0 ? (double) efficiency * efficiency + 1.0 : 0.0;
         List<Rule> rules = new ArrayList<>();
         Tool component = stack.getData(DataComponentTypes.TOOL);
@@ -269,7 +341,7 @@ final class CrabClaw implements Listener {
                 double speed = rule.speed() == null ? component.defaultMiningSpeed() : rule.speed();
                 if (speed > 1.0) speed += bonus;
                 rules.add(new Rule(rule.blocks(), anchors(rule.blocks()), speed,
-                        rule.correctForDrops() == TriState.TRUE, slot));
+                        rule.correctForDrops() == TriState.TRUE, slot, unbreaking, mending));
             }
             if (family == CrabClawRules.Family.NONE) family = CrabClawRules.family(anchors(rules));
         } else {
@@ -279,15 +351,20 @@ final class CrabClaw implements Listener {
             for (CrabClawRules.Spec spec : CrabClawRules.fallback(family, tier, speed)) {
                 RegistryKeySet<BlockType> blocks = blocks(spec.blocks());
                 if (blocks == null) continue;
-                rules.add(new Rule(blocks, anchors(blocks), spec.speed(), spec.drops(), slot));
+                rules.add(new Rule(blocks, anchors(blocks), spec.speed(), spec.drops(),
+                        slot, unbreaking, mending));
             }
         }
         if (family == CrabClawRules.Family.NONE || rules.isEmpty()) return null;
-        return new Borrow(slot, material, family, List.copyOf(rules), efficiency);
+        int score = CrabClawRules.score(plain(rules));
+        return new Borrow(slot, material, family, List.copyOf(rules), efficiency, score,
+                List.copyOf(enchants), Map.copyOf(sources));
     }
 
-    private static int score(Borrow borrow) {
-        return CrabClawRules.score(plain(borrow));
+    private static List<CrabClawRules.Rule> plain(List<Rule> rules) {
+        List<CrabClawRules.Rule> out = new ArrayList<>();
+        for (Rule rule : rules) out.add(rule.plain());
+        return out;
     }
 
     private static List<CrabClawRules.Rule> plain(Borrow borrow) {
@@ -321,15 +398,18 @@ final class CrabClaw implements Listener {
         TypedKey<BlockType> block = TypedKey.create(RegistryKey.BLOCK, event.getBlock().getType().getKey());
         for (Rule rule : rules(toolbox(player))) {
             if (!rule.blocks().contains(block)) continue;
-            wear(player, rule.slot());
+            wear(player, rule);
+            mend(player, rule, event);
             return;
         }
     }
 
-    private void wear(Player player, int slot) {
-        int amount = wearPerBlock();
+    /** Износ с «Прочностью»: чем выше уровень, тем чаще блок не стоит ничего. */
+    private void wear(Player player, Rule rule) {
+        int amount = CrabClawRules.wear(wearPerBlock(), rule.unbreaking(), ThreadLocalRandom.current().nextDouble());
         if (amount <= 0) return;
         PlayerInventory inventory = player.getInventory();
+        int slot = rule.slot();
         ItemStack stack = slot < 0 ? inventory.getItemInOffHand() : inventory.getItem(slot);
         if (stack == null || stack.getType().isAir()) return;
         ItemMeta meta = stack.getItemMeta();
@@ -346,6 +426,23 @@ final class CrabClaw implements Listener {
         damage.setDamage(next);
         stack.setItemMeta(meta);
         setTool(inventory, slot, stack);
+    }
+
+    /** «Починка»: опыт из блока не падает орбитой, а чинит инструмент — две прочности за очко.
+     *  Так же ведёт себя зачарованный инструмент в руке; если чинить нечего, опыт остаётся игроку. */
+    private void mend(Player player, Rule rule, BlockBreakEvent event) {
+        int experience = event.getExpToDrop();
+        if (rule.mending() <= 0 || experience <= 0) return;
+        PlayerInventory inventory = player.getInventory();
+        int slot = rule.slot();
+        ItemStack stack = slot < 0 ? inventory.getItemInOffHand() : inventory.getItem(slot);
+        if (stack == null || stack.getType().isAir()) return;
+        ItemMeta meta = stack.getItemMeta();
+        if (!(meta instanceof Damageable damage) || damage.getDamage() <= 0) return;
+        damage.setDamage(CrabClawRules.mend(damage.getDamage(), experience));
+        stack.setItemMeta(meta);
+        setTool(inventory, slot, stack);
+        event.setExpToDrop(0);      // опыт ушёл в инструмент, как с «Починкой» в руке
     }
 
     private static void setTool(PlayerInventory inventory, int slot, ItemStack tool) {

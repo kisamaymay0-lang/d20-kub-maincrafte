@@ -67,6 +67,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
 @Override
 public void onEnable() {
     saveDefaultConfig();
+    // Файлы настроек держим полными: чего в них нет — дописываем из комплекта (значения владельца
+    // не трогаем), сломанный файл уходит в копию и заменяется новым.
+    ConfigSync.sync(this);
     dataWriter = new AsyncTextWriter(getLogger());
 
     getServer().getPluginManager().registerEvents(
@@ -233,6 +236,7 @@ public void onEnable() {
      * созвездия и зацеп изморози держат копию настроек в памяти — их просим перечитаться.
      */
     public String reloadPluginSettings() {
+        ConfigSync.sync(this);   // /f8 reload тоже доводит файлы до полного вида
         reloadConfig();
         if (constellationManager != null) {
             constellationManager.reloadSettings();
