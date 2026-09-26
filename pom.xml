@@ -6,12 +6,14 @@
 
     <groupId>com.yourserver</groupId>
     <artifactId>adaptation</artifactId>
-    <version>10.29</version>
+    <version>10.30</version>
     <packaging>jar</packaging>
 
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <!-- Minecraft 26.2 (и Paper, и Purpur) требует Java 25: см. -->
+        <!-- https://fill.papermc.io/v3/projects/paper/versions/26.2 → java.version.minimum = 25 -->
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -36,8 +38,15 @@
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <!-- Целевая версия сервера: Paper 1.21.11 / Java 21 -->
-            <version>1.21.11-R0.1-SNAPSHOT</version>
+            <!--
+              Целевая версия сервера: Minecraft 26.2 — Paper 26.2 build 129
+              (Purpur 26.2 — форк Paper, тот же API, отдельный purpur-api не нужен).
+
+              Схема координат с 26.1 изменилась: вместо 1.21.11-R0.1-SNAPSHOT
+              Paper публикует готовые версии вида 26.2.build.<номер>-stable
+              (см. maven-metadata в https://repo.papermc.io/repository/maven-public/).
+            -->
+            <version>26.2.build.129-stable</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
@@ -46,6 +55,12 @@
             <version>5.11.4</version>
             <scope>test</scope>
         </dependency>
+        <!--
+          CraftEngine 26.8.x — линия, собранная под Paper 26.2: в её
+          gradle.properties paper_version=26.2.build.+ и
+          latest_supported_version=26.2. Линия 26.9 уже идёт на 26.3, поэтому
+          на Purpur 26.2 держим 26.8.2.
+        -->
         <dependency>
             <groupId>net.momirealms</groupId>
             <artifactId>craft-engine-core</artifactId>
@@ -69,8 +84,8 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>21</source>
-                    <target>21</target>
+                    <source>25</source>
+                    <target>25</target>
                 </configuration>
             </plugin>
             <plugin>

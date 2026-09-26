@@ -1,7 +1,7 @@
 name: f8-plugin
-version: '10.29'
+version: '10.30'
 main: com.yourserver.adaptation.AdaptationPlugin
-api-version: '1.21.11'
+api-version: '26.2'
 softdepend: [PlasmoVoice, CraftEngine]
 
 commands:

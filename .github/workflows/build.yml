@@ -3,9 +3,9 @@ name: Build Minecraft Plugin
 on:
   workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "arena/**" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "arena/**" ]
 
 jobs:
   build:
@@ -15,10 +15,10 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up JDK 21
+    - name: Set up JDK 25
       uses: actions/setup-java@v4
       with:
-        java-version: '21'
+        java-version: '25'
         distribution: 'temurin'
         cache: maven
 
@@ -130,7 +130,7 @@ jobs:
       if: steps.maven.outputs.exit_code == '0'
       uses: actions/upload-artifact@v4
       with:
-        name: f8-plugin-10.29
+        name: f8-plugin-10.30
         path: |
           target/*.jar
           docs/f8resurspack-fixed.zip
