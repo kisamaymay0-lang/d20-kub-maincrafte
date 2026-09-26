@@ -220,7 +220,7 @@ class CrabClawRulesTest {
         assertEquals(8, scan.get(27), "потом нижний ряд, он же горячий");
         assertEquals(0, scan.get(35), "левый нижний угол");
         assertEquals(CrabClawRules.OFFHAND, scan.get(36), "и в самом конце — левая рука");
-        assertEquals(36, scan.stream().distinct().count(), "каждый слот ровно один раз");
+        assertEquals(37, scan.stream().distinct().count(), "каждый слот ровно один раз, и левая рука тоже");
         for (int slot = 0; slot < 36; slot++) assertTrue(scan.contains(slot), "слот " + slot + " пропущен");
     }
 
