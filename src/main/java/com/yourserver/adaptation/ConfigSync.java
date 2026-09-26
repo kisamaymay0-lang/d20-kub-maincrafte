@@ -336,14 +336,15 @@ final class ConfigSync {
         }
     }
 
-    /** Разбор текста: null вместо исключения, если YAML сломан. */
+    /** Разбор текста: null вместо исключения, если YAML сломан (Bukkit сообщает о поломке
+     *  проверяемым InvalidConfigurationException — её тоже ловим). */
     static YamlConfiguration parse(String text) {
         if (text == null) return null;
         YamlConfiguration config = new YamlConfiguration();
         try {
             config.loadFromString(text);
             return config;
-        } catch (RuntimeException ex) {
+        } catch (Exception ex) {
             return null;
         }
     }
