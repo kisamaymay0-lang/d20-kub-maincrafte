@@ -39,7 +39,7 @@ final class CopperWeatheringTest {
     @Test
     void чужоеИмяНеОкисляется() {
         assertNull(CopperWeathering.next(""));
-        assertNull(CopperWeathering.next(null));
+        assertNull(CopperWeathering.next((String) null));
     }
 
     @Test

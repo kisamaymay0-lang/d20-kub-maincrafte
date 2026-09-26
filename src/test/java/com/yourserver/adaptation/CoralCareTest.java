@@ -29,7 +29,7 @@ final class CoralCareTest {
         assertFalse(CoralCare.isCoral("stone"));
         assertFalse(CoralCare.isCoral("water"));
         assertFalse(CoralCare.isCoral(""));
-        assertFalse(CoralCare.isCoral(null));
+        assertFalse(CoralCare.isCoral((String) null));
     }
 
     @Test
