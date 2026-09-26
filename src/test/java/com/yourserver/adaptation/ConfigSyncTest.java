@@ -191,11 +191,14 @@ class ConfigSyncTest {
     @Test
     void blocksSeeSectionsAndTheirEnds() {
         List<String> lines = ConfigSync.linesOf(DEFAULTS);
+        assertEquals(9, lines.size());
         var blocks = ConfigSync.blocks(lines);
         assertEquals(1, blocks.get("a").start());                 // строка «a:»
-        assertEquals(4, blocks.get("d").start());
+        assertEquals(5, blocks.get("d").start());                 // строка «d:»
+        assertEquals(5, blocks.get("a").end());                   // «a» кончается перед «d»
         assertEquals(lines.size(), blocks.get("d").end());        // «d» тянется до конца файла
-        assertEquals(2, blocks.get("a").indent());
+        assertEquals(0, blocks.get("a").indent());                // ключ верхнего уровня
+        assertEquals(2, blocks.get("d.e").indent());              // вложенный раздел
         assertNull(blocks.get("нет.такого"));
     }
 
