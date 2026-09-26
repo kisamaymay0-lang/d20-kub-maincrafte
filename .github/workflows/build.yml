@@ -10,9 +10,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
 
     steps:
     - name: Checkout repository
@@ -142,22 +139,6 @@ jobs:
               printf '::error::%s\n' "$line" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g'
             done
 
-    # ВРЕМЕННО (отладка порта на 26.2): логи Actions из внешней среды не
-    # читаются, поэтому ошибки Maven дублируются комментарием в PR.
-    - name: Post Maven errors as PR comment (debug)
-      if: always() && steps.maven.outputs.exit_code != '0' && github.event_name == 'pull_request'
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        {
-          echo "Maven упал (exit ${ steps.maven.outputs.exit_code }). Первые ошибки:"
-          echo '```'
-          grep -E "ERROR|error:|BUILD FAILURE|Tests run:.*(Failures: [1-9]|Errors: [1-9])" mvn-build.log | head -40
-          echo '```'
-        } > maven-errors.md || true
-        gh pr comment "${{ github.event.pull_request.number }}" \
-          --repo "$GITHUB_REPOSITORY" --body-file maven-errors.md
-
     - name: Fail on Maven error
       if: steps.maven.outputs.exit_code != '0'
       run: exit 1
@@ -166,7 +147,7 @@ jobs:
       if: steps.maven.outputs.exit_code == '0'
       uses: actions/upload-artifact@v4
       with:
-        name: f8-plugin-10.30
+        name: f8-plugin-10.31
         path: |
           target/*.jar
           docs/f8resurspack-fixed.zip
