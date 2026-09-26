@@ -26,6 +26,9 @@ final class WinterRules {
     static final int HANG_TICKS = 200;                 // pickaxes.diamond_pickaxe.hang_time = 10 с;
                                                        // в config.yml по умолчанию 0 — держит без ограничения
     static final int SOFT_FALL_GRACE_TICKS = 5;        // окно после скольжения по мягкому блоку
+    static final int GRIP_HOLD_GRACE_TICKS = 8;        // зацеп держится, пока зажата ПКМ: тишина дольше — отпускаем
+                                                       // (клиент повторяет отклик каждые 4 тика, 8 = запас на лаг)
+    static final int REGRAB_GRACE_TICKS = 10;          // после отпускания ПКМ самозахват приседом ждёт полсекунды
     static final double AUTO_GRAB_MAX_RISE = 0.0;      // пока взлетаем, присед ещё не цепляется: зацеп по апогею
     static final double WALL_JUMP_FORWARD_BOOST = 0.0; // только вверх: от стены не толкаем,
                                                        // иначе игрок сразу отлетает и не карабкается
@@ -90,6 +93,14 @@ final class WinterRules {
     static boolean canAutoGrab(boolean tool, boolean airborne, boolean notRising,
             boolean cooling, boolean gripping, boolean frozen) {
         return tool && airborne && notRising && !cooling && !gripping && !frozen;
+    }
+
+    /** Зацеп по ПКМ держится, пока приходят отклики зажатой кнопки: клиент повторяет их
+     *  каждые 4 тика, поэтому тишина дольше запаса означает, что игрок кнопку отпустил, —
+     *  и изморозь отпускает стену. Ноль в holdUntil (нет требования) — прежнее поведение,
+     *  когда зацеп жил, пока игрок смотрит на стену. */
+    static boolean gripExpired(long now, long holdUntil) {
+        return holdUntil > 0 && now > holdUntil;
     }
 
     /** Ещё взлетаем (например, только что прыгнули от стены) — цепляться рано. */

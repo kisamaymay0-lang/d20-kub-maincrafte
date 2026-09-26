@@ -369,6 +369,20 @@ class WinterRulesTest {
     }
 
     @Test
+    void gripLivesWhileTheRightButtonIsHeld() {
+        assertFalse(WinterRules.gripExpired(100, 108));      // отклик зажатой ПКМ только что пришёл — держим
+        assertFalse(WinterRules.gripExpired(108, 108));
+        assertTrue(WinterRules.gripExpired(109, 108));       // тишина дольше запаса — игрок отпустил кнопку
+        assertFalse(WinterRules.gripExpired(1000, 0));       // 0 — прежнее поведение: кнопку не требуем
+        // Клиент повторяет отклик каждые 4 тика: запас обязан быть больше одного повтора и не быть вечным.
+        assertTrue(WinterRules.GRIP_HOLD_GRACE_TICKS > 4);
+        assertTrue(WinterRules.GRIP_HOLD_GRACE_TICKS <= 40);
+        // После отпускания кнопки самозахват приседом ждёт, но недолго.
+        assertTrue(WinterRules.REGRAB_GRACE_TICKS > 0);
+        assertTrue(WinterRules.REGRAB_GRACE_TICKS <= 40);
+    }
+
+    @Test
     void enchantmentIsBlockedButOrdinaryRepairAndRenameRemainAllowed() {
         assertTrue(WinterRules.forbiddenEnchant(true, true, false, false));
         assertTrue(WinterRules.forbiddenEnchant(true, false, true, false));

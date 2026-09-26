@@ -48,16 +48,28 @@ import java.util.concurrent.ThreadLocalRandom;
  * от каждого удара предмет делает рывок в случайную сторону. После последнего
  * удара он падает на землю и превращается в настоящий предмет.
  *
- * Ударить можно и мимо: каждый взмах рукой во время охоты — это либо удар по
- * предмету, либо промах. Промах звучит неприятно и приближает провал: когда
- * промахов набирается столько же, сколько разрешено (по умолчанию 4),
- * предмет срывается и уходит на дно сам.
+ * Ударить можно и мимо: взмах рукой во время охоты — это либо удар по предмету, либо
+ * промах. Промах звучит неприятно и приближает провал: когда промахов набирается столько
+ * же, сколько разрешено (по умолчанию 4), предмет срывается и уходит на дно сам. Взмахи
+ * в стороне от предмета попыткой не считаются — наказания за них нет.
+ *
+ * <p>Удар считается со стороны клиента, а не сервера: при задержке сервер видит предмет
+ * устаревшим, и обычная проверка «смотрит ли игрок на предмет» расходится с картинкой на
+ * экране — игрок бьёт по тому, что видит, а получает промах. Поэтому предмет отматывается
+ * назад по истории полёта ровно на задержку игрока (плюс тик сглаживания клиента), а
+ * попаданием считается близость к лучу взгляда, а не угол из глаза — как у настоящего
+ * хитбокса. Отключить отмотку можно настройкой fishing.special-minigame.ping-compensation.
  *
  * Миниигра живёт только пока удочка в руке игрока и заброшена в водоём.
  * Если у биома нет особого предмета (fishing/special-items в конфиге),
  * миниигра не запускается.
  */
 final class SpecialCatch implements Listener {
+
+    /** Сколько тиков клиент сглаживает перелёт предмета: столько же стоит в setTeleportDuration. */
+    private static final int DISPLAY_INTERPOLATION_TICKS = 1;
+    /** Сколько точек полёта держим в истории: две секунды — этого хватает любой задержке. */
+    private static final int HISTORY_TICKS = 40;
 
     /** Отметка «этот поплавок мы забросили сами»: на нём миниигра не начинается. */
     private final NamespacedKey ourHook;
@@ -137,6 +149,17 @@ final class SpecialCatch implements Listener {
 
     private double hitAngle() {
         return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.hit-angle-degrees", 22.0), 5.0, 90.0);
+    }
+
+    /** Радиус попадания у прицела в блоках: у летящего предмета в игре тоже есть хитбокс,
+     *  поэтому «промах на волосок» ударом не считается. */
+    private double hitRadius() {
+        return Math.clamp(plugin.getConfig().getDouble("fishing.special-minigame.hit-radius", 0.8), 0.1, 4.0);
+    }
+
+    /** Судить удар по картинке игрока: предмет отматывается на его задержку. */
+    private boolean pingCompensation() {
+        return plugin.getConfig().getBoolean("fishing.special-minigame.ping-compensation", true);
     }
 
     private int particleInterval() {
@@ -221,6 +244,7 @@ final class SpecialCatch implements Listener {
     private void start(Player player, ItemStack reward) {
         Hunt hunt = new Hunt(player, reward);
         Location spot = orbitSpot(hunt);
+        hunt.history.add(spot.clone().add(0, 0.25, 0));   // отсюда начинается история полёта
         World world = player.getWorld();
         hunt.display = world.spawn(spot, ItemDisplay.class, display -> {
             display.setItemStack(reward.clone());
@@ -314,6 +338,10 @@ final class SpecialCatch implements Listener {
         }
         hunt.spot = spot;
         hunt.display.teleport(spot);
+        // История полёта: по ней удар судится со стороны клиента — на той точке,
+        // которую игрок видел своими глазами, а не на серверной.
+        hunt.history.add(spot.clone().add(0, 0.25, 0));
+        while (hunt.history.size() > HISTORY_TICKS) hunt.history.remove(0);
     }
 
     /** Скорость облёта: с каждым ударом предмет носится всё быстрее. */
@@ -377,23 +405,41 @@ final class SpecialCatch implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onSwing(PlayerAnimationEvent event) {
         if (event.getAnimationType() != PlayerAnimationType.ARM_SWING) return;
-        Hunt hunt = hunts.get(event.getPlayer().getUniqueId());
+        Player player = event.getPlayer();
+        Hunt hunt = hunts.get(player.getUniqueId());
         if (hunt == null || hunt.display == null || !hunt.display.isValid()) return;
-        // Любой взмах во время охоты — попытка: либо удар, либо промах.
-        if (aimedAt(event.getPlayer(), hunt)) hit(hunt);
-        else miss(hunt);
+        // Считаем по картинке игрока: предмет берём из истории на момент его задержки.
+        Location target = aimedTarget(player, hunt);
+        HuntGeometry.Ray ray = HuntGeometry.ray(player.getEyeLocation(),
+                player.getEyeLocation().getDirection(), target);
+        switch (HuntGeometry.aim(ray, hitRadius(), hitAngle(), hitRange())) {
+            case HIT -> hit(hunt, target);
+            case NEAR -> miss(hunt, target);
+            case AWAY -> { }        // взмах в стороне — это не попытка, и наказывать не за что
+        }
+    }
+
+    /** Точка, в которой игрок видел предмет: отматываем полёт на его задержку
+     *  (половина оборота связи) плюс тик сглаживания, которым клиент дорисовывает перелёт. */
+    private Location aimedTarget(Player player, Hunt hunt) {
+        if (hunt.history.isEmpty()) return hunt.display.getLocation().add(0, 0.25, 0);
+        int back = pingCompensation()
+                ? HuntGeometry.rewindTicks(player.getPing(), DISPLAY_INTERPOLATION_TICKS)
+                : DISPLAY_INTERPOLATION_TICKS;
+        Location sample = HuntGeometry.sample(hunt.history, back);
+        return sample != null ? sample : hunt.display.getLocation().add(0, 0.25, 0);
     }
 
     /** Промах: неприятный громкий звук. Много промахов — предмет уходит. */
-    private void miss(Hunt hunt) {
+    private void miss(Hunt hunt, Location target) {
         Player player = hunt.player;
         World world = player.getWorld();
         hunt.misses++;
         world.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 1.3f, 0.6f);
         world.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.1f, 0.7f);
-        Location where = hunt.display != null && hunt.display.isValid()
-                ? hunt.display.getLocation().add(0, 0.3, 0)
-                : player.getLocation();
+        Location where = target != null ? target.clone().add(0, 0.05, 0)
+                : (hunt.display != null && hunt.display.isValid() ? hunt.display.getLocation().add(0, 0.3, 0)
+                        : player.getLocation());
         world.spawnParticle(Particle.SMOKE, where, 8, 0.2, 0.2, 0.2, 0.02);
         if (hunt.misses >= missesAllowed()) {
             cancel(hunt, "§cПромахов слишком много — предмет сорвался и ушел на дно...");
@@ -402,23 +448,14 @@ final class SpecialCatch implements Listener {
         player.sendActionBar("§cПромах!");
     }
 
-    /** Игрок смотрит на предмет и стоит достаточно близко: удар засчитан. */
-    private boolean aimedAt(Player player, Hunt hunt) {
-        Location eye = player.getEyeLocation();
-        Location target = hunt.display.getLocation().add(0, 0.25, 0);
-        Vector toTarget = target.toVector().subtract(eye.toVector());
-        if (toTarget.length() > hitRange()) return false;
-        if (toTarget.lengthSquared() < 0.0001) return true;
-        double angle = Math.toDegrees(eye.getDirection().angle(toTarget.normalize()));
-        return angle <= hitAngle();
-    }
-
-    private void hit(Hunt hunt) {
+    private void hit(Hunt hunt, Location target) {
         Player player = hunt.player;
+        Location at = target != null ? target.clone()
+                : hunt.display.getLocation().add(0, 0.25, 0);
         hunt.hits++;
         World world = player.getWorld();
         world.playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_CRIT, 0.9f, 1.2f);
-        world.spawnParticle(Particle.CRIT, hunt.display.getLocation().add(0, 0.3, 0), 12, 0.25, 0.25, 0.25, 0.15);
+        world.spawnParticle(Particle.CRIT, at, 12, 0.25, 0.25, 0.25, 0.15);
         if (hunt.hits >= hitsRequired()) {
             finish(hunt);
             return;
@@ -429,7 +466,7 @@ final class SpecialCatch implements Listener {
         hunt.dash = new Vector(Math.cos(angle), ThreadLocalRandom.current().nextDouble(-0.2, 0.4), Math.sin(angle))
                 .multiply(power);
         hunt.dashTicks = 10;
-        world.spawnParticle(Particle.DUST, hunt.display.getLocation().add(0, 0.3, 0), 14, 0.25, 0.25, 0.25, 0.04, goldDust());
+        world.spawnParticle(Particle.DUST, at, 14, 0.25, 0.25, 0.25, 0.04, goldDust());
         player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.6f);
         player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.7f, 1.5f);
     }
@@ -501,6 +538,8 @@ final class SpecialCatch implements Listener {
                 + "§7, ударов §f" + hitsRequired()
                 + "§7, таймер §f" + (durationTicks() / 20) + " с"
                 + "§7, промахов до провала §f" + missesAllowed()
+                + "§7, хитбокс §f" + hitRadius() + " §7блока"
+                + "§7, по задержке §f" + (pingCompensation() ? "да" : "нет")
                 + "§7, разгон §f+" + Math.round(speedPerHit() * 100.0) + "%/удар"
                 + "§7, биомы с особым предметом: §f" + (biomes.isEmpty() ? "нет" : String.join(", ", biomes));
     }
@@ -530,6 +569,8 @@ final class SpecialCatch implements Listener {
         int misses;
         int ticks;
         Location spot;
+        /** Где предмет был в последние тики: по истории судится удар со стороны клиента. */
+        final List<Location> history = new ArrayList<>();
         /** Направление полёта: за ним тянутся искры следа. */
         Vector trail = new Vector();
 

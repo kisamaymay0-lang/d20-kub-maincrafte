@@ -51,7 +51,10 @@ import java.util.UUID;
  * Зацеп по механике мода Gouge (https://modrinth.com/mod/gouge) и временная неподвижность.
  *
  * <p>ПКМ изморозью по стене в падении: инструмент врезается в грань, и игрок скользит вдоль
- * неё. Скорость входа — та, с которой игрок подлетел к стене, поэтому чем выше было падение,
+ * неё. Зацеп живёт, пока ПКМ зажата: клиент повторяет отклик кнопки каждые 4 тика, поэтому
+ * отпущенная кнопка перестаёт приходить и изморозь отпускает стену сама (раньше одного
+ * нажатия хватало, чтобы закрепиться до конца падения — оторваться было нельзя).
+ * Скорость входа — та, с которой игрок подлетел к стене, поэтому чем выше было падение,
  * тем дольше длится торможение. Дальше трение отнимает скорость каждый тик: твёрдый блок
  * держит крепче и гасит скольжение почти в ноль, мягкий только притормаживает и оставляет
  * высокую «ползущую» скорость — игрок продолжает сползать. Присед на твёрдом блоке
@@ -76,6 +79,7 @@ final class WinterMovement implements Listener {
 
     /** Настройки механики из config.yml; по умолчанию — значения gouge.toml. */
     private record Tuning(double reach, double clearance, double drift, int hangTicks, int slideCooldownTicks,
+                          int holdGraceTicks,
                           double jumpForward, double jumpUp,
                           double softFallDamage, double softFallDamageCap,
                           double slideEntry, double slideMinEntry,
@@ -96,6 +100,8 @@ final class WinterMovement implements Listener {
         boolean used;             // инструмент уже поработал: за это будет перезарядка
         Location driftAnchor;
         long hangUntil;           // конец удержания приседом (0 — без ограничения)
+        long holdUntil;           // ПКМ зажата: до этого тика ждём отклик кнопки (0 — не требуем)
+        long regrabUntil;         // после отпускания ПКМ самозахват приседом ждёт до этого тика
         long softFallUntil;
         double slideSpeed;        // скорость скольжения вниз, блоков за тик
         double slideCharge;       // накопленный расход прочности за скольжение
@@ -122,6 +128,8 @@ final class WinterMovement implements Listener {
     private final Map<UUID, State> states = new HashMap<>();
     /** Кого ударили изморозью по льду: скользит по блокам, пока не остановится. */
     private final Map<UUID, Long> slidingUntil = new HashMap<>();
+    /** Когда игроку в следующий раз можно напомнить про перезарядку: ПКМ повторяется часто. */
+    private final Map<UUID, Long> noticeUntil = new HashMap<>();
     private final NamespacedKey walk, fly, gravity, coldLock, coldTicks;
     private final BukkitTask task;
     private long tick;
@@ -160,6 +168,7 @@ final class WinterMovement implements Listener {
                 Math.clamp(config.getDouble("gouge.max-drift", WinterRules.MAX_DRIFT), 0.0, 16.0),
                 WinterRules.ticks(config.getDouble("gouge.hang-seconds", WinterRules.HANG_TICKS / 20.0), 0, 3600),
                 WinterRules.ticks(config.getDouble("gouge.slide-cooldown-seconds", WinterRules.SLIDE_COOLDOWN_TICKS / 20.0), 0, 600),
+                Math.clamp(config.getInt("gouge.hold-grace-ticks", WinterRules.GRIP_HOLD_GRACE_TICKS), 0, 40),
                 Math.clamp(config.getDouble("gouge.wall-jump.forward-boost", WinterRules.WALL_JUMP_FORWARD_BOOST), 0.0, 5.0),
                 Math.clamp(config.getDouble("gouge.wall-jump.upward-boost", WinterRules.WALL_JUMP_UPWARD_BOOST), 0.0, 5.0),
                 Math.clamp(config.getDouble("gouge.soft-fall-damage", WinterRules.SOFT_FALL_DAMAGE), 0.0, 1.0),
@@ -334,7 +343,8 @@ final class WinterMovement implements Listener {
         return block.getBlockData().requiresCorrectToolForDrops();
     }
 
-    /** ПКМ изморозью по стене в падении: инструмент врезается в грань. */
+    /** ПКМ изморозью по стене в падении: инструмент врезается в грань. Пока ПКМ зажата,
+     *  клиент присылает отклик каждые 4 тика — по ним зацеп и продлевается. */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void interact(PlayerInteractEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) return;
@@ -342,20 +352,33 @@ final class WinterMovement implements Listener {
         if (action != Action.RIGHT_CLICK_BLOCK && action != Action.RIGHT_CLICK_AIR) return;
         Player player = event.getPlayer();
         State state = states.get(player.getUniqueId());
+        // ПКМ зажата: клиент повторяет это событие каждые 4 тика, поэтому зацеп живёт, пока
+        // приходят отклики, — отпустил кнопку, и изморозь тут же отпускает стену.
+        boolean holding = state != null && state.grip != Grip.NONE && items.holdsTool(player);
+        if (holding && tuning.holdGraceTicks() > 0) state.holdUntil = tick + tuning.holdGraceTicks();
         boolean cooling = rechargeTicks(player) > 0;
         // Падение: скорость вниз или уже накопленная высота падения (mod: deltaMovement.y < 0).
         boolean falling = player.getVelocity().getY() < 0 || player.getFallDistance() > 0;
-        if (cooling && airborne(player)) {
+        if (cooling && airborne(player) && !holding) {
             // Перезарядка: говорим, сколько ещё ждать, чтобы зацеп не выглядел сломанным.
-            player.sendActionBar("§bИзморозь ещё не готова: " + ((rechargeTicks(player) + 19) / 20) + " с");
+            // Кнопку можно держать и жать часто — поэтому не чаще раза в секунду.
+            notice(player);
         }
         if (!WinterRules.canGrab(items.holdsTool(player), airborne(player), falling, clearance(player),
                 cooling, state != null && state.grip != Grip.NONE,
                 state != null && state.frozenUntil > tick)) return;
         RayTraceResult hit = sight(player);
         if (hit == null || hit.getHitBlock() == null || hardness(hit.getHitBlock()) < 0) return;
-        attach(player, states.computeIfAbsent(player.getUniqueId(), ignored -> new State()), hit);
+        attach(player, states.computeIfAbsent(player.getUniqueId(), ignored -> new State()), hit, true);
         event.setCancelled(true);
+    }
+
+    /** Подсказка о перезарядке — не чаще раза в секунду: зажатая ПКМ повторяется каждые 4 тика. */
+    private void notice(Player player) {
+        Long until = noticeUntil.get(player.getUniqueId());
+        if (until != null && until > tick) return;
+        noticeUntil.put(player.getUniqueId(), tick + 20);
+        player.sendActionBar("§bИзморозь ещё не готова: " + ((rechargeTicks(player) + 19) / 20) + " с");
     }
 
     /** В креативе изморозь не изнашивается и перезарядки после скольжения нет. */
@@ -385,6 +408,7 @@ final class WinterMovement implements Listener {
     private void autoGrab(Player player) {
         if (!player.isSneaking() || !airborne(player)) return;
         State state = states.get(player.getUniqueId());
+        if (state != null && state.regrabUntil > tick) return;   // только что отпустил ПКМ — не хватаем снова
         boolean cooling = rechargeTicks(player) > 0;
         boolean gripping = state != null && state.grip != Grip.NONE;
         boolean frozen = state != null && (state.frozenUntil > tick || state.coldUntil > tick);
@@ -392,15 +416,18 @@ final class WinterMovement implements Listener {
                 WinterRules.notRising(player.getVelocity().getY()), cooling, gripping, frozen)) return;
         RayTraceResult hit = sight(player);
         if (hit == null || hit.getHitBlock() == null || hardness(hit.getHitBlock()) < 0) return;
-        attach(player, states.computeIfAbsent(player.getUniqueId(), ignored -> new State()), hit);
+        attach(player, states.computeIfAbsent(player.getUniqueId(), ignored -> new State()), hit, false);
     }
 
-    /** Зацепились: запоминаем грань, включаем удержание и точку для ограничения сноса. */
-    private void attach(Player player, State state, RayTraceResult hit) {
+    /** Зацепились: запоминаем грань, включаем удержание и точку для ограничения сноса.
+     *  held — зацеп по зажатой ПКМ: такой зацеп живёт, пока кнопка зажата (см. grip). */
+    private void attach(Player player, State state, RayTraceResult hit, boolean held) {
         state.grip = Grip.SLIDE;   // скорость падения и твёрдость уточнит первый же тик
         state.wall = hit.getHitBlock(); state.face = hit.getHitBlockFace();
         state.hardWall = hard(state.wall);
         state.entered = false; state.drifting = false; state.driftReady = false; state.used = false; state.hangUntil = 0;
+        state.holdUntil = held && tuning.holdGraceTicks() > 0 ? tick + tuning.holdGraceTicks() : 0;
+        state.regrabUntil = 0;
         state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
         state.driftAnchor = player.getLocation().clone();
         gripControl(player, state);
@@ -470,6 +497,8 @@ final class WinterMovement implements Listener {
 
     /** Один тик зацепа: держим грань в поле взгляда, считаем скольжение и износ инструмента. */
     private void grip(Player player, State state) {
+        // ПКМ отпущена (отклики перестали приходить) — изморозь отпускает стену.
+        if (WinterRules.gripExpired(tick, state.holdUntil)) { letGo(player, state); return; }
         if (player.isDead() || !airborne(player) || !items.holdsTool(player)) { release(player); return; }
         RayTraceResult hit = sight(player);
         if (hit == null || hit.getHitBlock() == null) { release(player); return; } // грань ушла из-под взгляда
@@ -482,6 +511,20 @@ final class WinterMovement implements Listener {
         // пределе пробелом можно прыгнуть вверх. Без приседа — обычное скольжение с трением.
         if (player.isSneaking()) drift(player, state);
         else wallSlide(player, state, hardness);
+    }
+
+    /** ПКМ отпущена: изморозь отпускает стену сама. Это обычное окончание зацепа — с откатом,
+     *  потому что инструмент отработал, и с короткой паузой, чтобы самозахват приседом не
+     *  схватил стену в тот же тик. Отпускание звенит и сыплет осколками изморози. */
+    private void letGo(Player player, State state) {
+        Block wall = state.wall;
+        state.holdUntil = 0;
+        release(player);
+        state.regrabUntil = tick + WinterRules.REGRAB_GRACE_TICKS;
+        if (wall == null || wall.getType().isAir()) return;
+        player.getWorld().playSound(player.getLocation(), Sound.BLOCK_GLASS_BREAK, 0.45f, 1.4f);
+        player.getWorld().spawnParticle(Particle.ITEM, nearestFace(wall, player.getEyeLocation()),
+                10, 0.25, 0.25, 0.25, 0.03, rimeParticle);
     }
 
     /** Ушли от точки захвата дальше max_drift — инструмент срывается (mod max_drift). */
@@ -841,7 +884,11 @@ final class WinterMovement implements Listener {
     }
     @EventHandler public void world(PlayerChangedWorldEvent event) { release(event.getPlayer()); }
     @EventHandler public void join(PlayerJoinEvent event) { recover(event.getPlayer()); }
-    @EventHandler public void quit(PlayerQuitEvent event) { cleanup(event.getPlayer()); }
+    @EventHandler
+    public void quit(PlayerQuitEvent event) {
+        noticeUntil.remove(event.getPlayer().getUniqueId());
+        cleanup(event.getPlayer());
+    }
     @EventHandler public void death(PlayerDeathEvent event) { cleanup(event.getEntity()); }
 
     /** Пока действует заморозка изморозью, игрок не получает НИКАКОГО урона, кроме
