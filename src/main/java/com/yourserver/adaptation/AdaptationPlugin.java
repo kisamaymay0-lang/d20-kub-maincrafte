@@ -51,9 +51,11 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private CaviarListener caviarListener;
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
+    /** Политые кораллы: список живёт в файле, поэтому нужен доступ на выключении. */
+    private CoralCare coralCare;
+    private SpecialCatch specialCatch;
     private ConstellationManager constellationManager;
     private ProfileManager profileManager;
-    private ResourcePackPusher resourcePackPusher;
 
     private final Particle.DustOptions meleeDust =
             new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -67,6 +69,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
 @Override
 public void onEnable() {
     saveDefaultConfig();
+    // Файлы настроек держим полными: чего в них нет — дописываем из комплекта (значения владельца
+    // не трогаем), сломанный файл уходит в копию и заменяется новым.
+    ConfigSync.sync(this);
     dataWriter = new AsyncTextWriter(getLogger());
 
     getServer().getPluginManager().registerEvents(
@@ -117,12 +122,22 @@ public void onEnable() {
     winterFishing = new WinterFishing(this);
     getServer().getPluginManager().registerEvents(winterFishing, this);
 
+    // Уход за блоками руками: вода по меди и кораллам, блок света спрятанной
+    // рамкой — всё это шифт + ПКМ, отдельными слушателями.
+    getServer().getPluginManager().registerEvents(new CopperCare(), this);
+
+    coralCare = new CoralCare(this, dataWriter);
+    getServer().getPluginManager().registerEvents(coralCare, this);
+
+    getServer().getPluginManager().registerEvents(new LightBlocks(this), this);
+    getServer().getPluginManager().registerEvents(new FrameVeil(), this);
+
     ancientJug = new AncientJug(this, dataWriter);
     getServer().getPluginManager().registerEvents(ancientJug, this);
 
-    // Раздача актуального ресурспака клиентам при входе.
-    resourcePackPusher = new ResourcePackPusher(this);
-    getServer().getPluginManager().registerEvents(resourcePackPusher, this);
+    // Миниигра особого предмета биома: вылавливается вместо обычной рыбы.
+    specialCatch = new SpecialCatch(this, ancientJug, winterFishing);
+    getServer().getPluginManager().registerEvents(specialCatch, this);
 
     profileManager = new ProfileManager(this, dataWriter);
     getServer().getPluginManager().registerEvents(profileManager, this);
@@ -216,15 +231,35 @@ public void onEnable() {
         if (winterFishing != null) {
             winterFishing.disable();
         }
+        if (specialCatch != null) {
+            specialCatch.disable();
+        }
         if (ancientJug != null) {
             ancientJug.disable();
         }
-        if (resourcePackPusher != null) {
-            resourcePackPusher.disable();
+        if (coralCare != null) {
+            coralCare.flush();
         }
         if (dataWriter != null) {
             dataWriter.close();
         }
+    }
+
+    /**
+     * Перечитать config.yml и настройки подсистем (/f8 reload).
+     * Настройки миниигры и кувшина читаются на ходу, поэтому им reload не нужен;
+     * созвездия и зацеп изморози держат копию настроек в памяти — их просим перечитаться.
+     */
+    public String reloadPluginSettings() {
+        ConfigSync.sync(this);   // /f8 reload тоже доводит файлы до полного вида
+        reloadConfig();
+        if (constellationManager != null) {
+            constellationManager.reloadSettings();
+        }
+        if (winterFishing != null) {
+            winterFishing.reloadSettings();
+        }
+        return specialCatch == null ? "" : specialCatch.describe();
     }
 
     public void breakAdaptation(Player player) {

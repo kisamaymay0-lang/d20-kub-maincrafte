@@ -37,6 +37,18 @@ final class PrefixCatalog {
     }
 
     static PrefixCatalog load(Path path) throws Exception {
+        return load(path, null);
+    }
+
+    /**
+     * Префиксы из {@code prefixes.yml} плюс префиксы паков
+     * ({@code plugins/f8-plugin/prefixpacks/*.yml}).
+     *
+     * Паки добавляются вторыми, поэтому их номера идут после обычных: выдача
+     * «по номеру» из {@code prefixes.yml} не съезжает. Если id из пака уже есть
+     * в {@code prefixes.yml}, запись пака пропускается — файл настроек главнее.
+     */
+    static PrefixCatalog load(Path path, PrefixPackCatalog packs) throws Exception {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.loadFromString(Files.readString(path));
         ConfigurationSection section = yaml.getConfigurationSection("prefixes");
@@ -52,6 +64,14 @@ final class PrefixCatalog {
             TextColor color = TextColor.fromHexString(section.getString(id + ".color", "#E6B94B"));
             if (color == null) throw new IllegalArgumentException("Неверный цвет префикса " + cleanId);
             byId.put(cleanId, new Prefix(cleanId, name, color, file, number++));
+        }
+        if (packs != null) {
+            for (PrefixPackCatalog.Pack pack : packs.packs()) {
+                for (Prefix entry : pack.prefixes()) {
+                    if (byId.containsKey(entry.id())) continue;
+                    byId.put(entry.id(), new Prefix(entry.id(), entry.name(), entry.color(), entry.file(), number++));
+                }
+            }
         }
         if (byId.isEmpty()) throw new IllegalArgumentException("Список префиксов пуст");
         return new PrefixCatalog(byId);

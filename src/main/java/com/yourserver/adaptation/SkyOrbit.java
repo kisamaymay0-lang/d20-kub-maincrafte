@@ -15,9 +15,14 @@ final class SkyOrbit {
         return new Vector3f(world).rotateY((float) -radians).div(depthScale);
     }
 
-    static float depthScale(double farthestGeometry, int clientChunks, int serverChunks, double multiplier) {
+    /**
+     * Насколько отодвинуть сферу: чем дальше, тем правдоподобнее «небо» — звезду
+     * перекрывают и деревья, и облака, потому что она дальше них. {@code fill}
+     * задаёт долю видимой клиентом дальности, которую занимает сфера (0.5..1.0).
+     */
+    static float depthScale(double farthestGeometry, int clientChunks, int serverChunks, double multiplier, double fill) {
         int chunks = Math.max(2, Math.min(clientChunks > 0 ? clientChunks : serverChunks, serverChunks));
-        double safeDistance = chunks * 16.0 * 0.70;
+        double safeDistance = chunks * 16.0 * Math.clamp(fill, 0.5, 1.0);
         return (float) Math.clamp(safeDistance / Math.max(1, farthestGeometry), 1.0, Math.max(1.0, multiplier));
     }
 }

@@ -1,8 +1,8 @@
 {
   "pack": {
     "description": "§6f8resurs §7— ресурспак плагина f8 (префиксы-иконки, медали, звёзды, еда, блоки)",
-    "pack_format": 75,
-    "min_format": 34,
-    "max_format": 75
+    "pack_format": 88,
+    "min_format": 88,
+    "max_format": 88
   }
 }

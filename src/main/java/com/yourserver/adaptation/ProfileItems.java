@@ -79,6 +79,24 @@ final class ProfileItems {
                 icon == null ? null : icon.file());
     }
 
+    /**
+     * Кнопка «Настроить косметику» в профиле: обычная незерская звезда (без модели
+     * из ресурспака) — она ведёт в меню, где лежат префикс и косметика.
+     */
+    ItemStack cosmeticMenuButton(boolean owner) {
+        return named(Material.NETHER_STAR, medals.title("Настроить косметику", ProfileMedal.Metal.GOLD), List.of(
+                text(owner ? "Префикс и косметика на голове" : "Настраивать можно только свой профиль", NamedTextColor.DARK_GRAY)));
+    }
+
+    /** Кнопка «Мои префиксы»: список уже собранных префиксов, чтобы надеть любой. */
+    ItemStack myPrefixesButton(int owned) {
+        return named(Material.CHEST, medals.title("Мои префиксы", ProfileMedal.Metal.COPPER), List.of(
+                text("Собрано " + owned + " " + plural(owned, "префикс", "префикса", "префиксов"),
+                        owned > 0 ? NamedTextColor.GRAY : NamedTextColor.RED),
+                text(owned > 0 ? "Нажмите, чтобы надеть любой" : "Префиксы выпадают из кейсов паков",
+                        NamedTextColor.DARK_GRAY)));
+    }
+
     /** Префикс в списке выбора. Чужой показан красным «У вас нету этого префикса!». */
     ItemStack prefixEntry(PrefixCatalog.Prefix prefix, boolean owned, boolean equipped) {
         if (!owned) {
@@ -113,11 +131,99 @@ final class ProfileItems {
         return item;
     }
 
+    /**
+     * Сундучок пака префиксов в меню: название пака, сколько кейсов лежит у
+     * игрока и что внутри. Надпись «бессрочный» — когда срок пака {@code -1}.
+     */
+    ItemStack prefixPack(PrefixPackCatalog.Pack pack, int cases, long nearestExpiry, long now) {
+        List<Component> lore = new ArrayList<>();
+        lore.add(text(cases > 0 ? countText(cases) : "Нет кейсов этого пака",
+                cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED));
+        lore.add(text(cases > 0 ? "Нажмите, чтобы открыть" : "Кейсы выдаёт администратор",
+                NamedTextColor.DARK_GRAY));
+        lore.add(Component.empty());
+        lore.add(text("Внутри " + pack.size() + " " + ProfileItems.plural(pack.size(), "префикс", "префикса", "префиксов"),
+                NamedTextColor.GOLD));
+        for (PrefixCatalog.Prefix prefix : pack.prefixes()) {
+            lore.add(text(" §7§l•§r ", NamedTextColor.DARK_GRAY).append(text(prefix.name(), prefix.color())));
+        }
+        if (cases > 0) {
+            lore.add(Component.empty());
+            lore.add(text(nearestExpiry == Long.MAX_VALUE
+                            ? "Кейсы бессрочные"
+                            : "Ближайший сгорит через " + PrefixPackCatalog.leftText(nearestExpiry, now),
+                    NamedTextColor.DARK_GRAY));
+        }
+        ItemStack item = named(Material.CHEST, medals.title(pack.name(), ProfileMedal.Metal.GOLD), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private static String countText(int cases) {
+        return cases == 1 ? "Есть 1 кейс" : "Есть " + cases + " кейсов";
+    }
+
+    /** Русская форма числа: 1 префикс, 2 префикса, 5 префиксов. */
+    static String plural(int count, String one, String few, String many) {
+        int mod100 = Math.abs(count) % 100;
+        int mod10 = mod100 % 10;
+        if (mod100 >= 11 && mod100 <= 14) return many;
+        if (mod10 == 1) return one;
+        if (mod10 >= 2 && mod10 <= 4) return few;
+        return many;
+    }
+
     /** Карточка префикса во время вскрытия кейса. slot — номер места (1…9). */
     ItemStack prefixReveal(PrefixCatalog.Prefix prefix, int slot) {
         return model(named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), List.of(
                 text("Место " + slot, NamedTextColor.DARK_GRAY),
                 text("Вскрытие кейса…", NamedTextColor.DARK_GRAY))), prefix.file());
+    }
+
+    /**
+     * Косметика в списке выбора. Иконка — сама модель косметики из ресурспака.
+     * Чужая показана красным «У вас нету этой косметики!».
+     */
+    ItemStack cosmeticEntry(CosmeticCatalog.Cosmetic cosmetic, boolean owned, boolean equipped) {
+        if (!owned) {
+            return model(named(Material.PAPER, bold("У вас нету этой косметики!", NamedTextColor.RED), List.of(
+                    text("№" + cosmetic.number() + ": ", NamedTextColor.DARK_GRAY).append(text(cosmetic.name(), cosmetic.color())),
+                    text("Получите её из кейса косметики", NamedTextColor.DARK_GRAY))), cosmetic.file());
+        }
+        List<Component> lore = new ArrayList<>();
+        if (equipped) {
+            lore.add(text("Надета. Shift + клик — снять косметику", NamedTextColor.DARK_GRAY));
+        } else {
+            lore.add(text("Нажмите, чтобы надеть на голову", NamedTextColor.DARK_GRAY));
+        }
+        lore.add(text("Видна другим игрокам; вам — только в меню", NamedTextColor.DARK_GRAY));
+        lore.add(text("№" + cosmetic.number() + " · модель " + cosmetic.file(), NamedTextColor.DARK_GRAY));
+        ItemStack item = named(Material.PAPER, bold(cosmetic.name(), cosmetic.color()), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(equipped);
+        item.setItemMeta(meta);
+        return model(item, cosmetic.file());
+    }
+
+    /** Кнопка «Кейс косметики»: показывает число кейсов у игрока. */
+    ItemStack cosmeticCase(int cases) {
+        String count = cases == 1 ? "Есть 1 кейс косметики" : "Есть " + cases + " кейсов косметики";
+        ItemStack item = named(Material.CHEST, medals.title("Кейс косметики", ProfileMedal.Metal.GOLD), List.of(
+                text(count, cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED),
+                text(cases > 0 ? "Нажмите, чтобы открыть" : "Кейсы выдаёт администратор", NamedTextColor.DARK_GRAY)));
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** Карточка косметики во время вскрытия кейса. slot — номер места (1…9). */
+    ItemStack cosmeticReveal(CosmeticCatalog.Cosmetic cosmetic, int slot) {
+        return model(named(Material.PAPER, bold(cosmetic.name(), cosmetic.color()), List.of(
+                text("Место " + slot, NamedTextColor.DARK_GRAY),
+                text("Вскрытие кейса…", NamedTextColor.DARK_GRAY))), cosmetic.file());
     }
 
     static ItemStack item(Material material, String name, TextColor color, List<Component> lore) {
