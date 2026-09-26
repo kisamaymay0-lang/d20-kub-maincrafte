@@ -208,8 +208,7 @@ final class CrabClaw implements Listener {
             return type == Material.COBWEB ? 15.0 : 1.5;      // меч: паутина вмиг, «своё» — в полтора раза
         }
         if (toolFamily == CrabClawRules.Family.SHEARS) {
-            if (type == Material.COBWEB || Tag.SHEARS_EXTREME_BREAKING_SPEED.isTagged(type)
-                    || Tag.SHEARS_MAJOR_BREAKING_SPEED.isTagged(type)) return 15.0;
+            if (type == Material.COBWEB) return 15.0;          // паутина — вмиг, как мечом
             return Tag.WOOL.isTagged(type) ? 5.0 : 2.0;        // шерсть — впятеро, прочее — вдвое
         }
         return CrabClawRules.tierSpeed(tool.getType().name());
@@ -250,10 +249,9 @@ final class CrabClaw implements Listener {
         if (Tag.SWORD_EFFICIENT.isTagged(type) || Tag.SWORD_INSTANTLY_MINES.isTagged(type)) {
             return CrabClawRules.Family.SWORD;
         }
-        if (type == Material.COBWEB || Tag.WOOL.isTagged(type)
-                || Tag.SHEARS_MINOR_BREAKING_SPEED.isTagged(type)
-                || Tag.SHEARS_MAJOR_BREAKING_SPEED.isTagged(type)
-                || Tag.SHEARS_EXTREME_BREAKING_SPEED.isTagged(type)) return CrabClawRules.Family.SHEARS;
+        if (type == Material.COBWEB || Tag.WOOL.isTagged(type)) return CrabClawRules.Family.SHEARS;
+        if (type == Material.VINE || type == Material.GLOW_LICHEN || type == Material.HANGING_ROOTS
+                || type == Material.TRIPWIRE) return CrabClawRules.Family.SHEARS;   // то, что режут ножницами
         return CrabClawRules.Family.NONE;
     }
 
