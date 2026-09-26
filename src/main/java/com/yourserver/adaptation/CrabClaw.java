@@ -1,93 +1,106 @@
 package com.yourserver.adaptation;
 
+import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.Tool;
+import io.papermc.paper.registry.RegistryAccess;
+import io.papermc.paper.registry.RegistryKey;
+import io.papermc.paper.registry.TypedKey;
+import io.papermc.paper.registry.set.RegistryKeySet;
+import io.papermc.paper.registry.set.RegistrySet;
+import io.papermc.paper.registry.tag.TagKey;
+import net.kyori.adventure.util.TriState;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
-import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
 import org.bukkit.Sound;
-import org.bukkit.Tag;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.attribute.AttributeModifier;
-import org.bukkit.block.Block;
+import org.bukkit.block.BlockType;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockDamageAbortEvent;
-import org.bukkit.event.block.BlockDamageEvent;
-import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerItemBreakEvent;
+import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.Damageable;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
-import org.bukkit.util.Vector;
 
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
-import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * Клешня краба — улов болот (обычного и мангрового).
  *
  * В любой руке она добавляет три блока к дальности взаимодействия: атрибуты
  * {@code block_interaction_range} и {@code entity_interaction_range} клиент получает сам,
- * поэтому дотянуться действительно можно. А в правой руке она копает «чужими» инструментами
- * из инвентаря: блок ломается со скоростью лучшего подходящего инструмента, а сам инструмент
- * тратит вдвое больше прочности. Нет подходящего инструмента — клешня копает как обычная рука.
+ * поэтому дотянуться действительно можно.
  *
- * Никаких сообщений в чат и над хотбаром механика не пишет: всё видно по самой игре.
+ * А в правой руке она копает «чужими» инструментами из инвентаря. Клешне подставляется компонент
+ * {@code minecraft:tool} — тот самый, которым описаны настоящие инструменты, — а правила берутся
+ * у инструментов игрока: ванильный набор блоков плюс скорость и дроп этого инструмента. Поэтому
+ * клешня копает ровно так, как копал бы он сам: игра считает и скорость, и дроп, и полосу копания
+ * на клиенте, и защиту регионов (блок ломает сама игра, а не плагин). Нет подходящего инструмента —
+ * компонента нет, и клешня копает как обычная рука. Инструмент, которым сломали блок, тратит вдвое
+ * больше прочности; сама клешня не изнашивается.
+ *
+ * Сообщений в чат и над хотбаром механика не пишет: всё видно по игре.
  */
 final class CrabClaw implements Listener {
-    /** Как часто сверяем атрибут дальности с тем, что лежит в руках. */
-    private static final int REACH_CHECK_TICKS = 5;
+    /** Как часто сверяем руку с инвентарём: раз в четверть секунды. */
+    private static final int REFRESH_TICKS = 5;
 
-    /** Что игрок копает прямо сейчас: блок, слот инструмента и сколько тиков нужно. */
-    private static final class Mining {
-        Location block;
-        int slot;      // -1 — инструмент в левой руке
-        int ticks;
-        int elapsed;
+    /** Правило, которое клешня отдаёт Minecraft: те же блоки, скорость и дроп, что у инструмента. */
+    private record Rule(RegistryKeySet<BlockType> blocks, Set<String> anchors,
+                        double speed, boolean drops, int slot) {
+        CrabClawRules.Rule plain() {
+            return new CrabClawRules.Rule(anchors, speed, drops);
+        }
     }
 
-    /** Из чего клешня копает: инструмент, его слот и посчитанное время. */
-    private record Borrow(ItemStack tool, int slot, int ticks) { }
+    /** Взятый в займы инструмент: что он даёт клешне и в каком слоте лежит. */
+    private record Borrow(int slot, String material, CrabClawRules.Family family,
+                          List<Rule> rules, int efficiency) { }
 
     private final JavaPlugin plugin;
     private final WinterItems items;
     private final NamespacedKey reachKey;
-    private final Map<UUID, Mining> mining = new HashMap<>();
-    private final BukkitTask reachTask;
-    private BukkitTask miningTask;
-    private boolean asking;   // сами подняли BlockBreakEvent: свой обработчик его не трогает
+    /** Подпись собранных правил лежит в самом предмете: так мы не пересылаем его зря. */
+    private final NamespacedKey toolboxKey;
+    private final BukkitTask task;
+    /** Наборы блоков — собираем один раз на всё время работы. */
+    private final Map<String, RegistryKeySet<BlockType>> sets = new HashMap<>();
 
     CrabClaw(JavaPlugin plugin, WinterItems items) {
         this.plugin = plugin;
         this.items = items;
         this.reachKey = new NamespacedKey(plugin, "crab_claw_reach");
+        this.toolboxKey = new NamespacedKey(plugin, "crab_claw_toolbox");
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        reachTask = Bukkit.getScheduler().runTaskTimer(plugin, this::syncReach, REACH_CHECK_TICKS, REACH_CHECK_TICKS);
+        task = Bukkit.getScheduler().runTaskTimer(plugin, this::refresh, REFRESH_TICKS, REFRESH_TICKS);
     }
 
     void disable() {
-        reachTask.cancel();
-        if (miningTask != null) {
-            miningTask.cancel();
-            miningTask = null;
-        }
-        mining.clear();
+        task.cancel();
         for (Player player : Bukkit.getOnlinePlayers()) setReach(player, false);
     }
 
@@ -110,10 +123,6 @@ final class CrabClaw implements Listener {
         return items.kind(player.getInventory().getItemInMainHand()) == WinterItems.Kind.CLAW;
     }
 
-    private void syncReach() {
-        for (Player player : Bukkit.getOnlinePlayers()) setReach(player, holdsClaw(player));
-    }
-
     private void setReach(Player player, boolean enabled) {
         apply(player.getAttribute(Attribute.BLOCK_INTERACTION_RANGE), enabled);
         apply(player.getAttribute(Attribute.ENTITY_INTERACTION_RANGE), enabled);
@@ -129,267 +138,250 @@ final class CrabClaw implements Listener {
         }
     }
 
-    @EventHandler
-    public void join(PlayerJoinEvent event) { setReach(event.getPlayer(), holdsClaw(event.getPlayer())); }
+    // ===== обновление руки =====
+
+    private void refresh() {
+        for (Player player : Bukkit.getOnlinePlayers()) refresh(player);
+    }
+
+    private void refresh(Player player) {
+        setReach(player, holdsClaw(player));
+        applyMining(player);
+    }
+
+    /** Слот меняется уже после события, поэтому смотрим руку следующим тиком. */
+    private void nextTick(Player player) {
+        Bukkit.getScheduler().runTask(plugin, () -> refresh(player));
+    }
 
     @EventHandler
-    public void respawn(PlayerRespawnEvent event) { setReach(event.getPlayer(), holdsClaw(event.getPlayer())); }
+    public void join(PlayerJoinEvent event) { refresh(event.getPlayer()); }
 
     @EventHandler
-    public void quit(PlayerQuitEvent event) { mining.remove(event.getPlayer().getUniqueId()); }
+    public void respawn(PlayerRespawnEvent event) { refresh(event.getPlayer()); }
 
     @EventHandler
-    public void death(PlayerDeathEvent event) { mining.remove(event.getEntity().getUniqueId()); }
+    public void held(PlayerItemHeldEvent event) { nextTick(event.getPlayer()); }
 
-    // ===== копание чужими инструментами =====
+    @EventHandler
+    public void swap(PlayerSwapHandItemsEvent event) { nextTick(event.getPlayer()); }
 
-    /** Начали копать блок: считаем, чем и как быстро его сломает клешня. */
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void damage(BlockDamageEvent event) {
-        Player player = event.getPlayer();
-        Mining session = session(player, event.getBlock());
-        if (session == null) {
-            mining.remove(player.getUniqueId());
+    // ===== копание: клешня получает компонент инструмента =====
+
+    /** Собирает клешне правила по инструментам в инвентаре — только когда она в правой руке. */
+    private void applyMining(Player player) {
+        ItemStack held = player.getInventory().getItemInMainHand();
+        if (items.kind(held) != WinterItems.Kind.CLAW) return;
+        Map<CrabClawRules.Family, Borrow> toolbox = toolbox(player);
+        String signature = signature(toolbox);
+        ItemMeta meta = held.getItemMeta();
+        if (signature.equals(meta.getPersistentDataContainer().get(toolboxKey, PersistentDataType.STRING))) return;
+        List<Rule> rules = rules(toolbox);
+        meta.getPersistentDataContainer().set(toolboxKey, PersistentDataType.STRING, signature);
+        ItemStack updated = held.clone();
+        updated.setItemMeta(meta);
+        if (rules.isEmpty()) updated.unsetData(DataComponentTypes.TOOL);
+        else updated.setData(DataComponentTypes.TOOL, component(rules));
+        player.getInventory().setItemInMainHand(updated);
+    }
+
+    /** Компонент инструмента: скорость копания, износ самой клешни — ноль (она не изнашивается). */
+    private Tool component(List<Rule> rules) {
+        Tool.Builder builder = Tool.tool()
+                .defaultMiningSpeed(1.0f)
+                .damagePerBlock(0)
+                .canDestroyBlocksInCreative(true);
+        for (Rule rule : rules) {
+            builder.addRule(Tool.rule(rule.blocks(), (float) rule.speed(),
+                    rule.drops() ? TriState.TRUE : TriState.FALSE));
+        }
+        return builder.build();
+    }
+
+    /** Правила всех взятых инструментов: семейства идут по старшинству, как в ванильных наборах. */
+    private List<Rule> rules(Map<CrabClawRules.Family, Borrow> toolbox) {
+        List<Rule> out = new ArrayList<>();
+        for (CrabClawRules.Family family : CrabClawRules.ORDER) {
+            Borrow borrow = toolbox.get(family);
+            if (borrow != null) out.addAll(borrow.rules());
+        }
+        return List.copyOf(out);
+    }
+
+    /** Подпись набора инструментов: по ней видно, что клешне уже выданы нужные правила. */
+    private String signature(Map<CrabClawRules.Family, Borrow> toolbox) {
+        StringBuilder out = new StringBuilder(Integer.toString(toolbox.size()));
+        for (CrabClawRules.Family family : CrabClawRules.ORDER) {
+            Borrow borrow = toolbox.get(family);
+            if (borrow == null) continue;
+            out.append('|').append(family).append(' ').append(borrow.material())
+                    .append(" эф").append(borrow.efficiency())
+                    .append(" x").append(borrow.rules().size())
+                    .append('@').append(borrow.rules().stream().mapToDouble(Rule::speed).sum());
+        }
+        return out.toString();
+    }
+
+    // ===== инструменты из инвентаря =====
+
+    /** Лучший инструмент каждого семейства: сильнее по уровню, при равной силе — быстрее. */
+    private Map<CrabClawRules.Family, Borrow> toolbox(Player player) {
+        Map<CrabClawRules.Family, Borrow> found = new EnumMap<>(CrabClawRules.Family.class);
+        PlayerInventory inventory = player.getInventory();
+        ItemStack[] storage = inventory.getStorageContents();
+        for (int slot = 0; slot < storage.length; slot++) add(found, storage[slot], slot);
+        add(found, inventory.getItemInOffHand(), -1);
+        return found;
+    }
+
+    private void add(Map<CrabClawRules.Family, Borrow> found, ItemStack stack, int slot) {
+        Borrow borrow = borrow(stack, slot);
+        if (borrow == null) return;
+        Borrow current = found.get(borrow.family());
+        if (current == null) {
+            found.put(borrow.family(), borrow);
             return;
         }
-        mining.put(player.getUniqueId(), session);
-        ensureTask();
+        int score = score(borrow);
+        int best = score(current);
+        boolean wins = score > best || (score == best
+                && CrabClawRules.topSpeed(plain(borrow)) > CrabClawRules.topSpeed(plain(current)));
+        if (wins) found.put(borrow.family(), borrow);
     }
 
-    /** Игрок перестал копать блок — сессия больше не нужна. */
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void abort(BlockDamageAbortEvent event) {
-        Mining session = mining.get(event.getPlayer().getUniqueId());
-        if (session != null && session.block.equals(event.getBlock().getLocation())) {
-            mining.remove(event.getPlayer().getUniqueId());
+    /** Что предмет может дать клешне: null — это не инструмент, брать нечего. */
+    private Borrow borrow(ItemStack stack, int slot) {
+        if (stack == null || stack.getType().isAir()) return null;
+        if (items.kind(stack) != null) return null;                    // чужой улов не одалживаем
+        if (stack.getType().getMaxDurability() <= 0) return null;      // не инструмент — изнашивать нечего
+        String material = stack.getType().name();
+        CrabClawRules.Family family = CrabClawRules.family(material);
+        int efficiency = Math.max(0, stack.getEnchantmentLevel(Enchantment.EFFICIENCY));
+        double bonus = efficiency > 0 ? (double) efficiency * efficiency + 1.0 : 0.0;
+        List<Rule> rules = new ArrayList<>();
+        Tool component = stack.getData(DataComponentTypes.TOOL);
+        if (component != null) {
+            // Настоящий инструмент: берём его собственные правила, поэтому и скорость, и дроп
+            // получаются такими же, как если бы игрок копал им самим. Зачарование усиливает
+            // только те правила, где инструмент действительно копает быстрее руки.
+            for (Tool.Rule rule : component.rules()) {
+                double speed = rule.speed() == null ? component.defaultMiningSpeed() : rule.speed();
+                if (speed > 1.0) speed += bonus;
+                rules.add(new Rule(rule.blocks(), anchors(rule.blocks()), speed,
+                        rule.correctForDrops() == TriState.TRUE, slot));
+            }
+            if (family == CrabClawRules.Family.NONE) family = CrabClawRules.family(anchors(rules));
+        } else {
+            if (family == CrabClawRules.Family.NONE) return null;
+            double speed = CrabClawRules.withEfficiency(CrabClawRules.tierSpeed(material), efficiency);
+            int tier = Math.max(0, CrabClawRules.toolTier(material));
+            for (CrabClawRules.Spec spec : CrabClawRules.fallback(family, tier, speed)) {
+                RegistryKeySet<BlockType> blocks = blocks(spec.blocks());
+                if (blocks == null) continue;
+                rules.add(new Rule(blocks, anchors(blocks), spec.speed(), spec.drops(), slot));
+            }
         }
+        if (family == CrabClawRules.Family.NONE || rules.isEmpty()) return null;
+        return new Borrow(slot, material, family, List.copyOf(rules), efficiency);
     }
 
-    /** Клиент сломал блок первым (мгновенный блок или медленный инструмент) — берём работу на себя. */
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    private static int score(Borrow borrow) {
+        return CrabClawRules.score(plain(borrow));
+    }
+
+    private static List<CrabClawRules.Rule> plain(Borrow borrow) {
+        List<CrabClawRules.Rule> out = new ArrayList<>();
+        for (Rule rule : borrow.rules()) out.add(rule.plain());
+        return out;
+    }
+
+    /** Опорные блоки правил: по ним узнаём семейство незнакомого инструмента и его силу. */
+    private static Set<String> anchors(List<Rule> rules) {
+        Set<String> found = new LinkedHashSet<>();
+        for (Rule rule : rules) found.addAll(rule.anchors());
+        return found;
+    }
+
+    private static Set<String> anchors(RegistryKeySet<BlockType> blocks) {
+        Set<String> found = new LinkedHashSet<>();
+        for (String anchor : CrabClawRules.ANCHORS) {
+            if (blocks.contains(TypedKey.create(RegistryKey.BLOCK, NamespacedKey.minecraft(anchor)))) found.add(anchor);
+        }
+        return found;
+    }
+
+    // ===== износ чужого инструмента =====
+
+    /** Блок сломала сама игра — остаётся износить инструмент, которым клешня копала. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void broke(BlockBreakEvent event) {
         Player player = event.getPlayer();
-        if (asking || player.getGameMode() == GameMode.CREATIVE || !clawInMainHand(player)) return;
-        Block block = event.getBlock();
-        if (block.getType().getHardness() < 0) return;
-        Borrow borrow = borrow(player, block);
-        if (borrow == null) return;      // нечем — клешня копает как рука, всё остаётся ванильным
-        event.setCancelled(true);
-        mining.remove(player.getUniqueId());
-        breakDirectly(player, block, borrow.slot());
-    }
-
-    /** Сколько тиков займёт этот блок этим инструментом (null — голой рукой).
-     *  Всё как в ванили: скорость даёт семейство, делитель 30 вместо 100 — подходящий уровень. */
-    private int breakTicks(Player player, Block block, ItemStack tool) {
-        CrabClawRules.Family blockFamily = family(block);
-        CrabClawRules.Family toolFamily = tool == null
-                ? CrabClawRules.Family.NONE : CrabClawRules.family(tool.getType().name());
-        boolean fits = CrabClawRules.fits(toolFamily, blockFamily);
-        double speed = 1.0;
-        if (fits) {
-            speed = toolSpeed(tool, block, toolFamily);
-            if (isDigger(toolFamily)) {
-                speed = CrabClawRules.withEfficiency(speed, tool.getEnchantmentLevel(Enchantment.EFFICIENCY));
-            }
-        }
-        speed *= CrabClawRules.effectMultiplier(level(player, PotionEffectType.HASTE),
-                level(player, PotionEffectType.CONDUIT_POWER));
-        int toolTier = tool == null ? -1 : CrabClawRules.toolTier(tool.getType().name());
-        boolean correctTool = CrabClawRules.correctTool(toolFamily, toolTier, blockFamily, requiredTier(block));
-        return CrabClawRules.breakTicks(speed, block.getType().getHardness(), correctTool,
-                CrabClawRules.fatigueMultiplier(amplifier(player, PotionEffectType.MINING_FATIGUE)));
-    }
-
-    /** Скорость инструмента по этому блоку: у кирок и прочих — по уровню, у мечей и ножниц — своя. */
-    private static double toolSpeed(ItemStack tool, Block block, CrabClawRules.Family toolFamily) {
-        Material type = block.getType();
-        if (toolFamily == CrabClawRules.Family.SWORD) {
-            return type == Material.COBWEB ? 15.0 : 1.5;      // меч: паутина вмиг, «своё» — в полтора раза
-        }
-        if (toolFamily == CrabClawRules.Family.SHEARS) {
-            if (type == Material.COBWEB) return 15.0;          // паутина — вмиг, как мечом
-            return Tag.WOOL.isTagged(type) ? 5.0 : 2.0;        // шерсть — впятеро, прочее — вдвое
-        }
-        return CrabClawRules.tierSpeed(tool.getType().name());
-    }
-
-    /** Кирка, топор, лопата, мотыга — только они получают «Эффективность». */
-    private static boolean isDigger(CrabClawRules.Family family) {
-        return family == CrabClawRules.Family.PICKAXE || family == CrabClawRules.Family.AXE
-                || family == CrabClawRules.Family.SHOVEL || family == CrabClawRules.Family.HOE;
-    }
-
-    /** Уровень, которого блок требует от инструмента: по ванильным тегам needs_*_tool. */
-    private static int requiredTier(Block block) {
-        Material type = block.getType();
-        return CrabClawRules.requiredTier(Tag.NEEDS_STONE_TOOL.isTagged(type), Tag.NEEDS_IRON_TOOL.isTagged(type),
-                Tag.NEEDS_DIAMOND_TOOL.isTagged(type));
-    }
-
-    private static int level(Player player, PotionEffectType type) {
-        PotionEffect effect = player.getPotionEffect(type);
-        return effect == null ? 0 : effect.getAmplifier() + 1;
-    }
-
-    private static int amplifier(Player player, PotionEffectType type) {
-        PotionEffect effect = player.getPotionEffect(type);
-        return effect == null ? -1 : effect.getAmplifier();
-    }
-
-    /** Семейство блока по ванильным тегам: кирка, топор, лопата, мотыга, меч, ножницы.
-     *  Порядок важен: листва помечена и тегами мотыги, и тегами ножниц — мотыга идёт первой,
-     *  как в ванили, где мотыга рвёт листву быстрее всего. */
-    private static CrabClawRules.Family family(Block block) {
-        Material type = block.getType();
-        if (Tag.MINEABLE_PICKAXE.isTagged(type)) return CrabClawRules.Family.PICKAXE;
-        if (Tag.MINEABLE_AXE.isTagged(type)) return CrabClawRules.Family.AXE;
-        if (Tag.MINEABLE_SHOVEL.isTagged(type)) return CrabClawRules.Family.SHOVEL;
-        if (Tag.MINEABLE_HOE.isTagged(type)) return CrabClawRules.Family.HOE;
-        if (Tag.SWORD_EFFICIENT.isTagged(type) || Tag.SWORD_INSTANTLY_MINES.isTagged(type)) {
-            return CrabClawRules.Family.SWORD;
-        }
-        if (type == Material.COBWEB || Tag.WOOL.isTagged(type)) return CrabClawRules.Family.SHEARS;
-        if (type == Material.VINE || type == Material.GLOW_LICHEN || type == Material.HANGING_ROOTS
-                || type == Material.TRIPWIRE) return CrabClawRules.Family.SHEARS;   // то, что режут ножницами
-        return CrabClawRules.Family.NONE;
-    }
-
-    /** Новая сессия копания: null — копать будет сама рука или блок ломается мгновенно. */
-    private Mining session(Player player, Block block) {
-        if (player.getGameMode() == GameMode.CREATIVE || !clawInMainHand(player)) return null;
-        if (block.getType().getHardness() < 0) return null;            // неразрушимый блок
-        Borrow borrow = borrow(player, block);
-        if (borrow == null || borrow.ticks() <= 0) return null;
-        Mining session = new Mining();
-        session.block = block.getLocation();
-        session.slot = borrow.slot();
-        session.ticks = borrow.ticks();
-        session.elapsed = 0;
-        return session;
-    }
-
-    /** Лучший подходящий инструмент: тот, которым блок сломается быстрее всего — и быстрее руки. */
-    private Borrow borrow(Player player, Block block) {
-        PlayerInventory inventory = player.getInventory();
-        int handTicks = breakTicks(player, block, null);
-        Borrow best = null;
-        ItemStack[] storage = inventory.getStorageContents();
-        for (int slot = 0; slot < storage.length; slot++) {
-            best = better(best, candidate(player, block, storage[slot], slot, handTicks));
-        }
-        return better(best, candidate(player, block, inventory.getItemInOffHand(), -1, handTicks));
-    }
-
-    private Borrow candidate(Player player, Block block, ItemStack stack, int slot, int handTicks) {
-        if (stack == null || stack.getType().isAir() || items.kind(stack) != null) return null;
-        if (!(stack.getItemMeta() instanceof Damageable)) return null;  // не инструмент — изнашивать нечего
-        if (CrabClawRules.family(stack.getType().name()) == CrabClawRules.Family.NONE) return null;
-        int ticks = breakTicks(player, block, stack);
-        return CrabClawRules.borrowable(ticks, handTicks) ? new Borrow(stack.clone(), slot, ticks) : null;
-    }
-
-    private static Borrow better(Borrow best, Borrow candidate) {
-        if (candidate == null) return best;
-        return best == null || candidate.ticks() < best.ticks() ? candidate : best;
-    }
-
-    private void ensureTask() {
-        if (miningTask != null) return;
-        miningTask = Bukkit.getScheduler().runTaskTimer(plugin, this::mineTick, 1L, 1L);
-    }
-
-    private void mineTick() {
-        if (mining.isEmpty()) {
-            miningTask.cancel();
-            miningTask = null;
+        if (player.getGameMode() == GameMode.CREATIVE || !clawInMainHand(player)) return;
+        TypedKey<BlockType> block = TypedKey.create(RegistryKey.BLOCK, event.getBlock().getType().getKey());
+        for (Rule rule : rules(toolbox(player))) {
+            if (!rule.blocks().contains(block)) continue;
+            wear(player, rule.slot());
             return;
         }
-        Iterator<Map.Entry<UUID, Mining>> entries = mining.entrySet().iterator();
-        while (entries.hasNext()) {
-            Map.Entry<UUID, Mining> entry = entries.next();
-            Player player = Bukkit.getPlayer(entry.getKey());
-            Mining session = entry.getValue();
-            if (player == null || !player.isOnline() || player.isDead() || !clawInMainHand(player)
-                    || player.getGameMode() == GameMode.CREATIVE || !reachable(player, session)) {
-                entries.remove();
-                continue;
-            }
-            session.elapsed++;
-            if (session.elapsed < session.ticks) {
-                player.sendBlockDamage(session.block,
-                        (float) Math.min(0.99, (double) session.elapsed / session.ticks), player.getEntityId());
-                continue;
-            }
-            entries.remove();
-            breakFromTick(player, session);
-        }
-    }
-
-    /** Блок ещё тот же и игрок рядом с ним: иначе сессию бросаем. */
-    private boolean reachable(Player player, Mining session) {
-        Block block = session.block.getBlock();
-        if (block.getType().isAir() || block.getType().getHardness() < 0) return false;
-        Location eye = player.getEyeLocation();
-        if (!eye.getWorld().equals(session.block.getWorld())) return false;
-        AttributeInstance range = player.getAttribute(Attribute.BLOCK_INTERACTION_RANGE);
-        double reach = range == null ? 4.5 : range.getValue();
-        return eye.toVector().distance(session.block.toVector().add(new Vector(0.5, 0.5, 0.5))) <= reach + 1.0;
-    }
-
-    /** Пришли своим таймером: спрашиваем другие плагины (приваты) и ломаем блок инструментом. */
-    private void breakFromTick(Player player, Mining session) {
-        Block block = session.block.getBlock();
-        if (block.getType().isAir()) return;
-        BlockBreakEvent asked = new BlockBreakEvent(block, player);
-        asking = true;
-        try {
-            Bukkit.getPluginManager().callEvent(asked);
-        } finally {
-            asking = false;
-        }
-        if (asked.isCancelled() || block.getType().isAir()) return;
-        breakDirectly(player, block, session.slot);
-    }
-
-    /** Ломает блок «чужим» инструментом: дроп и опыт как у инструмента, а износ у инструмента вдвое. */
-    private void breakDirectly(Player player, Block block, int slot) {
-        ItemStack tool = toolAt(player, slot);
-        if (tool == null) {
-            block.breakNaturally(true, true);
-            return;
-        }
-        block.breakNaturally(tool, true, true);
-        wear(player, slot);
     }
 
     private void wear(Player player, int slot) {
         int amount = wearPerBlock();
         if (amount <= 0) return;
-        ItemStack tool = toolAt(player, slot);
-        if (tool == null || !(tool.getItemMeta() instanceof Damageable meta)) return;
-        int max = tool.getType().getMaxDurability();
-        int next = meta.getDamage() + amount;
+        PlayerInventory inventory = player.getInventory();
+        ItemStack stack = slot < 0 ? inventory.getItemInOffHand() : inventory.getItem(slot);
+        if (stack == null || stack.getType().isAir()) return;
+        ItemMeta meta = stack.getItemMeta();
+        if (!(meta instanceof Damageable damage)) return;
+        int max = stack.getType().getMaxDurability();
+        int next = damage.getDamage() + amount;
         if (max > 0 && next >= max) {          // инструмент стёрся до конца — как в ванили
-            ItemStack broken = tool.clone();
-            setTool(player, slot, null);
+            ItemStack broken = stack.clone();
+            setTool(inventory, slot, null);
             player.getWorld().playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 1.0f, 1.0f);
             Bukkit.getPluginManager().callEvent(new PlayerItemBreakEvent(player, broken));
             return;
         }
-        meta.setDamage(next);
-        tool.setItemMeta(meta);
-        setTool(player, slot, tool);
+        damage.setDamage(next);
+        stack.setItemMeta(meta);
+        setTool(inventory, slot, stack);
     }
 
-    private static ItemStack toolAt(Player player, int slot) {
-        ItemStack tool = slot < 0 ? player.getInventory().getItemInOffHand() : player.getInventory().getItem(slot);
-        return tool == null || tool.getType().isAir() ? null : tool;
-    }
-
-    private static void setTool(Player player, int slot, ItemStack tool) {
+    private static void setTool(PlayerInventory inventory, int slot, ItemStack tool) {
         ItemStack value = tool == null ? new ItemStack(Material.AIR) : tool;
-        if (slot < 0) player.getInventory().setItem(EquipmentSlot.OFF_HAND, value);
-        else player.getInventory().setItem(slot, value);
+        if (slot < 0) inventory.setItem(EquipmentSlot.OFF_HAND, value);
+        else inventory.setItem(slot, value);
+    }
+
+    // ===== наборы блоков =====
+
+    /** Ванильный тег как набор блоков: у Paper он и есть набор ключей, поэтому в предмете
+     *  остаётся короткая ссылка «#тег», а не сотня отдельных блоков. */
+    private RegistryKeySet<BlockType> tagSet(String tag) {
+        Registry<BlockType> registry = RegistryAccess.registryAccess().getRegistry(RegistryKey.BLOCK);
+        TagKey<BlockType> key = TagKey.create(RegistryKey.BLOCK, NamespacedKey.minecraft(tag));
+        return registry.hasTag(key) ? registry.getTag(key) : null;
+    }
+
+    /** Набор блоков: ванильный тег или перечень блоков — с кэшем, чтобы не дёргать реестр зря. */
+    private RegistryKeySet<BlockType> blocks(CrabClawRules.Blocks spec) {
+        String key = spec.tag() != null ? "#" + spec.tag() : String.join(",", spec.names());
+        if (sets.containsKey(key)) return sets.get(key);
+        RegistryKeySet<BlockType> set = null;
+        try {
+            if (spec.tag() != null) {
+                set = tagSet(spec.tag());
+            } else {
+                List<BlockType> found = spec.names().stream()
+                        .map(Material::matchMaterial).filter(Objects::nonNull)
+                        .map(Material::asBlockType).filter(Objects::nonNull).toList();
+                if (!found.isEmpty()) set = RegistrySet.keySetFromValues(RegistryKey.BLOCK, found);
+            }
+        } catch (RuntimeException ex) {
+            plugin.getLogger().warning("Клешня краба: набор блоков " + key + " не собрался (" + ex.getMessage() + ")");
+        }
+        if (set == null) plugin.getLogger().warning("Клешня краба: набор блоков " + key + " не нашёлся");
+        sets.put(key, set);
+        return set;
     }
 }

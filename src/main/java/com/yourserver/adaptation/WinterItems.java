@@ -77,14 +77,14 @@ final class WinterItems {
             case RAW, DEPLETED -> "Рыба с неведомых земель.";
             case ROE -> "Добывается из Изморози (shift + ПКМ)";
             case SANDWICH -> "Сытный, как золотая морковка";
-            case CLAW -> "В руке дальность взаимодействия +3 блока, в правой руке копает инструментами из инвентаря.";
+            case CLAW -> "Особый предмет рыбалки в болотах.";
         };
     }
 
-    /** Прежнее описание изморози: его тоже заменяем на актуальное, чтобы вещи обновились. */
-    private static String legacyDescription(Kind kind) {
-        return kind == Kind.TOOL ? "Особый предмет рыбалки в зимних биомах." : null;
-    }
+    /** Прежние описания: их тоже заменяем на актуальные, чтобы выданные ранее вещи обновились. */
+    private static final java.util.Set<String> LEGACY_LORE = java.util.Set.of(
+            "Особый предмет рыбалки в зимних биомах.",             // изморозь до 10.22
+            "В руке дальность взаимодействия +3 блока, в правой руке копает инструментами из инвентаря.");
 
     /** Описания изморози, которые когда-то выдавала механика зацепа: их возвращаем к прежнему. */
     private static final java.util.Set<String> RIME_LORE = java.util.Set.of(
@@ -92,7 +92,7 @@ final class WinterItems {
             "ПКМ по стене в падении — зацеп, Shift + пробел — прыжок от стены.");
 
     private static boolean defaultLore(Kind kind, String plain) {
-        return plain.equals(description(kind)) || plain.equals(legacyDescription(kind))
+        return plain.equals(description(kind)) || LEGACY_LORE.contains(plain)
                 || (kind == Kind.TOOL && RIME_LORE.contains(plain))
                 || (kind == Kind.ROE && plain.equals("Добывается из Изморози"));
     }

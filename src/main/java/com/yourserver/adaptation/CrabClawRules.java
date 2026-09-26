@@ -1,15 +1,21 @@
 package com.yourserver.adaptation;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 /**
- * Правила клешни краба: дальность взаимодействия, «чужие» инструменты из инвентаря и их износ.
+ * Правила клешни краба: дальность взаимодействия и «одолженные» инструменты из инвентаря.
  *
- * Здесь только арифметика без доступа к серверу, поэтому таблица скоростей и время копания
- * проверяются юнит-тестами: числа сверены с вики (камень: дерево 1.15 с, камень-кирка 0.6 с,
- * железо 0.4 с, алмаз 0.3 с, незерит 0.25 с; обсидиан деревянной киркой 125 с, рукой 250 с).
+ * Копает сама клешня: ей подставляется компонент {@code minecraft:tool} — тот самый, которым
+ * описаны настоящие инструменты. Поэтому в правилах клешни лежат ванильные наборы блоков
+ * ({@code #mineable/pickaxe}, {@code #mineable/shovel}, {@code #sword_instantly_mines} и прочие),
+ * и игра сама считает скорость копания, дроп и полосу копания на клиенте.
  *
- * Ванильное правило: скорость даёт семейство инструмента, а деление на 30 вместо 100 — только
- * подходящий по уровню инструмент. Поэтому деревянная кирка по железной руде копает быстрее
- * руки, но дропа не даёт: об этом заботится сам {@code breakNaturally}.
+ * Здесь только чистые данные: семейства, уровни, скорости и запасные правила — для тех предметов,
+ * у которых нет своего компонента инструмента. Числа сверены с вики: камень — дерево 1.15 с,
+ * камень-кирка 0.6 с, железо 0.4 с, алмаз 0.3 с, незерит 0.25 с; обсидиан — дерево 125 с и рука 250 с.
  */
 final class CrabClawRules {
     /** Прибавка к дальности взаимодействия в блоках — и по блокам, и по сущностям. */
@@ -17,10 +23,53 @@ final class CrabClawRules {
     /** Износ чужого инструмента за один блок: вдвое больше обычного. */
     static final int WEAR_PER_BLOCK = 2;
 
+    /** Порядок семейств в правилах клешни: у кого выше скорость на общих блоках, тот и раньше.
+     *  Так ножницы рвут листву вмиг, а меч по той же листве копает в полтора раза быстрее руки. */
+    static final List<Family> ORDER = List.of(Family.SHEARS, Family.SWORD, Family.HOE,
+            Family.SHOVEL, Family.AXE, Family.PICKAXE);
+
+    /** Опорные блоки: по ним узнаём семейство незнакомого инструмента и его силу. */
+    static final List<String> ANCHORS = List.of(
+            "stone", "oak_log", "dirt", "hay_block", "white_wool", "cobweb",
+            "copper_ore", "iron_ore", "gold_ore", "diamond_ore", "obsidian", "ancient_debris");
+
+    /** Вес опорного блока: чем крепче блок, тем выше уровень инструмента, который его берёт. */
+    private static final Map<String, Integer> WEIGHTS = Map.of(
+            "copper_ore", 1, "iron_ore", 1, "gold_ore", 2, "diamond_ore", 2,
+            "obsidian", 3, "ancient_debris", 3);
+
+    /** Блоки, которые ножницы рвут вмиг: паутина и всякая мелочь, до которой они «дотягиваются». */
+    private static final List<String> SHEARS_BLOCKS = List.of(
+            "cobweb", "vine", "glow_lichen", "hanging_roots", "tripwire",
+            "cave_vines", "cave_vines_plant", "weeping_vines", "weeping_vines_plant",
+            "twisting_vines", "twisting_vines_plant");
+
+    private static final double SHEARS_FAST = 15.0;
+    private static final double SHEARS_WOOL = 5.0;
+    private static final double SWORD_FAST = 15.0;
+    private static final double SWORD_SPEED = 1.5;
+
     private CrabClawRules() { }
 
-    /** Семейство инструмента: по нему видно, подходит ли инструмент блоку. */
+    /** Семейство инструмента: по нему видно, какие блоки он берёт. */
     enum Family { PICKAXE, AXE, SHOVEL, HOE, SWORD, SHEARS, NONE }
+
+    /** Набор блоков: ванильный тег или перечень блоков. */
+    record Blocks(String tag, List<String> names) {
+        Blocks {
+            names = List.copyOf(names);
+        }
+    }
+
+    /** Правило, которое клешня отдаёт игре: набор блоков, скорость и дроп. */
+    record Spec(Blocks blocks, double speed, boolean drops) { }
+
+    /** Правило в виде данных — для расчётов силы инструмента. */
+    record Rule(Set<String> anchors, double speed, boolean drops) {
+        Rule {
+            anchors = Set.copyOf(anchors);
+        }
+    }
 
     /** Семейство по имени материала Bukkit: DIAMOND_PICKAXE, STONE_AXE, SHEARS, STICK... */
     static Family family(String material) {
@@ -34,26 +83,16 @@ final class CrabClawRules {
         return Family.NONE;
     }
 
-    /** Подходит ли инструмент блоку: только своё семейство и не «пустая рука». */
-    static boolean fits(Family tool, Family block) {
-        return tool != Family.NONE && tool == block;
-    }
-
-    /** Скорость инструмента по блоку своего семейства: дерево 2, камень 4, медь 5, железо 6,
-     *  алмаз 8, незерит 9, золото 12; всё остальное (в том числе рука) копает со скоростью 1. */
-    static double tierSpeed(String material) {
-        if (material == null) return 1.0;
-        // Мечи и ножницы носят имена уровней («DIAMOND_SWORD»), но скоростью уровня не копают:
-        // их скорость считает слушатель, а здесь — предохранитель от случайного вызова.
-        if (material.endsWith("_SWORD") || material.equals("SHEARS")) return 1.0;
-        if (material.startsWith("WOODEN_")) return 2.0;
-        if (material.startsWith("STONE_")) return 4.0;
-        if (material.startsWith("COPPER_")) return 5.0;
-        if (material.startsWith("IRON_")) return 6.0;
-        if (material.startsWith("DIAMOND_")) return 8.0;
-        if (material.startsWith("NETHERITE_")) return 9.0;
-        if (material.startsWith("GOLDEN_")) return 12.0;
-        return 1.0;
+    /** Семейство незнакомого (например, кастомного) инструмента — по опорным блокам его правил.
+     *  Ножницы проверяем раньше меча: только у них в правилах есть шерсть. */
+    static Family family(Set<String> anchors) {
+        if (anchors.contains("stone")) return Family.PICKAXE;
+        if (anchors.contains("oak_log")) return Family.AXE;
+        if (anchors.contains("dirt")) return Family.SHOVEL;
+        if (anchors.contains("hay_block")) return Family.HOE;
+        if (anchors.contains("white_wool")) return Family.SHEARS;
+        if (anchors.contains("cobweb")) return Family.SWORD;
+        return Family.NONE;
     }
 
     /** Уровень инструмента: дерево и золото 0, камень и медь 1, железо 2, алмаз и незерит 3;
@@ -68,58 +107,82 @@ final class CrabClawRules {
         return -1;
     }
 
-    /** Требуемый блоком уровень по ванильным тегам: needs_diamond_tool 3, needs_iron_tool 2,
-     *  needs_stone_tool 1; всё прочее — 0 (камень, дерево, земля: годится любой инструмент). */
-    static int requiredTier(boolean needsStone, boolean needsIron, boolean needsDiamond) {
-        if (needsDiamond) return 3;
-        if (needsIron) return 2;
-        if (needsStone) return 1;
-        return 0;
+    /** Скорость инструмента по блокам своего семейства: дерево 2, камень 4, медь 5, железо 6,
+     *  алмаз 8, незерит 9, золото 12; всё остальное (в том числе рука) копает со скоростью 1. */
+    static double tierSpeed(String material) {
+        if (material == null) return 1.0;
+        if (material.startsWith("WOODEN_")) return 2.0;
+        if (material.startsWith("STONE_")) return 4.0;
+        if (material.startsWith("COPPER_")) return 5.0;
+        if (material.startsWith("IRON_")) return 6.0;
+        if (material.startsWith("DIAMOND_")) return 8.0;
+        if (material.startsWith("NETHERITE_")) return 9.0;
+        if (material.startsWith("GOLDEN_")) return 12.0;
+        return 1.0;
     }
 
-    /** Инструмент подходит блоку: и семейством, и уровнем. Тогда он копает «по-своему» (делитель 30). */
-    static boolean correctTool(Family toolFamily, int toolTier, Family blockFamily, int blockTier) {
-        return fits(toolFamily, blockFamily) && toolTier >= blockTier;
-    }
-
-    /** «Эффективность» прибавляется только к настоящему инструменту: уровень в квадрате плюс один. */
+    /** «Эффективность» прибавляется только настоящему инструменту: уровень в квадрате плюс один. */
     static double withEfficiency(double speed, int level) {
         return speed > 1.0 && level > 0 ? speed + (double) level * level + 1.0 : speed;
     }
 
-    /** Спешка и проводник ускоряют копание на 20 % за уровень (как в ванили). */
-    static double effectMultiplier(int hasteLevel, int conduitLevel) {
-        double factor = 1.0;
-        if (hasteLevel > 0) factor *= 1.0 + 0.2 * hasteLevel;
-        if (conduitLevel > 0) factor *= 1.0 + 0.2 * conduitLevel;
-        return factor;
+    /**
+     * Запасные правила — для предмета без своего компонента инструмента: тогда берём ванильные
+     * наборы по имени и уровню материала. Настоящие инструменты пользуются своими правилами.
+     */
+    static List<Spec> fallback(Family family, int tier, double speed) {
+        List<Spec> out = new ArrayList<>();
+        switch (family) {
+            case SHEARS -> {
+                out.add(new Spec(new Blocks(null, SHEARS_BLOCKS), SHEARS_FAST, true));
+                out.add(new Spec(new Blocks("wool", List.of()), SHEARS_WOOL, true));
+            }
+            case SWORD -> {
+                out.add(new Spec(new Blocks("sword_instantly_mines", List.of()), SWORD_FAST, true));
+                out.add(new Spec(new Blocks("sword_efficient", List.of()), SWORD_SPEED, true));
+            }
+            case HOE -> out.add(new Spec(new Blocks("mineable/hoe", List.of()), speed, true));
+            case SHOVEL -> out.add(new Spec(new Blocks("mineable/shovel", List.of()), speed, true));
+            case AXE -> out.add(new Spec(new Blocks("mineable/axe", List.of()), speed, true));
+            case PICKAXE -> {
+                // «Не тот» уровень копает медленнее и без дропа, поэтому его правила идут раньше общего.
+                if (tier < 3) out.add(new Spec(new Blocks("needs_diamond_tool", List.of()), speed, false));
+                if (tier < 2) out.add(new Spec(new Blocks("needs_iron_tool", List.of()), speed, false));
+                if (tier < 1) out.add(new Spec(new Blocks("needs_stone_tool", List.of()), speed, false));
+                out.add(new Spec(new Blocks("mineable/pickaxe", List.of()), speed, true));
+            }
+            default -> { }
+        }
+        return List.copyOf(out);
     }
 
-    /** Усталость шахтёра множит уже готовый урон по блоку: 0.3, 0.09, 0.0027… (уровень −1 — нет эффекта). */
-    static double fatigueMultiplier(int amplifier) {
-        return amplifier < 0 ? 1.0 : Math.pow(0.3, amplifier + 1);
+    /** Сила инструмента: сколько тяжёлых блоков он берёт с дропом. Первое подходящее правило решает. */
+    static int score(List<Rule> rules) {
+        int score = 0;
+        for (String anchor : ANCHORS) {
+            Integer weight = WEIGHTS.get(anchor);
+            if (weight == null) continue;
+            for (Rule rule : rules) {
+                if (!rule.anchors().contains(anchor)) continue;
+                if (rule.drops()) score += weight;
+                break;
+            }
+        }
+        return score;
     }
 
-    /** Сколько блок теряет прочности за тик: скорость делится на прочность, а подходящий инструмент
-     *  копает втрое быстрее всех прочих (делитель 30 против 100 — как в ванили). */
-    static double progressPerTick(double speed, double hardness, boolean correctTool, double fatigueFactor) {
-        if (hardness <= 0) return 1.0;
-        return Math.max(0.0, speed) / hardness / (correctTool ? 30.0 : 100.0) * Math.clamp(fatigueFactor, 0.0, 1.0);
+    /** Самая высокая скорость среди правил: по ней сравниваем инструменты одного уровня. */
+    static double topSpeed(List<Rule> rules) {
+        double speed = 0;
+        for (Rule rule : rules) speed = Math.max(speed, rule.speed());
+        return speed;
     }
 
-    /** Тиков до поломки блока: 0 — ломается сразу, максимум — блок не сломать этим инструментом.
-     *  Поправка на double: ровно целые случаи (150 тиков рукой по камню, 45 у «не того»
-     *  инструмента) из-за деления получаются чуть больше целого и иначе округляются вверх. */
-    static int breakTicks(double speed, double hardness, boolean correctTool, double fatigueFactor) {
-        if (hardness < 0) return Integer.MAX_VALUE;
-        double progress = progressPerTick(speed, hardness, correctTool, fatigueFactor);
-        if (progress >= 1.0) return 0;
-        if (progress <= 0) return Integer.MAX_VALUE;
-        return (int) Math.ceil(1.0 / progress - 1e-9);
-    }
-
-    /** Инструмент стоит брать, только если им быстрее, чем рукой: иначе клешня копает как рука. */
-    static boolean borrowable(int toolTicks, int handTicks) {
-        return toolTicks < handTicks;
+    /** Сколько секунд займёт блок, если копать его с такой скоростью (таблица из вики). */
+    static double seconds(double speed, double hardness, boolean correctTool) {
+        if (hardness <= 0) return 0.0;
+        double progress = speed / hardness / (correctTool ? 30.0 : 100.0);
+        if (progress >= 1.0) return 0.0;
+        return Math.ceil(1.0 / progress - 1e-9) / 20.0;
     }
 }

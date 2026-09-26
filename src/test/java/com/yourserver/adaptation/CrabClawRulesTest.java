@@ -2,16 +2,43 @@ package com.yourserver.adaptation;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Клешня краба: семейства инструментов, уровни и время копания.
+ * Клешня краба: что она берёт в займы и какие правила отдаёт компоненту {@code minecraft:tool}.
  *
- * Числа сверены с вики: камень — дерево 1.15 с, каменная кирка 0.6 с, железная 0.4 с, алмазная
- * 0.3 с, незеритовая 0.25 с, рукой 7.5 с; обсидиан — деревянной киркой 125 с, рукой 250 с,
- * незеритовой 8.35 с; железная руда — деревянной киркой 7.5 с, каменной 1.15 с.
+ * Копает сама игра, поэтому числа сверены с вики: камень — дерево 1.15 с, камень-кирка 0.6 с,
+ * железо 0.4 с, алмаз 0.3 с, незерит 0.25 с; обсидиан — рука 250 с, дерево 125 с, камень 62.5 с,
+ * железо 41.7 с, алмаз 9.4 с, незерит 8.35 с; булыжник незеритом 0.35 с; железная руда каменной
+ * киркой 1.15 с, деревянной 7.5 с; рука по камню 7.5 с.
+ *
+ * Здесь же видно, зачем в правилах есть наборы без дропа: «не тот уровень» — это не только пустой
+ * блок, но и штраф к скорости (игра делит на 100 вместо 30), поэтому обсидиан железной киркой
+ * копается 41.7 с, а алмазной 9.4 с.
  */
 class CrabClawRulesTest {
+
+    private static final double DELTA = 1e-9;
+
+    /** Правила кирки в том виде, в каком их отдаёт игра: сперва «не тот уровень», потом основной набор. */
+    private static List<CrabClawRules.Rule> pickaxeRules(int tier, double speed) {
+        Set<String> base = Set.of("stone", "copper_ore", "iron_ore", "gold_ore", "diamond_ore",
+                "obsidian", "ancient_debris");
+        List<CrabClawRules.Rule> rules = new ArrayList<>();
+        if (tier < 3) rules.add(new CrabClawRules.Rule(Set.of("diamond_ore", "obsidian", "ancient_debris"), speed, false));
+        if (tier < 2) rules.add(new CrabClawRules.Rule(Set.of("gold_ore", "diamond_ore"), speed, false));
+        if (tier < 1) rules.add(new CrabClawRules.Rule(Set.of("copper_ore", "iron_ore", "gold_ore"), speed, false));
+        rules.add(new CrabClawRules.Rule(base, speed, true));
+        return rules;
+    }
 
     @Test
     void familiesComeFromMaterialNames() {
@@ -23,37 +50,25 @@ class CrabClawRulesTest {
         assertEquals(CrabClawRules.Family.SWORD, CrabClawRules.family("STONE_SWORD"));
         assertEquals(CrabClawRules.Family.SHEARS, CrabClawRules.family("SHEARS"));
         assertEquals(CrabClawRules.Family.NONE, CrabClawRules.family("STICK"));
-        assertEquals(CrabClawRules.Family.NONE, CrabClawRules.family(null));
+        assertEquals(CrabClawRules.Family.NONE, CrabClawRules.family("PRISMARINE_SHARD"));
+        assertEquals(CrabClawRules.Family.NONE, CrabClawRules.family((String) null));
         // Кирка проверяется раньше топора: у «_PICKAXE» и «_AXE» общий хвост.
         assertNotEquals(CrabClawRules.Family.AXE, CrabClawRules.family("DIAMOND_PICKAXE"));
     }
 
     @Test
-    void onlyItsOwnFamilyFitsTheBlock() {
-        assertTrue(CrabClawRules.fits(CrabClawRules.Family.PICKAXE, CrabClawRules.Family.PICKAXE));
-        assertFalse(CrabClawRules.fits(CrabClawRules.Family.AXE, CrabClawRules.Family.PICKAXE));
-        assertFalse(CrabClawRules.fits(CrabClawRules.Family.NONE, CrabClawRules.Family.PICKAXE));
-        assertFalse(CrabClawRules.fits(CrabClawRules.Family.PICKAXE, CrabClawRules.Family.NONE));
+    void familiesComeFromAnchorsForUnknownItems() {
+        assertEquals(CrabClawRules.Family.PICKAXE, CrabClawRules.family(Set.of("stone", "copper_ore")));
+        assertEquals(CrabClawRules.Family.AXE, CrabClawRules.family(Set.of("oak_log")));
+        assertEquals(CrabClawRules.Family.SHOVEL, CrabClawRules.family(Set.of("dirt")));
+        assertEquals(CrabClawRules.Family.HOE, CrabClawRules.family(Set.of("hay_block")));
+        assertEquals(CrabClawRules.Family.SHEARS, CrabClawRules.family(Set.of("cobweb", "white_wool")));
+        assertEquals(CrabClawRules.Family.SWORD, CrabClawRules.family(Set.of("cobweb")));
+        assertEquals(CrabClawRules.Family.NONE, CrabClawRules.family(Set.of()));
     }
 
     @Test
-    void tiersMatchVanillaTools() {
-        assertEquals(2.0, CrabClawRules.tierSpeed("WOODEN_PICKAXE"), 1e-9);
-        assertEquals(4.0, CrabClawRules.tierSpeed("STONE_PICKAXE"), 1e-9);
-        assertEquals(5.0, CrabClawRules.tierSpeed("COPPER_PICKAXE"), 1e-9);
-        assertEquals(6.0, CrabClawRules.tierSpeed("IRON_PICKAXE"), 1e-9);
-        assertEquals(8.0, CrabClawRules.tierSpeed("DIAMOND_PICKAXE"), 1e-9);
-        assertEquals(9.0, CrabClawRules.tierSpeed("NETHERITE_PICKAXE"), 1e-9);
-        assertEquals(12.0, CrabClawRules.tierSpeed("GOLDEN_PICKAXE"), 1e-9);
-        assertEquals(1.0, CrabClawRules.tierSpeed("STICK"), 1e-9);        // не инструмент — как рука
-        assertEquals(1.0, CrabClawRules.tierSpeed(null), 1e-9);
-        // Мечи и ножницы считает не таблица уровней, а сам слушатель: у них своя скорость.
-        assertEquals(1.0, CrabClawRules.tierSpeed("SHEARS"), 1e-9);
-        assertEquals(1.0, CrabClawRules.tierSpeed("DIAMOND_SWORD"), 1e-9);
-    }
-
-    @Test
-    void toolTiersAndBlockLevelsMatchVanilla() {
+    void tiersAndSpeedsMatchVanillaTools() {
         assertEquals(0, CrabClawRules.toolTier("WOODEN_PICKAXE"));
         assertEquals(0, CrabClawRules.toolTier("GOLDEN_SHOVEL"));
         assertEquals(1, CrabClawRules.toolTier("STONE_PICKAXE"));
@@ -61,79 +76,163 @@ class CrabClawRulesTest {
         assertEquals(2, CrabClawRules.toolTier("IRON_PICKAXE"));
         assertEquals(3, CrabClawRules.toolTier("DIAMOND_PICKAXE"));
         assertEquals(3, CrabClawRules.toolTier("NETHERITE_PICKAXE"));
-        assertEquals(0, CrabClawRules.toolTier("SHEARS"));                // ножницы не бывают «не того уровня»
+        assertEquals(0, CrabClawRules.toolTier("SHEARS"));          // ножницы не бывают «не того уровня»
         assertEquals(0, CrabClawRules.toolTier("IRON_SWORD"));
         assertEquals(-1, CrabClawRules.toolTier("STICK"));
         assertEquals(-1, CrabClawRules.toolTier(null));
 
-        assertEquals(0, CrabClawRules.requiredTier(false, false, false));    // камень, дерево, земля
-        assertEquals(1, CrabClawRules.requiredTier(true, false, false));     // железная и медная руда
-        assertEquals(2, CrabClawRules.requiredTier(true, true, false));      // золотая и алмазная руда
-        assertEquals(3, CrabClawRules.requiredTier(true, true, true));       // обсидиан, древние обломки
+        assertEquals(2.0, CrabClawRules.tierSpeed("WOODEN_PICKAXE"), DELTA);
+        assertEquals(4.0, CrabClawRules.tierSpeed("STONE_PICKAXE"), DELTA);
+        assertEquals(5.0, CrabClawRules.tierSpeed("COPPER_PICKAXE"), DELTA);
+        assertEquals(6.0, CrabClawRules.tierSpeed("IRON_PICKAXE"), DELTA);
+        assertEquals(8.0, CrabClawRules.tierSpeed("DIAMOND_PICKAXE"), DELTA);
+        assertEquals(9.0, CrabClawRules.tierSpeed("NETHERITE_PICKAXE"), DELTA);
+        assertEquals(12.0, CrabClawRules.tierSpeed("GOLDEN_PICKAXE"), DELTA);
+        assertEquals(1.0, CrabClawRules.tierSpeed("STICK"), DELTA);  // не инструмент — как рука
+        assertEquals(1.0, CrabClawRules.tierSpeed(null), DELTA);
     }
 
     @Test
-    void efficiencyAndEffectsSpeedUpOnlyRealTools() {
-        assertEquals(8.0, CrabClawRules.withEfficiency(8.0, 0), 1e-9);
-        assertEquals(10.0, CrabClawRules.withEfficiency(8.0, 1), 1e-9);   // +1*1+1
-        assertEquals(13.0, CrabClawRules.withEfficiency(8.0, 2), 1e-9);   // +2*2+1
-        assertEquals(18.0, CrabClawRules.withEfficiency(8.0, 3), 1e-9);   // +3*3+1
-        assertEquals(1.0, CrabClawRules.withEfficiency(1.0, 3), 1e-9);    // голой руке «Эффективность» не помогает
-        assertEquals(1.0, CrabClawRules.effectMultiplier(0, 0), 1e-9);
-        assertEquals(1.4, CrabClawRules.effectMultiplier(2, 0), 1e-9);    // Спешка II
-        assertEquals(1.2, CrabClawRules.effectMultiplier(0, 1), 1e-9);    // Проводник I
-        assertEquals(1.68, CrabClawRules.effectMultiplier(2, 1), 1e-9);
-        assertEquals(1.0, CrabClawRules.fatigueMultiplier(-1), 1e-9);     // нет усталости
-        assertEquals(0.3, CrabClawRules.fatigueMultiplier(0), 1e-9);
-        assertEquals(0.09, CrabClawRules.fatigueMultiplier(1), 1e-9);
+    void efficiencyOnlyHelpsRealTools() {
+        assertEquals(19.0, CrabClawRules.withEfficiency(9.0, 3), DELTA);   // незерит + «Эффективность III»
+        assertEquals(6.0, CrabClawRules.withEfficiency(4.0, 1), DELTA);
+        assertEquals(4.0, CrabClawRules.withEfficiency(4.0, 0), DELTA);
+        assertEquals(1.0, CrabClawRules.withEfficiency(1.0, 5), DELTA);    // рука быстрее не копает
     }
 
     @Test
-    void stoneMatchesTheWikiDurations() {
-        // Камень (прочность 1.5): 20 тиков = 1 с, инструмент подходящий — делитель 30.
-        assertEquals(150, CrabClawRules.breakTicks(1.0, 1.5, false, 1.0));  // рука: 7.5 с
-        assertEquals(23, CrabClawRules.breakTicks(2.0, 1.5, true, 1.0));    // дерево: 1.15 с
-        assertEquals(12, CrabClawRules.breakTicks(4.0, 1.5, true, 1.0));    // камень: 0.6 с
-        assertEquals(8, CrabClawRules.breakTicks(6.0, 1.5, true, 1.0));     // железо: 0.4 с
-        assertEquals(6, CrabClawRules.breakTicks(8.0, 1.5, true, 1.0));     // алмаз: 0.3 с
-        assertEquals(5, CrabClawRules.breakTicks(9.0, 1.5, true, 1.0));     // незерит: 0.25 с
+    void fallbackPickaxeRulesFollowTheTier() {
+        // Незерит: один набор — копает всё, что вообще под силу кирке, и всегда с дропом.
+        List<CrabClawRules.Spec> netherite = CrabClawRules.fallback(CrabClawRules.Family.PICKAXE, 3, 9.0);
+        assertEquals(1, netherite.size());
+        assertEquals("mineable/pickaxe", netherite.getFirst().blocks().tag());
+        assertEquals(9.0, netherite.getFirst().speed(), DELTA);
+        assertTrue(netherite.getFirst().drops());
+
+        // Железо: сперва набор, где дропа нет (алмаз и обсидиан), потом общий.
+        List<CrabClawRules.Spec> iron = CrabClawRules.fallback(CrabClawRules.Family.PICKAXE, 2, 6.0);
+        assertEquals(List.of("needs_diamond_tool", "mineable/pickaxe"),
+                iron.stream().map(spec -> spec.blocks().tag()).toList());
+        assertFalse(iron.get(0).drops());
+
+        // Дерево: три запрета подряд, потому что ему не по силам ни алмаз, ни железо, ни камень.
+        List<CrabClawRules.Spec> wooden = CrabClawRules.fallback(CrabClawRules.Family.PICKAXE, 0, 2.0);
+        assertEquals(List.of("needs_diamond_tool", "needs_iron_tool", "needs_stone_tool", "mineable/pickaxe"),
+                wooden.stream().map(spec -> spec.blocks().tag()).toList());
+        assertEquals(4, wooden.size());
+        assertTrue(wooden.subList(0, 3).stream().noneMatch(CrabClawRules.Spec::drops));
+        assertTrue(wooden.get(3).drops());
     }
 
     @Test
-    void theWrongTierKeepsTheSpeedButLosesTheDrop() {
-        CrabClawRules.Family pickaxe = CrabClawRules.Family.PICKAXE;
-        int diamond = CrabClawRules.requiredTier(true, true, true);
-        // Обсидиан деревянной киркой: семейство подходит, уровня нет — делитель 100.
-        assertTrue(CrabClawRules.fits(pickaxe, pickaxe));
-        assertFalse(CrabClawRules.correctTool(pickaxe, 0, pickaxe, diamond));
-        assertTrue(CrabClawRules.correctTool(pickaxe, 3, pickaxe, diamond));
-        assertEquals(2500, CrabClawRules.breakTicks(2.0, 50.0, false, 1.0));   // 125 с — как на вики
-        assertEquals(5000, CrabClawRules.breakTicks(1.0, 50.0, false, 1.0));   // рукой 250 с
-        assertEquals(167, CrabClawRules.breakTicks(9.0, 50.0, true, 1.0));     // незеритом 8.35 с
-        // Железная руда: деревянной киркой 7.5 с (без дропа — это решает breakNaturally), каменной 1.15 с.
-        assertFalse(CrabClawRules.correctTool(pickaxe, 0, pickaxe, 1));
-        assertEquals(150, CrabClawRules.breakTicks(2.0, 3.0, false, 1.0));
-        assertEquals(23, CrabClawRules.breakTicks(4.0, 3.0, true, 1.0));
-        assertEquals(15, CrabClawRules.breakTicks(6.0, 3.0, true, 1.0));       // железной по алмазной руде
+    void fallbackShearsAndSwordKeepTheirSpeed() {
+        List<CrabClawRules.Spec> shears = CrabClawRules.fallback(CrabClawRules.Family.SHEARS, 0, 1.0);
+        assertEquals(2, shears.size());
+        assertTrue(shears.get(0).blocks().names().contains("cobweb"));
+        assertEquals(15.0, shears.get(0).speed(), DELTA);          // паутина рвётся вмиг
+        assertEquals("wool", shears.get(1).blocks().tag());
+        assertEquals(5.0, shears.get(1).speed(), DELTA);
+
+        List<CrabClawRules.Spec> sword = CrabClawRules.fallback(CrabClawRules.Family.SWORD, 0, 1.0);
+        assertEquals(List.of("sword_instantly_mines", "sword_efficient"),
+                sword.stream().map(spec -> spec.blocks().tag()).toList());
+        assertEquals(15.0, sword.get(0).speed(), DELTA);
+        assertEquals(1.5, sword.get(1).speed(), DELTA);
     }
 
     @Test
-    void theClawBorrowsOnlyWhatIsFasterThanTheHand() {
-        int hand = CrabClawRules.breakTicks(1.0, 1.5, false, 1.0);        // 150 тиков рукой (7.5 с)
-        int pickaxe = CrabClawRules.breakTicks(8.0, 1.5, true, 1.0);      // 6 тиков алмазной киркой
-        assertTrue(CrabClawRules.borrowable(pickaxe, hand), "кирка быстрее руки — берём");
-        assertFalse(CrabClawRules.borrowable(hand, hand), "рука не быстрее руки — не берём");
-        assertFalse(CrabClawRules.borrowable(Integer.MAX_VALUE, hand));
-        // Мгновенный блок: брать нечего, ломается сразу и без сессии.
-        assertEquals(0, CrabClawRules.breakTicks(8.0, 0.0, true, 1.0));
-        assertTrue(CrabClawRules.borrowable(0, hand));
+    void otherFamiliesUseTheirOwnMineableTag() {
+        assertEquals("mineable/axe", CrabClawRules.fallback(CrabClawRules.Family.AXE, 0, 2.0).getFirst().blocks().tag());
+        assertEquals("mineable/shovel", CrabClawRules.fallback(CrabClawRules.Family.SHOVEL, 0, 2.0).getFirst().blocks().tag());
+        assertEquals("mineable/hoe", CrabClawRules.fallback(CrabClawRules.Family.HOE, 0, 2.0).getFirst().blocks().tag());
+        assertTrue(CrabClawRules.fallback(CrabClawRules.Family.NONE, 0, 1.0).isEmpty());
+        assertTrue(CrabClawRules.fallback(CrabClawRules.Family.SWORD, 0, 1.0).get(0).drops());
+    }
+
+    @Test
+    void strongerToolsScoreHigherAndWinTheBorrow() {
+        int wooden = CrabClawRules.score(pickaxeRules(0, 2.0));
+        int stone = CrabClawRules.score(pickaxeRules(1, 4.0));
+        int iron = CrabClawRules.score(pickaxeRules(2, 6.0));
+        int diamond = CrabClawRules.score(pickaxeRules(3, 8.0));
+
+        assertEquals(0, wooden);            // дерево не берёт ни железо, ни алмаз, ни обсидиан
+        assertTrue(stone > wooden);
+        assertTrue(iron > stone);
+        assertTrue(diamond > iron);
+        // Алмаз и незерит одинаково сильны — их разводит скорость.
+        assertEquals(diamond, CrabClawRules.score(pickaxeRules(3, 9.0)));
+        assertTrue(CrabClawRules.topSpeed(pickaxeRules(3, 9.0)) > CrabClawRules.topSpeed(pickaxeRules(3, 8.0)));
+        assertEquals(2.0, CrabClawRules.topSpeed(pickaxeRules(0, 2.0)), DELTA);
+    }
+
+    @Test
+    void fastFamiliesGoFirstSoSharedBlocksMineFast() {
+        // Ножницы рвут листву вмиг, меч по той же листве — в полтора раза быстрее руки,
+        // поэтому их правила стоят раньше кирочных: первое подходящее правило и выигрывает.
+        assertEquals(List.of(CrabClawRules.Family.SHEARS, CrabClawRules.Family.SWORD, CrabClawRules.Family.HOE,
+                        CrabClawRules.Family.SHOVEL, CrabClawRules.Family.AXE, CrabClawRules.Family.PICKAXE),
+                CrabClawRules.ORDER);
+        assertTrue(CrabClawRules.ORDER.indexOf(CrabClawRules.Family.SHEARS) < CrabClawRules.ORDER.indexOf(CrabClawRules.Family.PICKAXE));
+        assertTrue(CrabClawRules.ORDER.indexOf(CrabClawRules.Family.SWORD) < CrabClawRules.ORDER.indexOf(CrabClawRules.Family.AXE));
+    }
+
+    @Test
+    void wikiDurationsComeOutOfTheRules() {
+        // Камень (твёрдость 1.5): дерево 1.15 с, камень 0.6 с, железо 0.4 с, алмаз 0.3 с, незерит 0.25 с.
+        assertEquals(1.15, CrabClawRules.seconds(2.0, 1.5, true), DELTA);
+        assertEquals(0.6, CrabClawRules.seconds(4.0, 1.5, true), DELTA);
+        assertEquals(0.4, CrabClawRules.seconds(6.0, 1.5, true), DELTA);
+        assertEquals(0.3, CrabClawRules.seconds(8.0, 1.5, true), DELTA);
+        assertEquals(0.25, CrabClawRules.seconds(9.0, 1.5, true), DELTA);
+        assertEquals(7.5, CrabClawRules.seconds(1.0, 1.5, false), DELTA);   // рука по камню: штраф ÷100
+        assertEquals(0.35, CrabClawRules.seconds(9.0, 2.0, true), DELTA);   // булыжник незеритом
+        // Обсидиан (твёрдость 50): рука 250 с, дерево 125 с, камень 62.5 с, железо 41.7 с — всё со штрафом,
+        // потому что обсидиан по силам только алмазу; алмаз 9.4 с и незерит 8.35 с — уже как подходящий инструмент.
+        assertEquals(250.0, CrabClawRules.seconds(1.0, 50.0, false), DELTA);
+        assertEquals(125.0, CrabClawRules.seconds(2.0, 50.0, false), DELTA);
+        assertEquals(62.5, CrabClawRules.seconds(4.0, 50.0, false), DELTA);
+        assertEquals(41.7, CrabClawRules.seconds(6.0, 50.0, false), DELTA);
+        assertEquals(9.4, CrabClawRules.seconds(8.0, 50.0, true), DELTA);
+        assertEquals(8.35, CrabClawRules.seconds(9.0, 50.0, true), DELTA);
+        // Железная руда (твёрдость 3) каменной киркой 1.15 с, деревянной 7.5 с — и без дропа дерево тоже медленнее.
+        assertEquals(1.15, CrabClawRules.seconds(4.0, 3.0, true), DELTA);
+        assertEquals(7.5, CrabClawRules.seconds(2.0, 3.0, false), DELTA);
+        assertEquals(0.0, CrabClawRules.seconds(2.0, 0.0, true), DELTA);
+    }
+
+    @Test
+    void wrongTierIsBothSlowAndDropless() {
+        // Железная кирка на обсидиане берёт первое правило — «нужен алмаз»: дропа нет и штраф ÷100,
+        // поэтому 41.7 с вместо 12.5 с. Алмазная кирка берёт основной набор: дроп есть, 9.4 с.
+        List<CrabClawRules.Rule> iron = pickaxeRules(2, 6.0);
+        assertFalse(iron.get(0).drops());
+        assertTrue(iron.get(1).drops());
+        assertEquals(41.7, CrabClawRules.seconds(6.0, 50.0, false), DELTA);
+        assertEquals(9.4, CrabClawRules.seconds(8.0, 50.0, true), DELTA);
+        // Деревянной кирке запретов три подряд, и все три — без дропа.
+        List<CrabClawRules.Rule> wooden = pickaxeRules(0, 2.0);
+        assertEquals(3, wooden.stream().filter(rule -> !rule.drops()).count());
+        assertTrue(wooden.getLast().drops());
     }
 
     @Test
     void reachBonusAndWearAreNiceRoundNumbers() {
-        assertEquals(3.0, CrabClawRules.REACH_BONUS, 1e-9);
+        assertEquals(3.0, CrabClawRules.REACH_BONUS, DELTA);
         assertEquals(2, CrabClawRules.WEAR_PER_BLOCK);
-        // Клешня добавляет дальность к ванильным 4.5 блока (атрибут) — итого 7.5.
-        assertTrue(4.5 + CrabClawRules.REACH_BONUS > 7.0);
+        assertTrue(CrabClawRules.ANCHORS.containsAll(List.of("stone", "oak_log", "dirt", "hay_block",
+                "white_wool", "cobweb", "obsidian", "ancient_debris")));
+    }
+
+    @Test
+    void fallbackBlocksNameTheirTagOrTheirBlocks() {
+        CrabClawRules.Blocks tag = new CrabClawRules.Blocks("mineable/pickaxe", List.of());
+        assertTrue(tag.names().isEmpty());
+        assertEquals("mineable/pickaxe", tag.tag());
+
+        CrabClawRules.Blocks names = new CrabClawRules.Blocks(null, List.of("cobweb", "vine"));
+        assertEquals(List.of("cobweb", "vine"), names.names());
+        assertNull(names.tag());
+        assertNotEquals(tag, names);
     }
 }
