@@ -96,7 +96,8 @@ final class CrabClaw implements Listener {
         this.reachKey = new NamespacedKey(plugin, "crab_claw_reach");
         this.toolboxKey = new NamespacedKey(plugin, "crab_claw_toolbox");
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        task = Bukkit.getScheduler().runTaskTimer(plugin, this::refresh, REFRESH_TICKS, REFRESH_TICKS);
+        Runnable tick = () -> refresh();   // лямбда, а не ссылка: у планировщика два подходящих перегруза
+        task = Bukkit.getScheduler().runTaskTimer(plugin, tick, REFRESH_TICKS, REFRESH_TICKS);
     }
 
     void disable() {
