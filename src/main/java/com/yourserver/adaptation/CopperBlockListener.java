@@ -641,32 +641,21 @@ public class CopperBlockListener implements Listener {
                 int lowSlot = 22 + step;
                 int subSlot = 31 + step;
 
-                boolean playedAny = false;
-
-                playedAny |= playNote(
+                // Частица — на каждую сыгранную ноту и её цветом: раньше на весь
+                // шаг спавнилась одна частица ноты 0 (всегда один и тот же цвет),
+                // и четырем звукам отвечала одна картинка.
+                playNote(
                         finalItems, highSlot, 1.2f, 1.0f
                 );
-                playedAny |= playNote(
+                playNote(
                         finalItems, midSlot, 1.0f, 0.79f
                 );
-                playedAny |= playNote(
+                playNote(
                         finalItems, lowSlot, 0.8f, 0.63f
                 );
-                playedAny |= playNote(
+                playNote(
                         finalItems, subSlot, 0.9f, 0.5f
                 );
-
-                if (playedAny) {
-                    block.getWorld().spawnParticle(
-                            Particle.NOTE,
-                            particleLoc,
-                            1,
-                            0.0,
-                            0.0,
-                            0.0,
-                            0.0
-                    );
-                }
 
                 step++;
             }
@@ -688,6 +677,18 @@ public class CopperBlockListener implements Listener {
                         getInstrumentByMaterial(it.getType()),
                         volume,
                         pitch
+                );
+
+                // Как у ванильного нотного блока: одна нота — одна частица,
+                // цвет частицы — нота (смещение note / 24 при count = 0).
+                block.getWorld().spawnParticle(
+                        Particle.NOTE,
+                        particleLoc,
+                        0,
+                        NoteTones.offset(pitch),
+                        0.0,
+                        0.0,
+                        1.0
                 );
 
                 return true;

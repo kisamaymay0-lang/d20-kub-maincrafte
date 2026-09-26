@@ -799,15 +799,21 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         boolean own = player.getUniqueId().equals(data.owner);
         if (menu.screen == Screen.PROFILE) {
             if (slot == 12 || slot == 14) {
-                if (!own && subjects.vote(data, player.getUniqueId(), slot == 12 ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE)) {
+                ProfileData.Vote vote = slot == 12 ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE;
+                if (!own && subjects.vote(data, player.getUniqueId(), vote)) {
                     storage.changed(data.owner); refreshDetails(data.owner); clickSound(player);
+                    announceVote(data.owner, player, vote);
                 }
-            } else if (own && slot == 13) {
+            } else if (slot == 13) {
+                // Описание: в чужом профиле раньше молча ничего не происходило.
+                if (!own) { player.sendMessage(ProfileItems.text("Описание можно менять только в своём профиле.", NamedTextColor.RED)); return; }
                 if (voice.active(player.getUniqueId())) { voice.chat(player, ""); return; }
                 player.closeInventory();
                 editing.put(player.getUniqueId(), new Editing());
                 player.sendMessage(voice.prompt());
-            } else if (own && slot == 17) {
+            } else if (slot == 17) {
+                // Медали: то же самое — чужой профиль отвечает сообщением, а не молчанием.
+                if (!own) { player.sendMessage(ProfileItems.text("Медали можно расставлять только в своём профиле.", NamedTextColor.RED)); return; }
                 clickSound(player); open(player, data.owner, Screen.COLLECTION, 0, null);
             } else if (slot == 9) {
                 clickSound(player);
@@ -889,6 +895,21 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
     }
 
+    /**
+     * Владелец профиля узнаёт об оценке: зелёная строка за лайк, красная — за
+     * дизлайк, с ником того, кто поставил. Сообщение уходит тихо
+     * ({@link ChatNotice}): оценка не должна звучать среди игры.
+     *
+     * Себе оценку поставить нельзя, поэтому «свой» голос сюда не попадает.
+     */
+    private void announceVote(UUID owner, Player voter, ProfileData.Vote vote) {
+        Player target = Bukkit.getPlayer(owner);
+        if (target == null || target.getUniqueId().equals(voter.getUniqueId())) return;
+        boolean like = vote == ProfileData.Vote.LIKE;
+        ChatNotice.silent(target, (like ? "Вам поставили лайк — " : "Вам поставили дизлайк — ") + voter.getName(),
+                like ? NamedTextColor.GREEN : NamedTextColor.RED);
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void inventoryDrag(InventoryDragEvent event) {
         if (event.getView().getTopInventory().getHolder() instanceof Menu
@@ -951,7 +972,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                     ProfileData data = profile(target.profile(), target.name());
                     if (hit.action() == ProfilePanelGeometry.Action.PLAY_VOICE) { voice.play(player, data.voice()); return; }
                     ProfileData.Vote vote = hit.action() == ProfilePanelGeometry.Action.LIKE ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE;
-                    if (subjects.vote(data, player.getUniqueId(), vote)) { storage.changed(data.owner); refreshDetails(data.owner); clickSound(player); }
+                    if (subjects.vote(data, player.getUniqueId(), vote)) {
+                        storage.changed(data.owner); refreshDetails(data.owner); clickSound(player);
+                        announceVote(data.owner, player, vote);
+                    }
                 } catch (RuntimeException ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не удалось обработать нажатие карточки", ex); }
             }
         });
