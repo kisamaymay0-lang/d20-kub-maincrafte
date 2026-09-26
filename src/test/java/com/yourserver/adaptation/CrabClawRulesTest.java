@@ -28,16 +28,16 @@ class CrabClawRulesTest {
 
     private static final double DELTA = 1e-9;
 
-    /** Правила кирки в том виде, в каком их отдаёт игра: сперва «не тот уровень», потом основной набор. */
-    private static List<CrabClawRules.Rule> pickaxeRules(int tier, double speed) {
-        Set<String> base = Set.of("stone", "copper_ore", "iron_ore", "gold_ore", "diamond_ore",
-                "obsidian", "ancient_debris");
-        List<CrabClawRules.Rule> rules = new ArrayList<>();
-        if (tier < 3) rules.add(new CrabClawRules.Rule(Set.of("diamond_ore", "obsidian", "ancient_debris"), speed, false));
-        if (tier < 2) rules.add(new CrabClawRules.Rule(Set.of("gold_ore", "diamond_ore"), speed, false));
-        if (tier < 1) rules.add(new CrabClawRules.Rule(Set.of("copper_ore", "iron_ore", "gold_ore"), speed, false));
-        rules.add(new CrabClawRules.Rule(base, speed, true));
-        return rules;
+    /** Правила кирки в том виде, в каком их отдаёт игра: сперва запреты «нужен тот-то инструмент»
+     *  (они и медленнее, и без дропа), а последним — основной набор блоков. Здесь важны только
+     *  флаги дропа: остальное считает игра. */
+    private static List<Boolean> pickaxeDrops(int tier) {
+        List<Boolean> drops = new ArrayList<>();
+        if (tier < 3) drops.add(false);
+        if (tier < 2) drops.add(false);
+        if (tier < 1) drops.add(false);
+        drops.add(true);
+        return drops;
     }
 
     @Test
@@ -150,23 +150,6 @@ class CrabClawRulesTest {
     }
 
     @Test
-    void strongerToolsScoreHigherAndWinTheBorrow() {
-        int wooden = CrabClawRules.score(pickaxeRules(0, 2.0));
-        int stone = CrabClawRules.score(pickaxeRules(1, 4.0));
-        int iron = CrabClawRules.score(pickaxeRules(2, 6.0));
-        int diamond = CrabClawRules.score(pickaxeRules(3, 8.0));
-
-        assertEquals(0, wooden);            // дерево не берёт ни железо, ни алмаз, ни обсидиан
-        assertTrue(stone > wooden);
-        assertTrue(iron > stone);
-        assertTrue(diamond > iron);
-        // Алмаз и незерит одинаково сильны — их разводит скорость.
-        assertEquals(diamond, CrabClawRules.score(pickaxeRules(3, 9.0)));
-        assertTrue(CrabClawRules.topSpeed(pickaxeRules(3, 9.0)) > CrabClawRules.topSpeed(pickaxeRules(3, 8.0)));
-        assertEquals(2.0, CrabClawRules.topSpeed(pickaxeRules(0, 2.0)), DELTA);
-    }
-
-    @Test
     void fastFamiliesGoFirstSoSharedBlocksMineFast() {
         // Ножницы рвут листву вмиг, меч по той же листве — в полтора раза быстрее руки,
         // поэтому их правила стоят раньше кирочных: первое подходящее правило и выигрывает.
@@ -205,15 +188,15 @@ class CrabClawRulesTest {
     void wrongTierIsBothSlowAndDropless() {
         // Железная кирка на обсидиане берёт первое правило — «нужен алмаз»: дропа нет и штраф ÷100,
         // поэтому 41.7 с вместо 12.5 с. Алмазная кирка берёт основной набор: дроп есть, 9.4 с.
-        List<CrabClawRules.Rule> iron = pickaxeRules(2, 6.0);
-        assertFalse(iron.get(0).drops());
-        assertTrue(iron.get(1).drops());
+        List<Boolean> iron = pickaxeDrops(2);
+        assertFalse(iron.get(0));
+        assertTrue(iron.get(1));
         assertEquals(41.7, CrabClawRules.seconds(6.0, 50.0, false), DELTA);
         assertEquals(9.4, CrabClawRules.seconds(8.0, 50.0, true), DELTA);
-        // Деревянной кирке запретов три подряд, и все три — без дропа.
-        List<CrabClawRules.Rule> wooden = pickaxeRules(0, 2.0);
-        assertEquals(3, wooden.stream().filter(rule -> !rule.drops()).count());
-        assertTrue(wooden.getLast().drops());
+        // Деревянной кирке запретов три подряд, и все три — без дропа, а дальше основной набор.
+        List<Boolean> wooden = pickaxeDrops(0);
+        assertEquals(3, wooden.stream().filter(drop -> !drop).count());
+        assertTrue(wooden.getLast());
     }
 
     @Test
@@ -225,44 +208,45 @@ class CrabClawRulesTest {
     }
 
     @Test
-    void mergesEnchantmentsOfEveryToolKeepingTheStrongestLevel() {
-        List<CrabClawRules.Enchant> pickaxe = List.of(
-                new CrabClawRules.Enchant(CrabClawRules.FORTUNE, 2),
-                new CrabClawRules.Enchant(CrabClawRules.UNBREAKING, 1));
-        List<CrabClawRules.Enchant> axe = List.of(
-                new CrabClawRules.Enchant(CrabClawRules.UNBREAKING, 3),
-                new CrabClawRules.Enchant(CrabClawRules.SILK_TOUCH, 1));
-
-        List<CrabClawRules.Enchant> merged = CrabClawRules.merge(List.of(pickaxe, axe, List.of()));
-        assertEquals(2, merged.size());
-        assertEquals(2, level(merged, CrabClawRules.FORTUNE));
-        assertEquals(3, level(merged, CrabClawRules.UNBREAKING), "берём самый высокий уровень");
-        assertEquals(0, level(merged, CrabClawRules.SILK_TOUCH),
-                "пока главный инструмент с удачей, шелк к нему не примешивается");
+    void theToolboxLooksThroughTheInventoryRightToLeftAndTopToBottom() {
+        // Порядок просмотра: 17…9 (верхний ряд), 26…18, 35…27, затем горячий ряд 8…0 и левая рука.
+        List<Integer> scan = CrabClawRules.SCAN;
+        assertEquals(37, scan.size(), "36 слотов хранилища и левая рука");
+        assertEquals(17, scan.get(0), "сначала правый верхний угол");
+        assertEquals(9, scan.get(8), "верхний ряд заканчивается слева");
+        assertEquals(26, scan.get(9), "дальше второй ряд справа");
+        assertEquals(18, scan.get(17));
+        assertEquals(35, scan.get(18), "третий ряд");
+        assertEquals(8, scan.get(27), "потом нижний ряд, он же горячий");
+        assertEquals(0, scan.get(35), "левый нижний угол");
+        assertEquals(CrabClawRules.OFFHAND, scan.get(36), "и в самом конце — левая рука");
+        assertEquals(36, scan.stream().distinct().count(), "каждый слот ровно один раз");
+        for (int slot = 0; slot < 36; slot++) assertTrue(scan.contains(slot), "слот " + slot + " пропущен");
     }
 
     @Test
-    void theMainToolDecidesBetweenFortuneAndSilkTouch() {
-        List<CrabClawRules.Enchant> silky = List.of(new CrabClawRules.Enchant(CrabClawRules.SILK_TOUCH, 1));
-        List<CrabClawRules.Enchant> lucky = List.of(new CrabClawRules.Enchant(CrabClawRules.FORTUNE, 3));
-
-        List<CrabClawRules.Enchant> silkFirst = CrabClawRules.merge(List.of(silky, lucky));
-        assertEquals(1, level(silkFirst, CrabClawRules.SILK_TOUCH));
-        assertEquals(0, level(silkFirst, CrabClawRules.FORTUNE));
-
-        List<CrabClawRules.Enchant> fortuneFirst = CrabClawRules.merge(List.of(lucky, silky));
-        assertEquals(3, level(fortuneFirst, CrabClawRules.FORTUNE));
-        assertEquals(0, level(fortuneFirst, CrabClawRules.SILK_TOUCH));
-        assertEquals("", CrabClawRules.opposite(CrabClawRules.UNBREAKING));
+    void eachFamilyIsBorrowedFromTheFirstToolInThatOrder() {
+        // Шаг за шагом по порядку просмотра: первый инструмент семейства и побеждает.
+        int pickaxe = CrabClawRules.SCAN.indexOf(17);      // верхний ряд, справа
+        int another = CrabClawRules.SCAN.indexOf(12);      // та же кирка ниже, но левее — проигрывает
+        assertTrue(pickaxe < another, "кто правее и выше, тот и одалживается");
+        int shears = CrabClawRules.SCAN.indexOf(CrabClawRules.OFFHAND);
+        assertEquals(CrabClawRules.SCAN.size() - 1, shears, "левая рука идёт после всего инвентаря");
     }
 
     @Test
-    void pickaxeIsTheMainToolWhenToolsAreEquallyStrong() {
-        assertEquals(0, CrabClawRules.rank(CrabClawRules.Family.PICKAXE));
-        assertTrue(CrabClawRules.rank(CrabClawRules.Family.PICKAXE)
-                < CrabClawRules.rank(CrabClawRules.Family.AXE));
-        assertTrue(CrabClawRules.rank(CrabClawRules.Family.HOE)
-                < CrabClawRules.rank(CrabClawRules.Family.SHEARS));
+    void lootEnchantTakesTheFirstOneThatDecidesDrops() {
+        // Обычный инструмент несёт только одно из двух; порядок нужен на случай выданного командой.
+        assertEquals(CrabClawRules.FORTUNE,
+                CrabClawRules.lootEnchant(List.of(CrabClawRules.FORTUNE)));
+        assertEquals(CrabClawRules.SILK_TOUCH,
+                CrabClawRules.lootEnchant(List.of(CrabClawRules.SILK_TOUCH)));
+        assertEquals(CrabClawRules.SILK_TOUCH,
+                CrabClawRules.lootEnchant(List.of(CrabClawRules.SILK_TOUCH, CrabClawRules.FORTUNE)));
+        assertEquals(CrabClawRules.FORTUNE,
+                CrabClawRules.lootEnchant(List.of(CrabClawRules.FORTUNE, CrabClawRules.SILK_TOUCH)));
+        assertEquals("", CrabClawRules.lootEnchant(List.of(CrabClawRules.UNBREAKING, CrabClawRules.MENDING)));
+        assertEquals("", CrabClawRules.lootEnchant(List.of()));
     }
 
     @Test
@@ -288,11 +272,6 @@ class CrabClawRulesTest {
         assertTrue(CrabClawRules.LOOT_ENCHANTS.contains(CrabClawRules.FORTUNE));
         assertTrue(CrabClawRules.LOOT_ENCHANTS.contains(CrabClawRules.SILK_TOUCH));
         assertFalse(CrabClawRules.LOOT_ENCHANTS.contains(CrabClawRules.UNBREAKING));
-    }
-
-    private static int level(List<CrabClawRules.Enchant> enchants, String id) {
-        for (CrabClawRules.Enchant enchant : enchants) if (enchant.id().equals(id)) return enchant.level();
-        return 0;
     }
 
     @Test

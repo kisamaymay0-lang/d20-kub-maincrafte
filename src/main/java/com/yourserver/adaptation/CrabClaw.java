@@ -20,6 +20,7 @@ import org.bukkit.Sound;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.attribute.AttributeModifier;
+import org.bukkit.block.Block;
 import org.bukkit.block.BlockType;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
@@ -27,6 +28,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockDamageEvent;
 import org.bukkit.event.player.PlayerItemBreakEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -42,7 +44,6 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -67,10 +68,13 @@ import java.util.concurrent.ThreadLocalRandom;
  * на клиенте, и защиту регионов (блок ломает сама игра, а не плагин). Нет подходящего инструмента —
  * компонента нет, и клешня копает как обычная рука.
  *
- * <p>Зачарования инструментов клешня тоже учитывает. «Удачу» и «Шёлковое касание» она заимствует
- * вместе с правилами — они решают, что выпадет из блока, — и держит у себя невидимо: без блеска
- * и без строчек в подсказке, чтобы вид предмета остался прежним. «Прочность» считается при износе
- * (шанс уровень/(уровень+1) не тратить ничего), «Починка» — когда из блока идёт опыт: орбиты
+ * <p>Зачарования клешня берёт у того инструмента, чьим правилом блок и ломается: кирка с «Шёлком»
+ * кладёт камень блоками, а ножницы без «Шелка» по шерсти зачарований не получают — каждое правило
+ * носит зачарования своего инструмента. Из них клешня подставляет себе ровно то, что решает дроп,
+ * — «Удачу» и «Шёлковое касание»: перед поломкой блока (и на самом старте копания) она надевает
+ * зачарования нужного инструмента, а после держит их невидимо — без блеска и без строчек
+ * в подсказке, чтобы вид предмета остался прежним. «Прочность» считается при износе (шанс
+ * уровень/(уровень+1) не тратить ничего), «Починка» — когда из блока идёт опыт: орбиты
  * не появляются, а инструмент чинится на две прочности за очко, как в ванили. «Эффективность»
  * уже сидит в скорости правил, поэтому второй раз не копируется. Инструмент, которым сломали
  * блок, тратит вдвое больше прочности; сама клешня не изнашивается.
@@ -81,18 +85,14 @@ final class CrabClaw implements Listener {
     /** Как часто сверяем руку с инвентарём: раз в четверть секунды. */
     private static final int REFRESH_TICKS = 5;
 
-    /** Правило, которое клешня отдаёт Minecraft: те же блоки, скорость и дроп, что у инструмента. */
+    /** Правило, которое клешня отдаёт Minecraft: те же блоки, скорость и дроп, что у инструмента,
+     *  плюс его «Прочность», «Починка» и зачарования дропа — они поедут вместе с этим правилом. */
     private record Rule(RegistryKeySet<BlockType> blocks, Set<String> anchors, double speed, boolean drops,
-                        int slot, int unbreaking, int mending) {
-        CrabClawRules.Rule plain() {
-            return new CrabClawRules.Rule(anchors, speed, drops);
-        }
-    }
+                        int slot, int unbreaking, int mending, Map<Enchantment, Integer> loot) { }
 
     /** Взятый в займы инструмент: что он даёт клешне и в каком слоте лежит. */
     private record Borrow(int slot, String material, CrabClawRules.Family family, List<Rule> rules,
-                          int efficiency, int score, List<CrabClawRules.Enchant> enchants,
-                          Map<String, Enchantment> sources) { }
+                          int efficiency) { }
 
     private final JavaPlugin plugin;
     private final WinterItems items;
@@ -188,18 +188,45 @@ final class CrabClaw implements Listener {
         if (items.kind(held) != WinterItems.Kind.CLAW) return;
         Map<CrabClawRules.Family, Borrow> toolbox = toolbox(player);
         List<Rule> rules = rules(toolbox);
-        Map<Enchantment, Integer> enchants = enchants(toolbox);
         String signature = signature(toolbox);
         ItemMeta meta = held.getItemMeta();
         boolean sameToolbox = signature.equals(meta.getPersistentDataContainer().get(toolboxKey, PersistentDataType.STRING));
-        if (sameToolbox && enchantsMatch(held, enchants)) return;
-        meta.getPersistentDataContainer().set(toolboxKey, PersistentDataType.STRING, signature);
-        ItemStack updated = held.clone();
-        updated.setItemMeta(meta);
-        if (rules.isEmpty()) updated.unsetData(DataComponentTypes.TOOL);
-        else updated.setData(DataComponentTypes.TOOL, component(rules));
-        applyEnchants(updated, enchants);
-        player.getInventory().setItemInMainHand(updated);
+        if (!sameToolbox) {
+            meta.getPersistentDataContainer().set(toolboxKey, PersistentDataType.STRING, signature);
+            ItemStack updated = held.clone();
+            updated.setItemMeta(meta);
+            if (rules.isEmpty()) updated.unsetData(DataComponentTypes.TOOL);
+            else updated.setData(DataComponentTypes.TOOL, component(rules));
+            player.getInventory().setItemInMainHand(updated);
+        }
+        // Зачарования — по тому блоку, на который игрок смотрит: у каждого инструмента они свои.
+        applyLoot(player, rules, player.getTargetBlockExact(targetRange(player)));
+    }
+
+    /** Дальность, на которой ищем блок под прицелом: своя дальность игрока (у клешни она
+     *  на три блока больше) плюс запас, чтобы блок у самой границы не остался без зачарований. */
+    private int targetRange(Player player) {
+        AttributeInstance instance = player.getAttribute(Attribute.BLOCK_INTERACTION_RANGE);
+        double reach = instance == null ? 4.5 : instance.getValue();
+        return Math.clamp((int) Math.ceil(reach) + 1, 4, 64);
+    }
+
+    /** Зачарования дропа берём у того правила, которое сработает на этом блоке. */
+    private void applyLoot(Player player, List<Rule> rules, Block block) {
+        ItemStack held = player.getInventory().getItemInMainHand();
+        if (items.kind(held) != WinterItems.Kind.CLAW) return;
+        Map<Enchantment, Integer> loot = Map.of();
+        if (block != null) {
+            TypedKey<BlockType> key = TypedKey.create(RegistryKey.BLOCK, block.getType().getKey());
+            for (Rule rule : rules) {
+                if (!rule.blocks().contains(key)) continue;
+                loot = rule.loot();
+                break;
+            }
+        }
+        if (enchantsMatch(held, loot)) return;
+        applyEnchants(held, loot);
+        player.getInventory().setItemInMainHand(held);
     }
 
     /** Невидимые зачарования клешни: блеск выключен, строчек в подсказке нет — вид предмета прежний. */
@@ -257,7 +284,6 @@ final class CrabClaw implements Listener {
             if (borrow == null) continue;
             out.append('|').append(family).append(' ').append(borrow.material())
                     .append(" эф").append(borrow.efficiency())
-                    .append("/").append(borrow.score())
                     .append(" x").append(borrow.rules().size())
                     .append('@').append(borrow.rules().stream().mapToDouble(Rule::speed).sum());
         }
@@ -267,49 +293,23 @@ final class CrabClaw implements Listener {
     // ===== инструменты из инвентаря =====
 
     /**
-     * Зачарования, которые клешня берёт у инструментов: «Удача» и «Шёлковое касание» — они решают,
-     * что выпадет. Инструменты идут от главного к остальным, поэтому спор удачи и шелка решает тот
-     * инструмент, которым копают чаще (и сильнее).
+     * Инструменты, которые клешня берёт в займы: по одному на семейство — первый по порядку
+     * просмотра инвентаря (справа налево, сверху вниз, затем горячий ряд и левая рука).
+     * Порядок тот же, что глазами: если в верхнем ряду справа лежит кирка с «Шёлком», а дальше
+     * в инвентаре есть кирка получше, клешня всё равно копает той, что лежит первой.
      */
-    private Map<Enchantment, Integer> enchants(Map<CrabClawRules.Family, Borrow> toolbox) {
-        List<Borrow> ordered = new ArrayList<>(toolbox.values());
-        ordered.sort(Comparator.<Borrow>comparingInt(Borrow::score).reversed()
-                .thenComparingInt(borrow -> CrabClawRules.rank(borrow.family())));
-        List<List<CrabClawRules.Enchant>> perTool = new ArrayList<>();
-        Map<String, Enchantment> byId = new LinkedHashMap<>();
-        for (Borrow borrow : ordered) {
-            perTool.add(borrow.enchants());
-            for (CrabClawRules.Enchant enchant : borrow.enchants()) byId.putIfAbsent(enchant.id(), borrow.sources().get(enchant.id()));
-        }
-        Map<Enchantment, Integer> out = new LinkedHashMap<>();
-        for (CrabClawRules.Enchant enchant : CrabClawRules.merge(perTool)) {
-            Enchantment found = byId.get(enchant.id());
-            if (found != null) out.put(found, enchant.level());
-        }
-        return out;
-    }
-
-    /** Лучший инструмент каждого семейства: сильнее по уровню, при равной силе — быстрее. */
     private Map<CrabClawRules.Family, Borrow> toolbox(Player player) {
         Map<CrabClawRules.Family, Borrow> found = new EnumMap<>(CrabClawRules.Family.class);
         PlayerInventory inventory = player.getInventory();
         ItemStack[] storage = inventory.getStorageContents();
-        for (int slot = 0; slot < storage.length; slot++) add(found, storage[slot], slot);
-        add(found, inventory.getItemInOffHand(), -1);
-        return found;
-    }
-
-    private void add(Map<CrabClawRules.Family, Borrow> found, ItemStack stack, int slot) {
-        Borrow borrow = borrow(stack, slot);
-        if (borrow == null) return;
-        Borrow current = found.get(borrow.family());
-        if (current == null) {
-            found.put(borrow.family(), borrow);
-            return;
+        for (int slot : CrabClawRules.SCAN) {
+            ItemStack stack = slot == CrabClawRules.OFFHAND
+                    ? inventory.getItemInOffHand()
+                    : (slot >= 0 && slot < storage.length ? storage[slot] : null);
+            Borrow borrow = borrow(stack, slot);
+            if (borrow != null) found.putIfAbsent(borrow.family(), borrow);
         }
-        boolean wins = borrow.score() > current.score() || (borrow.score() == current.score()
-                && CrabClawRules.topSpeed(plain(borrow)) > CrabClawRules.topSpeed(plain(current)));
-        if (wins) found.put(borrow.family(), borrow);
+        return found;
     }
 
     /** Что предмет может дать клешне: null — это не инструмент, брать нечего. */
@@ -323,13 +323,19 @@ final class CrabClaw implements Listener {
         int efficiency = Math.max(0, tool.getEnchantLevel(Enchantment.EFFICIENCY));
         int unbreaking = Math.max(0, tool.getEnchantLevel(Enchantment.UNBREAKING));
         int mending = Math.max(0, tool.getEnchantLevel(Enchantment.MENDING));
-        List<CrabClawRules.Enchant> enchants = new ArrayList<>();
-        Map<String, Enchantment> sources = new LinkedHashMap<>();
+        // Зачарования дропа: «Удача» и «Шёлковое касание». На обычном инструменте бывает только
+        // одно из них; если выданный командой предмет несёт оба, берём то, что попалось первым.
+        Map<String, Integer> levels = new LinkedHashMap<>();
+        Map<String, Enchantment> keys = new LinkedHashMap<>();
         for (Map.Entry<Enchantment, Integer> enchant : tool.getEnchants().entrySet()) {
             String id = enchant.getKey().getKey().toString();
-            sources.put(id, enchant.getKey());
-            if (CrabClawRules.LOOT_ENCHANTS.contains(id)) enchants.add(new CrabClawRules.Enchant(id, enchant.getValue()));
+            if (!CrabClawRules.LOOT_ENCHANTS.contains(id)) continue;
+            levels.put(id, enchant.getValue());
+            keys.put(id, enchant.getKey());
         }
+        String picked = CrabClawRules.lootEnchant(new ArrayList<>(levels.keySet()));
+        Map<Enchantment, Integer> loot = Map.of();
+        if (!picked.isEmpty()) loot = Map.of(keys.get(picked), levels.get(picked));
         double bonus = efficiency > 0 ? (double) efficiency * efficiency + 1.0 : 0.0;
         List<Rule> rules = new ArrayList<>();
         Tool component = stack.getData(DataComponentTypes.TOOL);
@@ -341,7 +347,7 @@ final class CrabClaw implements Listener {
                 double speed = rule.speed() == null ? component.defaultMiningSpeed() : rule.speed();
                 if (speed > 1.0) speed += bonus;
                 rules.add(new Rule(rule.blocks(), anchors(rule.blocks()), speed,
-                        rule.correctForDrops() == TriState.TRUE, slot, unbreaking, mending));
+                        rule.correctForDrops() == TriState.TRUE, slot, unbreaking, mending, loot));
             }
             if (family == CrabClawRules.Family.NONE) family = CrabClawRules.family(anchors(rules));
         } else {
@@ -352,25 +358,11 @@ final class CrabClaw implements Listener {
                 RegistryKeySet<BlockType> blocks = blocks(spec.blocks());
                 if (blocks == null) continue;
                 rules.add(new Rule(blocks, anchors(blocks), spec.speed(), spec.drops(),
-                        slot, unbreaking, mending));
+                        slot, unbreaking, mending, loot));
             }
         }
         if (family == CrabClawRules.Family.NONE || rules.isEmpty()) return null;
-        int score = CrabClawRules.score(plain(rules));
-        return new Borrow(slot, material, family, List.copyOf(rules), efficiency, score,
-                List.copyOf(enchants), Map.copyOf(sources));
-    }
-
-    private static List<CrabClawRules.Rule> plain(List<Rule> rules) {
-        List<CrabClawRules.Rule> out = new ArrayList<>();
-        for (Rule rule : rules) out.add(rule.plain());
-        return out;
-    }
-
-    private static List<CrabClawRules.Rule> plain(Borrow borrow) {
-        List<CrabClawRules.Rule> out = new ArrayList<>();
-        for (Rule rule : borrow.rules()) out.add(rule.plain());
-        return out;
+        return new Borrow(slot, material, family, List.copyOf(rules), efficiency);
     }
 
     /** Опорные блоки правил: по ним узнаём семейство незнакомого инструмента и его силу. */
@@ -388,15 +380,31 @@ final class CrabClaw implements Listener {
         return found;
     }
 
-    // ===== износ чужого инструмента =====
+    // ===== зачарования и износ чужого инструмента =====
 
-    /** Блок сломала сама игра — остаётся износить инструмент, которым клешня копала. */
+    /**
+     * Игрок начал копать блок — сразу надеваем на клешню зачарования того инструмента, которым этот
+     * блок и будет ломаться: движок читает предмет в момент поломки, так что «Удача» успевает
+     * на дроп, «Шёлк» — на сам блок, а чужой инструмент этими зачарованиями не пользуется вовсе.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void damage(BlockDamageEvent event) {
+        Player player = event.getPlayer();
+        if (!clawInMainHand(player)) return;
+        applyLoot(player, rules(toolbox(player)), event.getBlock());
+    }
+
+    /** Блок сломала сама игра — остаётся надеть зачарования нужного инструмента и износить его. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void broke(BlockBreakEvent event) {
         Player player = event.getPlayer();
-        if (player.getGameMode() == GameMode.CREATIVE || !clawInMainHand(player)) return;
+        if (!clawInMainHand(player)) return;
+        List<Rule> rules = rules(toolbox(player));
+        // Блок читается движком уже после события, поэтому зачарования успевают попасть в дроп.
+        applyLoot(player, rules, event.getBlock());
+        if (player.getGameMode() == GameMode.CREATIVE) return;
         TypedKey<BlockType> block = TypedKey.create(RegistryKey.BLOCK, event.getBlock().getType().getKey());
-        for (Rule rule : rules(toolbox(player))) {
+        for (Rule rule : rules) {
             if (!rule.blocks().contains(block)) continue;
             wear(player, rule);
             mend(player, rule, event);

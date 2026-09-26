@@ -1,9 +1,7 @@
 package com.yourserver.adaptation;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -14,8 +12,9 @@ import java.util.Set;
  * ({@code #mineable/pickaxe}, {@code #mineable/shovel}, {@code #sword_instantly_mines} и прочие),
  * и игра сама считает скорость копания, дроп и полосу копания на клиенте.
  *
- * Здесь только чистые данные: семейства, уровни, скорости и запасные правила — для тех предметов,
- * у которых нет своего компонента инструмента. Числа сверены с вики: камень — дерево 1.15 с,
+ * Здесь только чистые данные: семейства, уровни, скорости, запасные правила — для тех предметов,
+ * у которых нет своего компонента инструмента, — и порядок просмотра инвентаря, по которому
+ * инструменты и одалживаются. Числа сверены с вики: камень — дерево 1.15 с,
  * камень-кирка 0.6 с, железо 0.4 с, алмаз 0.3 с, незерит 0.25 с; обсидиан — дерево 125 с и рука 250 с.
  */
 final class CrabClawRules {
@@ -26,17 +25,48 @@ final class CrabClawRules {
     /** Сколько прочности чинит один опыт «Починки» — как в ванили. */
     static final int MEND_PER_EXPERIENCE = 2;
 
-    /* Зачарования. Клешня берёт у инструментов всё, что решает, что выпадет из блока: «Удачу»
-       и «Шёлковое касание». Остальное она считает сама и потому не копирует: скорость —
+    /* Зачарования. Клешня берёт у инструментов то, что решает, чем выпадет блок: «Удачу»
+       и «Шёлковое касание». Зачарования идут от того инструмента, чьим правилом блок и ломается,
+       поэтому кирка с «Шёлком» кладёт камень блоками, а ножницы без «Шелка» по шерсти зачарований
+       не получают вовсе. Остальное клешня считает сама и потому не копирует: скорость —
        «Эффективность» (она уже в правилах), износ — «Прочность», починку — «Починка».
-       Копировать их на клешню значило бы посчитать одно и то же дважды. Проклятия тоже
-       остаются на самом инструменте: он лежит в инвентаре и теряется сам. */
+       Копировать их значило бы посчитать одно и то же дважды. Проклятия тоже остаются
+       на самом инструменте: он лежит в инвентаре и теряется сам. */
     static final String FORTUNE = "minecraft:fortune";
     static final String SILK_TOUCH = "minecraft:silk_touch";
     static final String UNBREAKING = "minecraft:unbreaking";
     static final String MENDING = "minecraft:mending";
-    /** Что клешня заимствует у инструмента. */
+    /** Что клешня заимствует у инструмента: только то, что решает дроп. */
     static final Set<String> LOOT_ENCHANTS = Set.of(FORTUNE, SILK_TOUCH);
+
+    /** Левая рука в общем порядке просмотра: слот инвентаря у неё не номер, а признак. */
+    static final int OFFHAND = -1;
+
+    /**
+     * Порядок, в котором клешня ищет инструменты: справа налево и сверху вниз по рядам.
+     * Верхний ряд хранилища — 17…9, затем 26…18, затем 35…27, затем нижний ряд (горячий) 8…0,
+     * и в самом конце — левая рука. Инструмент каждого семейства берётся первый по этому порядку.
+     */
+    static final List<Integer> SCAN = scanOrder();
+
+    private static List<Integer> scanOrder() {
+        List<Integer> order = new ArrayList<>();
+        for (int row = 0; row < 3; row++) {
+            for (int column = 8; column >= 0; column--) order.add(9 + row * 9 + column);
+        }
+        for (int column = 8; column >= 0; column--) order.add(column);
+        order.add(OFFHAND);
+        return List.copyOf(order);
+    }
+
+    /** Первое зачарование дропа по порядку списка: если на инструменте вдруг и «Удача», и «Шёлк»
+     *  (так бывает только у выданного командой предмета), берём то, что стоит в списке раньше. */
+    static String lootEnchant(List<String> ids) {
+        for (String id : ids) {
+            if (LOOT_ENCHANTS.contains(id)) return id;
+        }
+        return "";
+    }
 
     /** Порядок семейств в правилах клешни: у кого выше скорость на общих блоках, тот и раньше.
      *  Так ножницы рвут листву вмиг, а меч по той же листве копает в полтора раза быстрее руки. */
@@ -47,11 +77,6 @@ final class CrabClawRules {
     static final List<String> ANCHORS = List.of(
             "stone", "oak_log", "dirt", "hay_block", "white_wool", "cobweb",
             "copper_ore", "iron_ore", "gold_ore", "diamond_ore", "obsidian", "ancient_debris");
-
-    /** Вес опорного блока: чем крепче блок, тем выше уровень инструмента, который его берёт. */
-    private static final Map<String, Integer> WEIGHTS = Map.of(
-            "copper_ore", 1, "iron_ore", 1, "gold_ore", 2, "diamond_ore", 2,
-            "obsidian", 3, "ancient_debris", 3);
 
     /** Блоки, которые ножницы рвут вмиг: паутина и всякая мелочь, до которой они «дотягиваются». */
     private static final List<String> SHEARS_BLOCKS = List.of(
@@ -78,16 +103,6 @@ final class CrabClawRules {
 
     /** Правило, которое клешня отдаёт игре: набор блоков, скорость и дроп. */
     record Spec(Blocks blocks, double speed, boolean drops) { }
-
-    /** Зачарование инструмента: ванильный id и уровень. */
-    record Enchant(String id, int level) { }
-
-    /** Правило в виде данных — для расчётов силы инструмента. */
-    record Rule(Set<String> anchors, double speed, boolean drops) {
-        Rule {
-            anchors = Set.copyOf(anchors);
-        }
-    }
 
     /** Семейство по имени материала Bukkit: DIAMOND_PICKAXE, STONE_AXE, SHEARS, STICK... */
     static Family family(String material) {
@@ -174,50 +189,6 @@ final class CrabClawRules {
         return List.copyOf(out);
     }
 
-    /**
-     * Слить зачарования инструментов в один набор для клешни.
-     *
-     * Список идёт от главного инструмента к остальным, и главный задаёт характер добычи:
-     * «Удача» и «Шёлковое касание» спорят друг с другом (одно умножает дроп, другое выдаёт блок
-     * как есть), поэтому побеждает то, что стоит у главного, а второе не добавляется. Всё
-     * остальное складывается: у каждого зачарования берём самый высокий уровень.
-     */
-    static List<Enchant> merge(List<List<Enchant>> perTool) {
-        Map<String, Integer> merged = new LinkedHashMap<>();
-        for (List<Enchant> tool : perTool) {
-            for (Enchant enchant : tool) {
-                if (merged.containsKey(opposite(enchant.id()))) continue;   // шелк и удача спорят
-                merged.merge(enchant.id(), enchant.level(), Math::max);
-            }
-        }
-        List<Enchant> out = new ArrayList<>();
-        for (Map.Entry<String, Integer> entry : merged.entrySet()) {
-            out.add(new Enchant(entry.getKey(), entry.getValue()));
-        }
-        return List.copyOf(out);
-    }
-
-    /** Зачарование, с которым спорит это: «Удача» и «Шёлковое касание» вместе не уживаются. */
-    static String opposite(String id) {
-        if (FORTUNE.equals(id)) return SILK_TOUCH;
-        if (SILK_TOUCH.equals(id)) return FORTUNE;
-        return "";
-    }
-
-    /** Старшинство семейств: при равной силе главным считается тот инструмент, которым копают
-     *  чаще, — кирка, топор, лопата, тяпка, а ножницы и меч идут последними. */
-    static int rank(Family family) {
-        return switch (family) {
-            case PICKAXE -> 0;
-            case AXE -> 1;
-            case SHOVEL -> 2;
-            case HOE -> 3;
-            case SWORD -> 4;
-            case SHEARS -> 5;
-            case NONE -> 6;
-        };
-    }
-
     /** Сколько прочности возьмёт блок с «Прочностью»: с шансом уровень/(уровень+1) износ
      *  не тратится вовсе (в ванили «Прочность III» бережёт предмет в трёх случаях из четырёх). */
     static int wear(int base, int unbreaking, double roll) {
@@ -230,28 +201,6 @@ final class CrabClawRules {
     static int mend(int damage, int experience) {
         if (experience <= 0) return Math.max(0, damage);
         return Math.max(0, damage - experience * MEND_PER_EXPERIENCE);
-    }
-
-    /** Сила инструмента: сколько тяжёлых блоков он берёт с дропом. Первое подходящее правило решает. */
-    static int score(List<Rule> rules) {
-        int score = 0;
-        for (String anchor : ANCHORS) {
-            Integer weight = WEIGHTS.get(anchor);
-            if (weight == null) continue;
-            for (Rule rule : rules) {
-                if (!rule.anchors().contains(anchor)) continue;
-                if (rule.drops()) score += weight;
-                break;
-            }
-        }
-        return score;
-    }
-
-    /** Самая высокая скорость среди правил: по ней сравниваем инструменты одного уровня. */
-    static double topSpeed(List<Rule> rules) {
-        double speed = 0;
-        for (Rule rule : rules) speed = Math.max(speed, rule.speed());
-        return speed;
     }
 
     /** Сколько секунд займёт блок, если копать его с такой скоростью (таблица из вики). */
