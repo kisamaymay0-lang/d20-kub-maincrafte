@@ -164,7 +164,10 @@ final class PrefixPackCatalogTest {
 
     @Test
     void idПриводитсяКБезопасномуВиду() {
-        assertEquals("pref-pack1_pref1", PrefixPackCatalog.sanitize("Pref Pack1 pref1"));
+        // Дефис и точка допустимы, пробелы и прочее становятся подчёркиванием,
+        // а цепочки подчёркиваний сжимаются до одного.
+        assertEquals("pref-pack1_pref1", PrefixPackCatalog.sanitize("Pref-Pack1 pref1"));
+        assertEquals("pref_pack1_pref1", PrefixPackCatalog.sanitize("Pref Pack1 pref1"));
         assertEquals("a_b_c", PrefixPackCatalog.sanitize("a__b  c"));
         assertEquals("", PrefixPackCatalog.sanitize(null));
     }
