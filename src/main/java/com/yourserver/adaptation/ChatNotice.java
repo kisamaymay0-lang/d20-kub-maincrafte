@@ -1,33 +1,33 @@
 package com.yourserver.adaptation;
 
 import net.kyori.adventure.audience.Audience;
-import net.kyori.adventure.audience.MessageType;
-import net.kyori.adventure.identity.Identity;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 
 /**
  * Короткое уведомление в чат <b>без звука</b>.
  *
- * <h2>Почему обычного sendMessage мало</h2>
+ * <h2>Почему это не озвучивается</h2>
  *
- * Обычное сообщение уходит клиентом как «чат»: у игрока в настройках
- * (Звуки и музыка → Уведомления → Сообщения чата) на него отвечает звук.
- * Системные сообщения ({@code MessageType.SYSTEM}) этим звуком не
- * озвучиваются — они нужны именно для тихих уведомлений плагина.
+ * {@link Audience#sendMessage(Component)} в Adventure — это
+ * <b>системное</b> сообщение (section «system messages» в самом интерфейсе):
+ * клиент показывает его в чате, но не отвечает звуком уведомления. Звук
+ * привязан к сообщениям с типом чата — {@code sendMessage(component, chatType)},
+ * который здесь не используется. Плюс плагин сам не играет никаких звуков:
+ * у лайка не должно быть «пика», в отличие от клика по кнопке.
  *
- * <h2>Где это используется</h2>
+ * <h2>Где используется</h2>
  *
- * Лайк и дизлайк чужому профилю: владелец профиля видит в чате, что ему
- * поставили оценку, а звука нет — оценка не должна «пикать» среди игры.
+ * Лайк и дизлайк чужому профилю: владелец видит в чате, что ему поставили
+ * оценку, — зелёной строкой за лайк и красной за дизлайк.
  */
 final class ChatNotice {
 
     private ChatNotice() { }
 
-    /** Отправить сообщение тихо: цвет задаёт вызывающий. */
+    /** Отправить сообщение тихо (системное, без звука уведомления). */
     static void silent(Audience target, Component message) {
-        target.sendMessage(Identity.nil(), message, MessageType.SYSTEM);
+        target.sendMessage(message);
     }
 
     /** Тихая строка одним цветом, без курсива. */
