@@ -6,6 +6,7 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -59,10 +60,44 @@ final class ProfileCodec {
         yaml.set("cosmetics.owned", new ArrayList<>(data.ownedCosmetics()));
         yaml.set("cosmetics.equipped", data.equippedCosmetic() == null ? "" : data.equippedCosmetic());
         yaml.set("cosmetics.cases", data.cosmeticCases());
+        writePackCases(yaml, data);
         List<String> slots = new ArrayList<>();
         for (UUID id : data.layout()) slots.add(id == null ? "" : id.toString());
         yaml.set("display", slots);
         return yaml;
+    }
+
+    /**
+     * Кейсы паков: id пака -> список сроков (мс). Срок {@link Long#MAX_VALUE}
+     * пишется как есть — он и означает «бессрочный».
+     */
+    private static void writePackCases(YamlConfiguration yaml, ProfileData data) {
+        Map<String, List<Long>> cases = data.packCasesSnapshot();
+        if (cases.isEmpty()) return;
+        ConfigurationSection section = yaml.createSection("prefix-packs");
+        for (Map.Entry<String, List<Long>> entry : cases.entrySet()) {
+            List<String> deadlines = new ArrayList<>();
+            for (Long deadline : entry.getValue()) deadlines.add(Long.toString(deadline));
+            section.set(entry.getKey(), deadlines);
+        }
+    }
+
+    private static Map<String, List<Long>> readPackCases(YamlConfiguration yaml) {
+        Map<String, List<Long>> cases = new LinkedHashMap<>();
+        ConfigurationSection section = yaml.getConfigurationSection("prefix-packs");
+        if (section == null) return cases;
+        for (String id : section.getKeys(false)) {
+            List<Long> deadlines = new ArrayList<>();
+            for (String value : section.getStringList(id)) {
+                try {
+                    deadlines.add(Long.parseLong(value.trim()));
+                } catch (NumberFormatException ignored) {
+                    // Битый срок — просто не выдаём этот кейс.
+                }
+            }
+            if (!deadlines.isEmpty()) cases.put(id, deadlines);
+        }
+        return cases;
     }
 
     private static void writeMedals(YamlConfiguration yaml, ProfileData data) {
@@ -121,6 +156,7 @@ final class ProfileCodec {
             data.restoreCosmetics(new HashSet<>(cosmetics.getStringList("owned")),
                     cosmetics.getString("equipped", ""), cosmetics.getInt("cases", 0));
         }
+        data.restorePackCases(readPackCases(yaml));
         if (version == 1) data.replaceMedals(readMedals(yaml));
         if (!yaml.isList("display")) throw new IllegalArgumentException("Неверные слоты профиля");
         List<?> display = yaml.getList("display", List.of());

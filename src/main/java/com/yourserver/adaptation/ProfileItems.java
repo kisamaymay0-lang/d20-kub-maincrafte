@@ -88,6 +88,15 @@ final class ProfileItems {
                 text(owner ? "Префикс и косметика на голове" : "Настраивать можно только свой профиль", NamedTextColor.DARK_GRAY)));
     }
 
+    /** Кнопка «Мои префиксы»: список уже собранных префиксов, чтобы надеть любой. */
+    ItemStack myPrefixesButton(int owned) {
+        return named(Material.CHEST, medals.title("Мои префиксы", ProfileMedal.Metal.COPPER), List.of(
+                text("Собрано " + owned + " " + plural(owned, "префикс", "префикса", "префиксов"),
+                        owned > 0 ? NamedTextColor.GRAY : NamedTextColor.RED),
+                text(owned > 0 ? "Нажмите, чтобы надеть любой" : "Префиксы выпадают из кейсов паков",
+                        NamedTextColor.DARK_GRAY)));
+    }
+
     /** Префикс в списке выбора. Чужой показан красным «У вас нету этого префикса!». */
     ItemStack prefixEntry(PrefixCatalog.Prefix prefix, boolean owned, boolean equipped) {
         if (!owned) {
@@ -120,6 +129,50 @@ final class ProfileItems {
         meta.setEnchantmentGlintOverride(cases > 0);
         item.setItemMeta(meta);
         return item;
+    }
+
+    /**
+     * Сундучок пака префиксов в меню: название пака, сколько кейсов лежит у
+     * игрока и что внутри. Надпись «бессрочный» — когда срок пака {@code -1}.
+     */
+    ItemStack prefixPack(PrefixPackCatalog.Pack pack, int cases, long nearestExpiry, long now) {
+        List<Component> lore = new ArrayList<>();
+        lore.add(text(cases > 0 ? countText(cases) : "Нет кейсов этого пака",
+                cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED));
+        lore.add(text(cases > 0 ? "Нажмите, чтобы открыть" : "Кейсы выдаёт администратор",
+                NamedTextColor.DARK_GRAY));
+        lore.add(Component.empty());
+        lore.add(text("Внутри " + pack.size() + " " + ProfileItems.plural(pack.size(), "префикс", "префикса", "префиксов"),
+                NamedTextColor.GOLD));
+        for (PrefixCatalog.Prefix prefix : pack.prefixes()) {
+            lore.add(text(" §7§l•§r ", NamedTextColor.DARK_GRAY).append(text(prefix.name(), prefix.color())));
+        }
+        if (cases > 0) {
+            lore.add(Component.empty());
+            lore.add(text(nearestExpiry == Long.MAX_VALUE
+                            ? "Кейсы бессрочные"
+                            : "Ближайший сгорит через " + PrefixPackCatalog.leftText(nearestExpiry, now),
+                    NamedTextColor.DARK_GRAY));
+        }
+        ItemStack item = named(Material.CHEST, medals.title(pack.name(), ProfileMedal.Metal.GOLD), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private static String countText(int cases) {
+        return cases == 1 ? "Есть 1 кейс" : "Есть " + cases + " кейсов";
+    }
+
+    /** Русская форма числа: 1 префикс, 2 префикса, 5 префиксов. */
+    static String plural(int count, String one, String few, String many) {
+        int mod100 = Math.abs(count) % 100;
+        int mod10 = mod100 % 10;
+        if (mod100 >= 11 && mod100 <= 14) return many;
+        if (mod10 == 1) return one;
+        if (mod10 >= 2 && mod10 <= 4) return few;
+        return many;
     }
 
     /** Карточка префикса во время вскрытия кейса. slot — номер места (1…9). */
