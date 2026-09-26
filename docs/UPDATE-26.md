@@ -105,7 +105,7 @@ fishing:
 ## 6. Проверка
 
 CI зелёный: `Validate resource pack`, `Validate shipped resource pack`, `Build with Maven`,
-`Report unit tests` — **208 тестов, 0 падений**; артефакт сборки `f8-plugin-10.27`.
+`Report unit tests` — **207 тестов, 0 падений**; артефакт сборки `f8-plugin-10.27`.
 
 Новый `CrabClawRulesTest` проверяет чистую арифметику клешни: семейства инструментов
 (`DIAMOND_PICKAXE` не путается с топором), скорости уровней (дерево 2 … незерит 9, золото 12),
