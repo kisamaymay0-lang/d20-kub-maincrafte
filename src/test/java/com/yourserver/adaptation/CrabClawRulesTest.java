@@ -276,7 +276,7 @@ class CrabClawRulesTest {
         assertEquals(2, CrabClawRules.wear(2, 1, 0.5));
         assertEquals(2, CrabClawRules.wear(2, 0, 0.0), "без «Прочности» износ идёт как идёт");
         assertEquals(0, CrabClawRules.wear(0, 0, 0.9));
-        assertEquals(0, CrabClawRules.wear(2, -1, 0.0));
+        assertEquals(2, CrabClawRules.wear(2, -1, 0.0), "отрицательный уровень — как без «Прочности»");
     }
 
     @Test
