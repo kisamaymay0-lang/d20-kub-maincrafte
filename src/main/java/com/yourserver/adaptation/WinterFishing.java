@@ -43,6 +43,7 @@ final class WinterFishing implements Listener {
     private final JavaPlugin plugin;
     final WinterItems items;
     private final WinterMovement movement;
+    private final CrabClaw crabClaw;
     private final Map<UUID, List<Replacement>> replacements = new HashMap<>();
     private final List<NamespacedKey> recipes = new ArrayList<>();
 
@@ -51,6 +52,7 @@ final class WinterFishing implements Listener {
         items = new WinterItems(plugin);
         movement = new WinterMovement(plugin, items);
         plugin.getServer().getPluginManager().registerEvents(movement, plugin);
+        crabClaw = new CrabClaw(plugin, items);
         registerRecipes();
         new WinterItemGuard(plugin, items);
     }
@@ -173,6 +175,7 @@ final class WinterFishing implements Listener {
     }
 
     void disable() {
+        crabClaw.disable();
         movement.disable();
         for (UUID owner : new ArrayList<>(replacements.keySet())) {
             Player player = Bukkit.getPlayer(owner); if (player != null) drain(player);

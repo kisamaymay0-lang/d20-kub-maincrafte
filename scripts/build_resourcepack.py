@@ -149,7 +149,7 @@ def validate() -> dict[str, bytes]:
         assert f"assets/f8resurs/models/item/{name}.json" in files
         assert f"assets/f8resurs/textures/item/{name}.png" in files
 
-    for item in ("icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich"):
+    for item in ("icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich", "crab_claw"):
         assert f"assets/f8resurs/items/{item}.json" in files
         assert f"assets/f8resurs/models/item/{item}.json" in files
         assert f"assets/f8resurs/textures/item/{item}.png" in files

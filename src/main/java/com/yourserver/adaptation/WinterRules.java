@@ -182,7 +182,7 @@ final class WinterRules {
     static NamedTextColor titleColor(String kind) {
         return switch (kind) {
             case "DEPLETED" -> NamedTextColor.GRAY;
-            case "SANDWICH" -> NamedTextColor.GOLD;
+            case "SANDWICH", "CLAW" -> NamedTextColor.GOLD;
             default -> NamedTextColor.AQUA;
         };
     }

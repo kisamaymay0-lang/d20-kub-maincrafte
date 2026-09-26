@@ -28,7 +28,8 @@ final class WinterItems {
         RAW("rime", "Изморозь", Material.COD),
         DEPLETED("depleted_rime", "Опустошённая изморозь", Material.COD),
         ROE("ice_caviar", "Ледяная икра", Material.LIGHT_BLUE_DYE),
-        SANDWICH("ice_caviar_sandwich", "Бутерброд с ледяной икрой", Material.BREAD);
+        SANDWICH("ice_caviar_sandwich", "Бутерброд с ледяной икрой", Material.BREAD),
+        CLAW("crab_claw", "Клешня краба", Material.PRISMARINE_SHARD);
         final String id, title;
         final Material material;
         Kind(String id, String title, Material material) { this.id = id; this.title = title; this.material = material; }
@@ -76,6 +77,7 @@ final class WinterItems {
             case RAW, DEPLETED -> "Рыба с неведомых земель.";
             case ROE -> "Добывается из Изморози (shift + ПКМ)";
             case SANDWICH -> "Сытный, как золотая морковка";
+            case CLAW -> "В руке дальность взаимодействия +3 блока, в правой руке копает инструментами из инвентаря.";
         };
     }
 

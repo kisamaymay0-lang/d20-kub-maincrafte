@@ -169,6 +169,7 @@ final class SpecialCatch implements Listener {
         String lower = biome.toLowerCase(Locale.ROOT);
         if (WinterRules.BIOMES.contains(lower)) return winterRime();
         if (lower.endsWith(":desert") || lower.contains("badlands")) return jug.createEmpty();
+        if (lower.contains("swamp")) return crabClaw();          // болото и мангровое болото
         return null;
     }
 
@@ -176,6 +177,10 @@ final class SpecialCatch implements Listener {
     private ItemStack itemOf(String value) {
         String token = value.trim().toUpperCase(Locale.ROOT);
         if (token.equals("ANCIENT_JUG") || token.equals("ДРЕВНИЙ_КУВШИН")) return jug.createEmpty();
+        if (token.equals("CRAB_CLAW") || token.equals("CLAW") || token.equals("КЛЕШНЯ_КРАБА")
+                || token.equals("КЛЕШНЯ")) {
+            return crabClaw();
+        }
         if (token.equals("ICY_RIME") || token.equals("RIME") || token.equals("ИЗМОРОЗЬ")
                 || token.equals("ЛЕДЯНАЯ_ИЗМОРОЗЬ") || token.equals("ЗАЛЕДЕНЕВШАЯ_ИЗМОРОЗЬ")) {
             return winterRime();
@@ -187,6 +192,11 @@ final class SpecialCatch implements Listener {
     /** Заледеневшая изморозь — зимний особый предмет биома. */
     private ItemStack winterRime() {
         return winter.items.create(WinterItems.Kind.TOOL);
+    }
+
+    /** Клешня краба — особый предмет болот: и обычного, и мангрового. */
+    private ItemStack crabClaw() {
+        return winter.items.create(WinterItems.Kind.CLAW);
     }
 
 
