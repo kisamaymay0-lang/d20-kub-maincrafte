@@ -51,6 +51,8 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private CaviarListener caviarListener;
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
+    /** Политые кораллы: список живёт в файле, поэтому нужен доступ на выключении. */
+    private CoralCare coralCare;
     private SpecialCatch specialCatch;
     private ConstellationManager constellationManager;
     private ProfileManager profileManager;
@@ -119,6 +121,16 @@ public void onEnable() {
 
     winterFishing = new WinterFishing(this);
     getServer().getPluginManager().registerEvents(winterFishing, this);
+
+    // Уход за блоками руками: вода по меди и кораллам, блок света спрятанной
+    // рамкой — всё это шифт + ПКМ, отдельными слушателями.
+    getServer().getPluginManager().registerEvents(new CopperCare(), this);
+
+    coralCare = new CoralCare(this, dataWriter);
+    getServer().getPluginManager().registerEvents(coralCare, this);
+
+    getServer().getPluginManager().registerEvents(new LightBlocks(this), this);
+    getServer().getPluginManager().registerEvents(new FrameVeil(), this);
 
     ancientJug = new AncientJug(this, dataWriter);
     getServer().getPluginManager().registerEvents(ancientJug, this);
@@ -224,6 +236,9 @@ public void onEnable() {
         }
         if (ancientJug != null) {
             ancientJug.disable();
+        }
+        if (coralCare != null) {
+            coralCare.flush();
         }
         if (dataWriter != null) {
             dataWriter.close();
