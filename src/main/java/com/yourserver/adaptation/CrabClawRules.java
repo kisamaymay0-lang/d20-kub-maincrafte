@@ -43,6 +43,9 @@ final class CrabClawRules {
      *  алмаз 8, незерит 9, золото 12; всё остальное (в том числе рука) копает со скоростью 1. */
     static double tierSpeed(String material) {
         if (material == null) return 1.0;
+        // Мечи и ножницы носят имена уровней («DIAMOND_SWORD»), но скоростью уровня не копают:
+        // их скорость считает слушатель, а здесь — предохранитель от случайного вызова.
+        if (material.endsWith("_SWORD") || material.equals("SHEARS")) return 1.0;
         if (material.startsWith("WOODEN_")) return 2.0;
         if (material.startsWith("STONE_")) return 4.0;
         if (material.startsWith("COPPER_")) return 5.0;
