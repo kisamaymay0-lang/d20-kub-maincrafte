@@ -56,7 +56,7 @@ import java.util.function.ToLongFunction;
 
 /** Профиль/коллекция/размещение. Доступ проверяется по UUID и серверному holder, не по названию предмета. */
 public final class ProfileManager implements Listener, CommandExecutor, TabCompleter {
-    private enum Screen { PROFILE, COLLECTION, PLACE, PREFIX, PREFIX_CASE, CUSTOMIZE, COSMETIC, COSMETIC_CASE, PACKS }
+    private enum Screen { PROFILE, COLLECTION, PLACE, PREFIX, PREFIX_CASE, CUSTOMIZE, COSMETIC, COSMETIC_CASE, PACKS, PACK }
 
     /** Место кнопок в меню «Настроить косметику» (второй ряд инвентаря). */
     private static final int CUSTOMIZE_PREFIX_SLOT = 11;
@@ -66,6 +66,12 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     /** Средний ряд меню паков: на нём стоят сундучки (до девяти паков). */
     private static final int PACK_ROW_START = 9;
     private static final int PACK_ROW_SIZE = 9;
+    /** Экран одного пака: содержимое сверху и снизу, в середине — кейс и отмена. */
+    private static final int PACK_TOP_ROW = 0;
+    private static final int PACK_BOTTOM_ROW = 18;
+    /** Кнопка «назад к пакам» и «крутить кейс пака» — обе в среднем ряду. */
+    private static final int PACK_BACK_SLOT = 9;
+    private static final int PACK_SPIN_SLOT = 13;
 
     /** Сколько префиксов помещается в кейс и как они «бьются».
      *  Моменты «поломок» (тики от открытия, 20 тиков = 1 с): первая через 2 с,
@@ -111,10 +117,17 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         final Map<Integer, String> cosmeticsBySlot = new HashMap<>();
         /** Сундучки паков: слот -> id пака. */
         final Map<Integer, String> packsBySlot = new HashMap<>();
+        /** Какой пак открыт на экране PACK (id пака). */
+        final String pack;
         int page;
         Inventory inventory;
         Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen) {
+            this(viewer, owner, screen, page, chosen, null);
+        }
+
+        Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen, String pack) {
             this.viewer = viewer; this.owner = owner; this.screen = screen; this.page = page; this.chosen = chosen;
+            this.pack = pack;
         }
         @Override public Inventory getInventory() { return inventory; }
     }
@@ -174,11 +187,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             plugin.getLogger().info("Создан файл префиксов: " + prefixConfig + " (правьте его и применяйте через /profile prefix reload)");
         }
         packFolder = plugin.getDataFolder().toPath().resolve("prefixpacks");
-        packs = loadPacks();
-        PrefixCatalog loadedPrefixes = PrefixCatalog.defaults();
-        try { loadedPrefixes = PrefixCatalog.load(prefixConfig, packs); }
+        PrefixCatalog base = PrefixCatalog.defaults();
+        try { base = PrefixCatalog.load(prefixConfig); }
         catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка prefixes.yml; используются стандартные префиксы", ex); }
-        prefixes = loadedPrefixes;
+        packs = loadPacks(base);
+        prefixes = base.withPacks(packs);
         plugin.getLogger().info("Префиксы профиля: " + prefixes.size() + " шт., файл " + prefixConfig
                 + ", паков " + packs.size());
         cosmeticConfig = plugin.getDataFolder().toPath().resolve("cosmetics.yml");
@@ -225,15 +238,19 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
      * Паки префиксов: plugins/f8-plugin/prefixpacks/*.yml. Папка создаётся при
      * первом запуске, и в неё кладётся тестовый пак pref-pack1 — по нему видно,
      * как писать свои.
+     *
+     * Имена и цвета префиксов паков берутся из {@code prefixes.yml} (каталог
+     * {@code base}): в файле пака пишется только файл префикса.
      */
-    private PrefixPackCatalog loadPacks() {
+    private PrefixPackCatalog loadPacks(PrefixCatalog base) {
         try {
             if (!Files.isDirectory(packFolder)) {
                 Files.createDirectories(packFolder);
                 plugin.saveResource("prefixpacks/pref-pack1.yml", false);
                 plugin.getLogger().info("Создан тестовый пак префиксов: " + packFolder.resolve("pref-pack1.yml"));
             }
-            PrefixPackCatalog loaded = PrefixPackCatalog.load(packFolder);
+            PrefixPackCatalog loaded = PrefixPackCatalog.load(packFolder, base,
+                    message -> plugin.getLogger().warning(message));
             plugin.getLogger().info("Паки префиксов: " + loaded.size() + " шт., папка " + packFolder);
             return loaded;
         } catch (Exception ex) {
@@ -684,13 +701,23 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen) {
+        open(viewer, owner, screen, page, chosen, null);
+    }
+
+    /** Открыть экран; для экрана пака ({@code Screen.PACK}) нужен ещё id пака. */
+    private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen, String pack) {
         if (stopping) return;
         if (screen != Screen.PROFILE && !viewer.getUniqueId().equals(owner)) return;
         editing.remove(viewer.getUniqueId());
         try {
             ProfileData data = profile(owner, owner.toString());
             if (screen == Screen.PLACE && !data.medals().containsKey(chosen)) return;
-            Menu menu = new Menu(viewer.getUniqueId(), owner, screen, page, chosen);
+            // Пака могло не стать (файл убрали, пока меню открыто): покажем список паков.
+            if (screen == Screen.PACK && packs.get(pack) == null) {
+                screen = Screen.PACKS;
+                pack = null;
+            }
+            Menu menu = new Menu(viewer.getUniqueId(), owner, screen, page, chosen, pack);
             String title = switch (screen) {
                 case PROFILE -> "Профиль • " + data.name();
                 case COLLECTION -> "Выбрать медаль";
@@ -701,6 +728,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 case COSMETIC -> "Выбрать косметику";
                 case COSMETIC_CASE -> "Вскрытие кейса косметики";
                 case PACKS -> "Префиксы";
+                case PACK -> {
+                    PrefixPackCatalog.Pack shown = menu.pack == null ? null : packs.get(menu.pack);
+                    yield shown == null ? "Пак префиксов" : shown.name();
+                }
             };
             menu.inventory = Bukkit.createInventory(menu, 27, Component.text(title, NamedTextColor.DARK_GRAY));
             populate(menu, data);
@@ -771,6 +802,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             populatePacks(menu, data);
             return;
         }
+        if (menu.screen == Screen.PACK) {
+            populatePack(menu, data);
+            return;
+        }
         if (menu.screen == Screen.PREFIX) {
             List<PrefixCatalog.Prefix> all = prefixes.list();
             int pages = Math.max(1, (all.size() + 17) / 18);
@@ -834,6 +869,61 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                         prefix.id().equals(data.equippedPrefix())));
             }
         }
+    }
+
+    /**
+     * Экран одного пака: что внутри — сверху и снизу, а посередине кнопка
+     * «крутить кейс пака» и отмена обратно к списку паков.
+     *
+     * Префиксы пака показываются как в списке выбора: чужой — красным, надетый
+     * — с блеском. Нажать можно тоже как в списке: надеть свой, снять шифтом.
+     * Пак, которого больше нет (файл убрали, пока меню открыто), показывает
+     * список паков — меню не остаётся пустым.
+     */
+    private void populatePack(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        menu.packsBySlot.clear();
+        menu.prefixesBySlot.clear();
+
+        PrefixPackCatalog.Pack pack = menu.pack == null ? null : packs.get(menu.pack);
+        if (pack == null) {
+            populatePacks(menu, data);
+            return;
+        }
+
+        List<PrefixCatalog.Prefix> inside = pack.prefixes();
+        long now = System.currentTimeMillis();
+        int slot = PACK_TOP_ROW;
+        for (PrefixCatalog.Prefix prefix : inside) {
+            if (slot > PACK_TOP_ROW + 8) slot = PACK_BOTTOM_ROW;
+            if (slot > PACK_BOTTOM_ROW + 8) break; // Больше восемнадцати в меню не помест.
+            menu.prefixesBySlot.put(slot, prefix.id());
+            inventory.setItem(slot, items.prefixEntry(prefix, data.ownsPrefix(prefix.id()),
+                    prefix.id().equals(data.equippedPrefix())));
+            slot++;
+        }
+
+        inventory.setItem(PACK_BACK_SLOT, items.backToPacks());
+        inventory.setItem(PACK_SPIN_SLOT, items.packCase(pack, data.packCases(pack.id()),
+                data.nearestPackExpiry(pack.id()), now));
+    }
+
+    /**
+     * Нажать префикс в меню: надеть свой, снять шифтом, если надет. Чужой не
+     * трогаем — просто говорим, что его нет.
+     */
+    private void pickPrefix(Player player, Menu menu, ProfileData data, int slot, boolean shift) {
+        String picked = menu.prefixesBySlot.get(slot);
+        if (picked == null) return;
+        PrefixCatalog.Prefix prefix = prefixes.get(picked);
+        if (prefix == null) return;
+        if (!data.ownsPrefix(picked)) {
+            player.sendMessage(ProfileItems.text("У вас нету этого префикса!", NamedTextColor.RED));
+            return;
+        }
+        if (shift && picked.equals(data.equippedPrefix())) unequipPrefix(player, data);
+        else if (!picked.equals(data.equippedPrefix())) equipPrefix(player, data, picked);
+        else clickSound(player);
     }
 
     private void populateDetails(Menu menu, ProfileData data) {
@@ -957,21 +1047,21 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         if (menu.screen == Screen.PACKS) {
             String packId = menu.packsBySlot.get(slot);
             if (packId != null) {
-                PrefixPackCatalog.Pack pack = packs.get(packId);
+                // Сундучок пака — не сразу кейс: сначала показываем, что внутри.
+                if (packs.get(packId) != null) { clickSound(player); open(player, data.owner, Screen.PACK, 0, null, packId); }
+                return;
+            }
+            pickPrefix(player, menu, data, slot, shift);
+            return;
+        }
+        if (menu.screen == Screen.PACK) {
+            if (slot == PACK_BACK_SLOT) { clickSound(player); open(player, data.owner, Screen.PACKS, 0, null); return; }
+            if (slot == PACK_SPIN_SLOT) {
+                PrefixPackCatalog.Pack pack = menu.pack == null ? null : packs.get(menu.pack);
                 if (pack != null) { clickSound(player); openPackCase(player, data, pack); }
                 return;
             }
-            String picked = menu.prefixesBySlot.get(slot);
-            if (picked == null) return;
-            PrefixCatalog.Prefix prefix = prefixes.get(picked);
-            if (prefix == null) return;
-            if (!data.ownsPrefix(picked)) {
-                player.sendMessage(ProfileItems.text("У вас нету этого префикса!", NamedTextColor.RED));
-                return;
-            }
-            if (shift && picked.equals(data.equippedPrefix())) unequipPrefix(player, data);
-            else if (!picked.equals(data.equippedPrefix())) equipPrefix(player, data, picked);
-            else clickSound(player);
+            pickPrefix(player, menu, data, slot, shift);
             return;
         }
         if (menu.screen == Screen.PREFIX) {
@@ -1337,6 +1427,48 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     /**
+     * Перечитать префиксы и паки с диска: и {@code prefixes.yml}, и
+     * {@code plugins/f8-plugin/prefixpacks/*.yml}. Этим же методом пользуется
+     * {@code /f8 reload}, чтобы префиксы обновлялись вместе с остальными
+     * настройками плагина.
+     *
+     * Сначала файлы читаются и проверяются: если хоть один сломан, состояние не
+     * меняется, а причина уходит в журнал и в ответ вызывающему.
+     *
+     * @return текст для ответа вызывающему.
+     */
+    public String reloadPrefixes() {
+        PrefixCatalog base;
+        PrefixPackCatalog nextPacks;
+        PrefixCatalog next;
+        try {
+            base = PrefixCatalog.load(prefixConfig);
+            nextPacks = loadPacks(base);
+            next = base.withPacks(nextPacks);
+        } catch (Exception ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING,
+                    "Не перечитаны префиксы и паки: файлы не изменились (" + ex.getMessage() + ")", ex);
+            return "Префиксы и паки не перечитаны: ошибка в файлах (причина в журнале сервера)."
+                    + " Префиксов по-прежнему " + prefixes.size() + ".";
+        }
+        prefixes = next;
+        packs = nextPacks;
+        cards.prefixes(next); // Карточки профиля держали свой каталог — отдаём новый.
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            try {
+                ProfileData data = profile(player);
+                // Надетый префикс исчез из файла: снимаем его, чтобы ник не «завис» без префикса.
+                String equipped = data.equippedPrefix();
+                if (equipped != null && prefixes.get(equipped) == null && data.equipPrefix(null)) savePrefix(data);
+                applyPrefixName(player, data);
+            } catch (RuntimeException ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применён префикс после reload: " + player.getName(), ex); }
+        }
+        for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
+        return "Префиксы перезагружены: " + prefixes.size() + " (№1–" + prefixes.size() + "), паков " + packs.size()
+                + ". Файлы: " + prefixConfig + " и " + packFolder;
+    }
+
+    /**
      * /profile case pack give|take <ник> <пак> [число] — выдать или забрать
      * кейсы пака, /profile case pack list <ник> — сколько их у игрока.
      *
@@ -1437,22 +1569,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             return;
         }
         if (args.length == 2 && args[1].equalsIgnoreCase("reload")) {
-            PrefixPackCatalog nextPacks = loadPacks();
-            // Сначала проверяем файлы: состояние не меняется при ошибке.
-            PrefixCatalog next = PrefixCatalog.load(prefixConfig, nextPacks);
-            prefixes = next;
-            packs = nextPacks;
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                try {
-                    ProfileData data = profile(player);
-                    // Надетый префикс исчез из файла: снимаем его, чтобы ник не «завис» без префикса.
-                    String equipped = data.equippedPrefix();
-                    if (equipped != null && prefixes.get(equipped) == null && data.equipPrefix(null)) savePrefix(data);
-                    applyPrefixName(player, data);
-                } catch (RuntimeException ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применён префикс после reload: " + player.getName(), ex); }
-            }
-            for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
-            sender.sendMessage(ProfileItems.text("Префиксы перезагружены: " + prefixes.size() + " (№1–" + prefixes.size() + "). Файл: " + prefixConfig, NamedTextColor.GREEN));
+            sender.sendMessage(ProfileItems.text(reloadPrefixes(), NamedTextColor.GREEN));
             return;
         }
         if (args.length < 3) throw new IllegalArgumentException("Использование: /profile prefix give|take|list <игрок или UUID> [номер|all]");

@@ -161,6 +161,42 @@ final class ProfileItems {
         return item;
     }
 
+    /**
+     * Кнопка «крутить кейс пака» на экране пака: название пака, сколько кейсов
+     * лежит у игрока, что внутри и срок ближайшего кейса.
+     */
+    ItemStack packCase(PrefixPackCatalog.Pack pack, int cases, long nearestExpiry, long now) {
+        List<Component> lore = new ArrayList<>();
+        lore.add(text(cases > 0 ? countText(cases) : "Нет кейсов этого пака",
+                cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED));
+        lore.add(text(cases > 0 ? "Нажмите, чтобы крутить кейс" : "Кейсы выдаёт администратор",
+                NamedTextColor.DARK_GRAY));
+        lore.add(Component.empty());
+        lore.add(text("Внутри " + pack.size() + " " + ProfileItems.plural(pack.size(), "префикс", "префикса", "префиксов"),
+                NamedTextColor.GOLD));
+        for (PrefixCatalog.Prefix prefix : pack.prefixes()) {
+            lore.add(text(" §7§l•§r ", NamedTextColor.DARK_GRAY).append(text(prefix.name(), prefix.color())));
+        }
+        if (cases > 0) {
+            lore.add(Component.empty());
+            lore.add(text(nearestExpiry == Long.MAX_VALUE
+                            ? "Кейсы бессрочные"
+                            : "Ближайший сгорит через " + PrefixPackCatalog.leftText(nearestExpiry, now),
+                    NamedTextColor.DARK_GRAY));
+        }
+        ItemStack item = named(Material.CHEST, medals.title("Крутить кейс пака", ProfileMedal.Metal.GOLD), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** Кнопка отмены на экране пака: обратно к списку паков. */
+    ItemStack backToPacks() {
+        return item(Material.ARROW, "Назад к пакам", NamedTextColor.GOLD, List.of(
+                text("Отмена — вернуться к списку паков", NamedTextColor.DARK_GRAY)));
+    }
+
     private static String countText(int cases) {
         return cases == 1 ? "Есть 1 кейс" : "Есть " + cases + " кейсов";
     }

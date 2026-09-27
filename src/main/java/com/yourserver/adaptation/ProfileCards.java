@@ -70,7 +70,7 @@ final class ProfileCards {
     private final ProfileSubjects subjects;
     private final ProfileVoice voice;
     private final ProfileItems items;
-    private final PrefixCatalog prefixes;
+    private volatile PrefixCatalog prefixes;
     private final Set<UUID> sneaking = new HashSet<>();
     private final Map<UUID, Card> cards = new HashMap<>();
     private final BukkitTask task;
@@ -80,6 +80,9 @@ final class ProfileCards {
 
     ProfileCards(JavaPlugin plugin, Function<ProfileSubjects.Subject, ProfileData> profiles, ProfileItems items, ProfileSubjects subjects, ProfileVoice voice, PrefixCatalog prefixes) {
         this.plugin = plugin; this.profiles = profiles; this.items = items; this.subjects = subjects; this.voice = voice; this.prefixes = prefixes;
+
+    /** Новый каталог префиксов после /f8 reload или /profile prefix reload. */
+    void prefixes(PrefixCatalog catalog) { this.prefixes = catalog; }
         double configured = plugin.getConfig().getDouble("profiles.quick-card-distance", 8);
         range = Double.isFinite(configured) ? Math.clamp(configured, 2, 16) : 8;
         for (Player player : Bukkit.getOnlinePlayers()) if (player.isSneaking()) sneaking.add(player.getUniqueId());
