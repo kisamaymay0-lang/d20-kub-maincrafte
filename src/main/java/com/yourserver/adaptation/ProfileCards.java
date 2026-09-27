@@ -80,14 +80,14 @@ final class ProfileCards {
 
     ProfileCards(JavaPlugin plugin, Function<ProfileSubjects.Subject, ProfileData> profiles, ProfileItems items, ProfileSubjects subjects, ProfileVoice voice, PrefixCatalog prefixes) {
         this.plugin = plugin; this.profiles = profiles; this.items = items; this.subjects = subjects; this.voice = voice; this.prefixes = prefixes;
-
-    /** Новый каталог префиксов после /f8 reload или /profile prefix reload. */
-    void prefixes(PrefixCatalog catalog) { this.prefixes = catalog; }
         double configured = plugin.getConfig().getDouble("profiles.quick-card-distance", 8);
         range = Double.isFinite(configured) ? Math.clamp(configured, 2, 16) : 8;
         for (Player player : Bukkit.getOnlinePlayers()) if (player.isSneaking()) sneaking.add(player.getUniqueId());
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 2L, 2L);
     }
+
+    /** Новый каталог префиксов после /f8 reload или /profile prefix reload. */
+    void prefixes(PrefixCatalog catalog) { this.prefixes = catalog; }
 
     void sneaking(UUID viewer, boolean value) { if (value) sneaking.add(viewer); else sneaking.remove(viewer); }
 

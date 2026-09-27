@@ -108,7 +108,7 @@ final class PrefixPackCatalogTest {
     }
 
     @Test
-    void файлаНетВПрефиксах — префиксСвойИПредупреждение(@TempDir Path folder) throws Exception {
+    void файлаНетВПрефиксахИПрефиксСвойСПредупреждением(@TempDir Path folder) throws Exception {
         Files.writeString(folder.resolve("prefixes.yml"), PREFIXES);
         Files.writeString(folder.resolve("pref-pack1.yml"), """
                 name: 'Тестовый пак'
