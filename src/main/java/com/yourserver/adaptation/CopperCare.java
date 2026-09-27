@@ -34,14 +34,11 @@ import org.bukkit.inventory.ItemStack;
  *       решётки) сохраняются: подменяется только имя материала в строке
  *       {@code BlockData}, а не весь блок. У медного сундука лежащие внутри
  *       предметы возвращаются на место — подмена материала их не трогает.</li>
- *   <li><b>На вощёной меди.</b> Вода смывает воск: {@code waxed_copper_block}
- *       становится {@code copper_block}, ступень та же. Дальше такая медь
- *       стареет как обычная — воск именно для того и нужен, чтобы медь не
- *       старела, и снятый воск возвращает её в общий круг.</li>
- *   <li><b>На медном предмете, который можно поставить.</b> Шифт + ПКМ водой
- *       в воздух, когда в другой руке лежит медный предмет (блок, дверь, люк,
- *       сундук, решётку…): стареет сам предмет, и его можно поставить уже
- *       окисленным. Предмет в главной руке, бутылка в левой — тоже работает.</li>
+ *   <li><b>На вощёной меди.</b> Вода смывает воск и в том же поливе старит
+ *       медь на одну ступень: {@code waxed_copper_block} становится
+ *       {@code exposed_copper}, {@code waxed_weathered_cut_copper} —
+ *       {@code weathered_cut_copper}. Вощёная медь «догоняет» обычную за один
+ *       клик: снятие воска и ступень — одно действие.</li>
  * </ul>
  *
  * <h2>Чего здесь нет</h2>
@@ -60,8 +57,7 @@ final class CopperCare implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void oxidize(PlayerInteractEvent event) {
-        Action action = event.getAction();
-        if (action != Action.RIGHT_CLICK_BLOCK && action != Action.RIGHT_CLICK_AIR) return;
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         EquipmentSlot hand = event.getHand();
         if (hand == null) return;
         // Событие приходит на каждую руку: работает только та, в которой бутылка.
@@ -73,21 +69,12 @@ final class CopperCare implements Listener {
         Player player = event.getPlayer();
         if (!player.isSneaking()) return;
 
-        // Предмет меди в другой руке: стареет предмет, а не блок.
-        if (action == Action.RIGHT_CLICK_AIR) {
-            EquipmentSlot copper = copperItemHand(player, hand);
-            if (copper != null && age(player, copper, hand)) event.setCancelled(true);
-            return;
-        }
-
         Block block = event.getClickedBlock();
         if (block == null || isCustomBlock(block)) return;
 
-        // Сначала пробуем следующую ступень, а вощёной меди вода смывает воск.
+        // Один полив: ступень окисления +1, у вощёной меди вода ещё и снимает воск.
         String data = CopperWeathering.nextBlockData(block.getBlockData().getAsString());
-        if (data == null) data = CopperWeathering.unwaxBlockData(block.getBlockData().getAsString());
         Material stepped = CopperWeathering.next(block.getType());
-        if (stepped == null) stepped = CopperWeathering.unwax(block.getType());
         if (data == null && stepped == null) return; // Полностью окисленная медь: старить нечего.
 
         // Медный сундук и другие медные хранилища: подмена материала не должна
@@ -125,45 +112,6 @@ final class CopperCare implements Listener {
             WaterBottle.consume(player, hand);
         }
         event.setCancelled(true);
-    }
-
-    /** В какой руке медный предмет, который можно поставить, или null. */
-    private static EquipmentSlot copperItemHand(Player player, EquipmentSlot clicked) {
-        EquipmentSlot other = clicked == EquipmentSlot.OFF_HAND ? EquipmentSlot.HAND : EquipmentSlot.OFF_HAND;
-        ItemStack item = handItem(player, other);
-        if (item == null || item.getType().isAir()) return null;
-        return CopperWeathering.next(item.getType()) != null ? other : null;
-    }
-
-    private static ItemStack handItem(Player player, EquipmentSlot slot) {
-        return slot == EquipmentSlot.OFF_HAND
-                ? player.getInventory().getItemInOffHand()
-                : player.getInventory().getItemInMainHand();
-    }
-
-    /**
-     * Состарить медный предмет на одну ступень и потратить бутылку.
-     *
-     * @return получилось ли: у полностью окисленного предмета стареть некуда.
-     */
-    private static boolean age(Player player, EquipmentSlot itemHand, EquipmentSlot bottleHand) {
-        ItemStack item = handItem(player, itemHand);
-        if (item == null) return false;
-        Material stepped = CopperWeathering.next(item.getType());
-        if (stepped == null) return false;
-        item.setType(stepped);
-        // Предмет возвращаем в руку: setType меняет копию, а не сам слот.
-        if (itemHand == EquipmentSlot.OFF_HAND) player.getInventory().setItemInOffHand(item);
-        else player.getInventory().setItemInMainHand(item);
-        player.getWorld().spawnParticle(
-                Particle.WAX_OFF,
-                player.getLocation().add(0.0, 1.0, 0.0),
-                14, 0.3, 0.3, 0.3, 0.0
-        );
-        if (player.getGameMode() != GameMode.CREATIVE) {
-            WaterBottle.consume(player, bottleHand);
-        }
-        return true;
     }
 
     /** Инвентарь одной половины сундука: у двойного сундука getInventory даёт все 54 слотов. */

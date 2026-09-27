@@ -42,35 +42,36 @@ final class CopperWeatheringTest {
     }
 
     @Test
-    void воскЗащищает() {
-        assertNull(CopperWeathering.next("waxed_copper_block"));
-        assertNull(CopperWeathering.next("waxed_weathered_cut_copper"));
-        assertNull(CopperWeathering.next("waxed_exposed_copper_bulb"));
+    void воСнимаетсяИМедьСразуСтареет() {
+        // Один полив: воск уходит и ступень +1.
+        assertEquals("exposed_copper", CopperWeathering.next("waxed_copper_block"));
+        assertEquals("weathered_cut_copper", CopperWeathering.next("waxed_exposed_cut_copper"));
+        assertEquals("oxidized_copper_grate", CopperWeathering.next("waxed_weathered_copper_grate"));
+        assertEquals("weathered_copper", CopperWeathering.next("waxed_exposed_copper"));
+        assertNull(CopperWeathering.next("waxed_oxidized_copper_bulb"), "последняя ступень — тупик");
+        assertNull(CopperWeathering.next("waxed_"), "имя без меди не трогаем");
     }
 
     @Test
-    void воСнимаетсяВодой() {
-        assertEquals("copper_block", CopperWeathering.unwax("waxed_copper_block"));
-        assertEquals("exposed_cut_copper", CopperWeathering.unwax("waxed_exposed_cut_copper"));
-        assertEquals("weathered_copper_grate", CopperWeathering.unwax("waxed_weathered_copper_grate"));
-        assertEquals("oxidized_copper_door", CopperWeathering.unwax("WAXED_OXIDIZED_COPPER_DOOR"));
-        assertNull(CopperWeathering.unwax("copper_block"), "без воска снимать нечего");
-        assertNull(CopperWeathering.unwax("waxed_"));
-        assertNull(CopperWeathering.unwax(""));
-        assertNull(CopperWeathering.unwax((String) null));
-    }
-
-    @Test
-    void состояниеБлокаПослеСнятияВоска() {
-        // Ступень окисления та же, уходит только защита.
-        assertEquals("minecraft:copper_block", CopperWeathering.unwaxBlockData("minecraft:waxed_copper_block"));
-        assertEquals("minecraft:exposed_cut_copper_stairs[facing=east,half=bottom]",
-                CopperWeathering.unwaxBlockData("minecraft:waxed_exposed_cut_copper_stairs[facing=east,half=bottom]"));
+    void вощёныйБлокСтареетТемЖеПоливом() {
+        // Свойства блока уезжают в новую ступень вместе со снятым воском.
+        assertEquals("minecraft:exposed_copper",
+                CopperWeathering.nextBlockData("minecraft:waxed_copper_block"));
+        assertEquals("minecraft:weathered_cut_copper_stairs[facing=east,half=bottom]",
+                CopperWeathering.nextBlockData("minecraft:waxed_exposed_cut_copper_stairs[facing=east,half=bottom]"));
         assertEquals("minecraft:oxidized_copper_grate[waterlogged=true]",
-                CopperWeathering.unwaxBlockData("minecraft:waxed_oxidized_copper_grate[waterlogged=true]"));
-        assertNull(CopperWeathering.unwaxBlockData("minecraft:copper_block"), "без воска не трогаем");
-        assertNull(CopperWeathering.unwaxBlockData("minecraft:weathered_copper_grate"));
-        assertNull(CopperWeathering.unwaxBlockData(null));
+                CopperWeathering.nextBlockData("minecraft:waxed_weathered_copper_grate[waterlogged=true]"));
+        assertNull(CopperWeathering.nextBlockData("minecraft:waxed_oxidized_copper_grate"),
+                "окисленную медь водой не тронуть");
+    }
+
+    @Test
+    void триПоливаСтарятВощёнуюМедьДоКонца() {
+        // Вощёная медь догоняет обычную: три полива вместо четырёх.
+        String state = "minecraft:waxed_copper_block";
+        for (int i = 0; i < 3; i++) state = CopperWeathering.nextBlockData(state);
+        assertEquals("minecraft:oxidized_copper", state);
+        assertNull(CopperWeathering.nextBlockData(state));
     }
 
     @Test

@@ -16,15 +16,23 @@ import java.util.Locale;
  * регулярно, хватает приставки:
  *
  * <pre>
- *   copper_block        -> exposed_copper
- *   exposed_cut_copper  -> weathered_cut_copper
- *   weathered_copper_grate -> oxidized_copper_grate
- *   oxidized_copper_bulb   -> null  (дальше некуда)
- *   waxed_copper_block     -> null  (воск защищает, снять его — unwax)
+ *   copper_block            -> exposed_copper
+ *   exposed_cut_copper      -> weathered_cut_copper
+ *   weathered_copper_grate  -> oxidized_copper_grate
+ *   oxidized_copper_bulb    -> null  (дальше некуда)
+ *   waxed_copper_block      -> exposed_copper     (воск снимается и медь стареет)
+ *   waxed_oxidized_copper   -> null               (последняя ступень)
  * </pre>
  *
  * Приставка работает и на новых медных блоках, которых здесь нет в списке:
  * проверка — существует ли материал с получившимся именем.
+ *
+ * <h2>Воск</h2>
+ *
+ * Вода смывает воск и в том же поливе старит медь на одну ступень:
+ * {@code waxed_weathered_cut_copper} → {@code weathered_cut_copper} →
+ * {@code oxidized_cut_copper}. То есть вощёная медь «догоняет» обычную за один
+ * клик, а не за два: снятие воска и ступень — одно действие.
  *
  * <h2>Одно исключение</h2>
  *
@@ -52,14 +60,23 @@ final class CopperWeathering {
     private CopperWeathering() { }
 
     /**
-     * Следующая ступень окисления по имени материала (в нижнем регистре, как
-     * в {@code Material#name()}) или {@code null}, если окислять нечего:
-     * воск защищает, а полностью окисленная медь — последняя ступень.
+     * Что станет с медным именем после одного полива: ступень окисления +1, а у
+     * вощёной меди вода сначала смывает воск и тут же старит на ту же ступень.
+     * Имя ожидается в нижнем регистре, как в {@code Material#name()}.
+     *
+     * @return новое имя или {@code null}, если менять нечего: полностью
+     *         окисленная медь — последняя ступень, а у не-меди следующего
+     *         материала просто не существует.
      */
     static String next(String materialName) {
         if (materialName == null || materialName.isEmpty()) return null;
         String name = materialName.toLowerCase(Locale.ROOT);
-        if (name.startsWith(WAXED) || name.startsWith(OXIDIZED)) return null;
+        if (name.startsWith(WAXED)) {
+            // Воск снимается, и медь в том же поливе стареет на одну ступень.
+            name = name.substring(WAXED.length());
+            if (name.isEmpty()) return null;
+        }
+        if (name.startsWith(OXIDIZED)) return null;
         if (name.startsWith(EXPOSED)) return WEATHERED + name.substring(EXPOSED.length());
         if (name.startsWith(WEATHERED)) return OXIDIZED + name.substring(WEATHERED.length());
         // Единственное исключение: следующая ступень медного блока — exposed_copper,
@@ -80,34 +97,14 @@ final class CopperWeathering {
     }
 
     /**
-     * Снять воск: {@code waxed_copper_block} → {@code copper_block},
-     * {@code waxed_exposed_cut_copper} → {@code exposed_cut_copper}. Ступень
-     * окисления при этом не меняется — убирается только защита.
+     * Переписать состояние блока ({@code BlockData#getAsString()}) одним поливом:
+     * следующая ступень, а у вощёной меди — ещё и снятие воска. Все свойства
+     * сохраняются: {@code minecraft:cut_copper_stairs[facing=east]} →
+     * {@code minecraft:exposed_cut_copper_stairs[facing=east]},
+     * {@code minecraft:waxed_copper_grate[waterlogged=true]} →
+     * {@code minecraft:exposed_copper_grate[waterlogged=true]}.
      *
-     * @return имя без воска или {@code null}, если воска и не было.
-     */
-    static String unwax(String materialName) {
-        if (materialName == null || materialName.isEmpty()) return null;
-        String name = materialName.toLowerCase(Locale.ROOT);
-        if (!name.startsWith(WAXED)) return null;
-        String bare = name.substring(WAXED.length());
-        return bare.isEmpty() ? null : bare;
-    }
-
-    /** Снять воск с блока или {@code null}, если воска на нём нет. */
-    static Material unwax(Material material) {
-        if (material == null || material.isAir()) return null;
-        String name = unwax(material.name());
-        if (name == null) return null;
-        return Material.getMaterial(name.toUpperCase(Locale.ROOT));
-    }
-
-    /**
-     * Переписать состояние блока ({@code BlockData#getAsString()}) на следующую
-     * ступень, сохранив все свойства: {@code minecraft:cut_copper_stairs[
-     * facing=east]} → {@code minecraft:exposed_cut_copper_stairs[facing=east]}.
-     *
-     * @return новое состояние или {@code null}, если окислять нечего.
+     * @return новое состояние или {@code null}, если поливать нечего.
      */
     static String nextBlockData(String asString) {
         if (asString == null || asString.isEmpty()) return null;
@@ -120,25 +117,5 @@ final class CopperWeathering {
         String stepped = next(name);
         if (stepped == null) return null;
         return namespace + ":" + stepped + states;
-    }
-
-    /**
-     * Переписать состояние блока ({@code BlockData#getAsString()}), сняв воск и
-     * сохранив все свойства: {@code minecraft:waxed_exposed_cut_copper_stairs[
-     * facing=east]} → {@code minecraft:exposed_cut_copper_stairs[facing=east]}.
-     *
-     * @return новое состояние или {@code null}, если воска на блоке нет.
-     */
-    static String unwaxBlockData(String asString) {
-        if (asString == null || asString.isEmpty()) return null;
-        int bracket = asString.indexOf('[');
-        String id = bracket < 0 ? asString : asString.substring(0, bracket);
-        String states = bracket < 0 ? "" : asString.substring(bracket);
-        int colon = id.indexOf(':');
-        String namespace = colon < 0 ? "minecraft" : id.substring(0, colon);
-        String name = colon < 0 ? id : id.substring(colon + 1);
-        String bare = unwax(name);
-        if (bare == null) return null;
-        return namespace + ":" + bare + states;
     }
 }
