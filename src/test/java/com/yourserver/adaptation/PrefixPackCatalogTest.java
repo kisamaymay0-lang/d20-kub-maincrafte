@@ -1,124 +1,113 @@
 package com.yourserver.adaptation;
 
-import net.kyori.adventure.text.format.TextColor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
-/** Паки префиксов: файл пака, срок кейса и свои префиксы внутри. */
+/** Паки ссылаются на файлы из prefixes.yml — не создают копии префиксов. */
 final class PrefixPackCatalogTest {
 
     private static final String TEST_PACK = """
             name: 'Тестовый пак'
             time-hours: -1
             prefixes:
-              - name: 'Морозный'
-                file: pref1
-              - name: 'Аврора'
-                file: pref9
-                color: '#7FF0D2'
+              - pref1
+              - pref9
             """;
+
+    private static PrefixCatalog catalog() throws Exception {
+        return PrefixCatalog.load(Path.of("src/main/resources/prefixes.yml"));
+    }
 
     @Test
     void пакЧитаетсяИзСвоегоФайла(@TempDir Path folder) throws Exception {
         Files.writeString(folder.resolve("pref-pack1.yml"), TEST_PACK);
-
-        PrefixPackCatalog catalog = PrefixPackCatalog.load(folder);
-        assertEquals(1, catalog.size());
-
-        PrefixPackCatalog.Pack pack = catalog.get("pref-pack1");
+        PrefixPackCatalog packs = PrefixPackCatalog.load(folder, catalog());
+        PrefixPackCatalog.Pack pack = packs.get("pref-pack1");
         assertNotNull(pack);
         assertEquals("Тестовый пак", pack.name());
-        assertTrue(pack.infinite(), "time-hours: -1 — бессрочный пак");
+        assertTrue(pack.infinite());
         assertEquals(2, pack.size());
     }
 
     @Test
-    void префиксыПакаПолучаютСвоиIdИИконки(@TempDir Path folder) throws Exception {
+    void имяЦветИНомерИзОсновногоКонфигаБезДублей(@TempDir Path folder) throws Exception {
         Files.writeString(folder.resolve("pref-pack1.yml"), TEST_PACK);
-
-        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder).get("pref-pack1");
+        PrefixCatalog base = catalog();
+        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder, base).get("pref-pack1");
         assertNotNull(pack);
-        assertEquals("pref-pack1_pref1", pack.prefixes().get(0).id(), "id собирается из пака и иконки");
-        assertEquals("pref1", pack.prefixes().get(0).file());
+        assertEquals(base.get("pref1"), pack.prefixes().get(0));
+        assertEquals(base.get("pref9"), pack.prefixes().get(1));
+        assertEquals("pref1", pack.prefixes().get(0).id(), "собственного id пака больше нет");
         assertEquals("Морозный", pack.prefixes().get(0).name());
-        assertEquals("pref-pack1_pref9", pack.prefixes().get(1).id());
-        assertEquals(TextColor.fromHexString("#7FF0D2"), pack.prefixes().get(1).color());
+        assertEquals(base.size(), catalog().size(), "пак не добавляет префиксы в общий список");
     }
 
     @Test
-    void свойIdИзФайлаНеПереписывается(@TempDir Path folder) throws Exception {
-        Files.writeString(folder.resolve("mine.yml"), """
-                name: 'Свой пак'
+    void старыйФорматЧитаетсяБезИмёнИЦветов(@TempDir Path folder) throws Exception {
+        Files.writeString(folder.resolve("old.yml"), """
+                name: 'Старый'
                 time-hours: 5
                 prefixes:
-                  - id: my-prefix
-                    name: 'Свой'
+                  - id: old_pref3
+                    name: 'Другое имя'
                     file: pref3
+                    color: '#FFFFFF'
                 """);
-
-        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder).get("mine");
+        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder, catalog()).get("old");
         assertNotNull(pack);
-        assertEquals("my-prefix", pack.prefixes().get(0).id());
+        assertEquals("pref3", pack.prefixes().get(0).id());
+        assertEquals("Звездочёт", pack.prefixes().get(0).name());
         assertFalse(pack.infinite());
         assertEquals(5, pack.timeHours());
     }
 
     @Test
-    void пакБезПрефиксовПропускается(@TempDir Path folder) throws Exception {
-        Files.writeString(folder.resolve("empty.yml"), """
-                name: 'Пустой'
-                time-hours: 1
-                prefixes: []
+    void одинФайлНеПовторяетсяВПаке(@TempDir Path folder) throws Exception {
+        Files.writeString(folder.resolve("repeat.yml"), """
+                prefixes: [pref1, pref1, pref9]
                 """);
-        Files.writeString(folder.resolve("ok.yml"), TEST_PACK);
-
-        PrefixPackCatalog catalog = PrefixPackCatalog.load(folder);
-        assertEquals(1, catalog.size());
-        assertNull(catalog.get("empty"));
-        assertNotNull(catalog.get("ok"));
-    }
-
-    @Test
-    void записьБезИмениИлиИконкиПропускается(@TempDir Path folder) throws Exception {
-        Files.writeString(folder.resolve("half.yml"), """
-                name: 'Половина'
-                time-hours: 1
-                prefixes:
-                  - name: 'Без иконки'
-                  - file: pref4
-                  - name: 'Полный'
-                    file: pref5
-                """);
-
-        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder).get("half");
+        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder, catalog()).get("repeat");
         assertNotNull(pack);
-        assertEquals(1, pack.size(), "Из трёх записей годится одна");
-        assertEquals("Полный", pack.prefixes().get(0).name());
+        assertEquals(2, pack.size());
     }
 
     @Test
-    void пустойКаталогБезПапкиНеПадает() {
-        assertEquals(0, PrefixPackCatalog.load(null).size());
-        assertEquals(0, PrefixPackCatalog.load(Path.of("нет-такой-папки")).size());
+    void неизвестныйФайлДаётОшибкуАНеПустойКейс(@TempDir Path folder) throws Exception {
+        Files.writeString(folder.resolve("bad.yml"), """
+                prefixes: [pref1, typo]
+                """);
+        Exception error = assertThrows(IllegalArgumentException.class, () -> PrefixPackCatalog.load(folder, catalog()));
+        assertTrue(error.getMessage().contains("typo"));
+    }
+
+    @Test
+    void пакБезПрефиксовПропускается(@TempDir Path folder) throws Exception {
+        Files.writeString(folder.resolve("empty.yml"), "prefixes: []\n");
+        Files.writeString(folder.resolve("ok.yml"), TEST_PACK);
+        PrefixPackCatalog packs = PrefixPackCatalog.load(folder, catalog());
+        assertEquals(1, packs.size());
+        assertNull(packs.get("empty"));
+        assertNotNull(packs.get("ok"));
+    }
+
+    @Test
+    void пустойКаталогБезПапкиНеПадает() throws Exception {
+        assertEquals(0, PrefixPackCatalog.load(null, catalog()).size());
+        assertEquals(0, PrefixPackCatalog.load(Path.of("нет-такой-папки"), catalog()).size());
     }
 
     @Test
     void пакНаходитсяПоИмени(@TempDir Path folder) throws Exception {
         Files.writeString(folder.resolve("pref-pack1.yml"), TEST_PACK);
-        PrefixPackCatalog catalog = PrefixPackCatalog.load(folder);
-
-        assertEquals("pref-pack1", catalog.resolve("pref-pack1").id());
-        assertEquals("pref-pack1", catalog.resolve("Тестовый пак").id());
-        assertNull(catalog.resolve("нет такого"));
+        PrefixPackCatalog packs = PrefixPackCatalog.load(folder, catalog());
+        assertEquals("pref-pack1", packs.resolve("pref-pack1").id());
+        assertEquals("pref-pack1", packs.resolve("Тестовый пак").id());
+        assertNull(packs.resolve("нет такого"));
     }
 
     @Test
@@ -133,7 +122,7 @@ final class PrefixPackCatalogTest {
     void срокСчитаетсяВЧасах() {
         long now = 1_700_000_000_000L;
         assertEquals(now + 24 * 3_600_000L, PrefixPackCatalog.expiresAt(now, 24));
-        assertEquals(now, PrefixPackCatalog.expiresAt(now, 0), "Ноль часов — сгорает сразу");
+        assertEquals(now, PrefixPackCatalog.expiresAt(now, 0));
     }
 
     @Test
@@ -148,24 +137,17 @@ final class PrefixPackCatalogTest {
 
     @Test
     void shippedТестовыйПакРаскладывается() throws Exception {
-        // Тот самый файл, что уезжает в jar и копируется игроку при первом запуске.
         Path shipped = Path.of("src/main/resources/prefixpacks/pref-pack1.yml");
-        assertTrue(Files.exists(shipped), "Тестовый пак должен лежать в ресурсах плагина");
-        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(shipped.getParent()).get("pref-pack1");
+        assertTrue(Files.exists(shipped));
+        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(shipped.getParent(), catalog()).get("pref-pack1");
         assertNotNull(pack);
         assertEquals("Тестовый пак", pack.name());
         assertTrue(pack.infinite());
-        assertFalse(pack.prefixes().isEmpty());
-        for (PrefixCatalog.Prefix prefix : pack.prefixes()) {
-            assertFalse(prefix.name().isEmpty());
-            assertFalse(prefix.file().isEmpty());
-        }
+        assertEquals(4, pack.size());
     }
 
     @Test
     void idПриводитсяКБезопасномуВиду() {
-        // Дефис и точка допустимы, пробелы и прочее становятся подчёркиванием,
-        // а цепочки подчёркиваний сжимаются до одного.
         assertEquals("pref-pack1_pref1", PrefixPackCatalog.sanitize("Pref-Pack1 pref1"));
         assertEquals("pref_pack1_pref1", PrefixPackCatalog.sanitize("Pref Pack1 pref1"));
         assertEquals("a_b_c", PrefixPackCatalog.sanitize("a__b  c"));

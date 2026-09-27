@@ -107,6 +107,15 @@ final class ProfileData {
         revision++;
         return true;
     }
+    /** Старые выигрыши из пака (<пак>_<file>) переводим в общий id prefixes.yml. */
+    boolean migratePrefix(String oldId, String newId) {
+        if (oldId == null || newId == null || oldId.equals(newId)
+                || !ownedPrefixes.remove(oldId)) return false;
+        ownedPrefixes.add(newId);
+        if (oldId.equals(equippedPrefix)) equippedPrefix = newId;
+        revision++;
+        return true;
+    }
     /** Забрать префикс; надетый префикс при этом снимается. */
     boolean revokePrefix(String id) {
         if (id == null || !ownedPrefixes.remove(id)) return false;

@@ -139,7 +139,7 @@ final class ProfileItems {
         List<Component> lore = new ArrayList<>();
         lore.add(text(cases > 0 ? countText(cases) : "Нет кейсов этого пака",
                 cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED));
-        lore.add(text(cases > 0 ? "Нажмите, чтобы открыть" : "Кейсы выдаёт администратор",
+        lore.add(text("Нажмите, чтобы посмотреть содержимое",
                 NamedTextColor.DARK_GRAY));
         lore.add(Component.empty());
         lore.add(text("Внутри " + pack.size() + " " + ProfileItems.plural(pack.size(), "префикс", "префикса", "префиксов"),
@@ -159,6 +159,29 @@ final class ProfileItems {
         meta.setEnchantmentGlintOverride(cases > 0);
         item.setItemMeta(meta);
         return item;
+    }
+
+    /** Кнопка открытия кейса выбранного пака — отдельно от сундучка в списке. */
+    ItemStack packOpen(PrefixPackCatalog.Pack pack, int cases, long nearestExpiry, long now) {
+        List<Component> lore = new ArrayList<>();
+        lore.add(text(cases > 0 ? countText(cases) : "Нет кейсов этого пака",
+                cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED));
+        lore.add(text(cases > 0 ? "Нажмите, чтобы крутить кейс" : "Кейсы выдаёт администратор",
+                NamedTextColor.DARK_GRAY));
+        if (cases > 0) lore.add(text(nearestExpiry == Long.MAX_VALUE ? "Бессрочный"
+                : "Сгорит через " + PrefixPackCatalog.leftText(nearestExpiry, now), NamedTextColor.DARK_GRAY));
+        ItemStack item = named(Material.CHEST, medals.title("Крутить кейс «" + pack.name() + "»",
+                ProfileMedal.Metal.GOLD), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** Кнопка отмены просмотра содержимого — вернуться к списку паков. */
+    ItemStack packBack() {
+        return named(Material.BARRIER, bold("Отмена", NamedTextColor.RED), List.of(
+                text("Вернуться к пакам префиксов", NamedTextColor.GRAY)));
     }
 
     private static String countText(int cases) {

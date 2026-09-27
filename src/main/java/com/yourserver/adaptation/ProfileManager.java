@@ -56,7 +56,7 @@ import java.util.function.ToLongFunction;
 
 /** Профиль/коллекция/размещение. Доступ проверяется по UUID и серверному holder, не по названию предмета. */
 public final class ProfileManager implements Listener, CommandExecutor, TabCompleter {
-    private enum Screen { PROFILE, COLLECTION, PLACE, PREFIX, PREFIX_CASE, CUSTOMIZE, COSMETIC, COSMETIC_CASE, PACKS }
+    private enum Screen { PROFILE, COLLECTION, PLACE, PREFIX, PREFIX_CASE, CUSTOMIZE, COSMETIC, COSMETIC_CASE, PACKS, PACK_CONTENTS }
 
     /** Место кнопок в меню «Настроить косметику» (второй ряд инвентаря). */
     private static final int CUSTOMIZE_PREFIX_SLOT = 11;
@@ -66,6 +66,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     /** Средний ряд меню паков: на нём стоят сундучки (до девяти паков). */
     private static final int PACK_ROW_START = 9;
     private static final int PACK_ROW_SIZE = 9;
+    /** Кнопки просмотра пака: вскрытие кейса и возврат к списку паков. */
+    private static final int PACK_OPEN_SLOT = 13;
+    private static final int PACK_BACK_SLOT = 9;
 
     /** Сколько префиксов помещается в кейс и как они «бьются».
      *  Моменты «поломок» (тики от открытия, 20 тиков = 1 с): первая через 2 с,
@@ -106,6 +109,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         final UUID owner;
         final Screen screen;
         final UUID chosen;
+        /** Пак, чьё содержимое показываем. */
+        final String packId;
         final Map<Integer, UUID> medalsBySlot = new HashMap<>();
         final Map<Integer, String> prefixesBySlot = new HashMap<>();
         final Map<Integer, String> cosmeticsBySlot = new HashMap<>();
@@ -113,8 +118,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         final Map<Integer, String> packsBySlot = new HashMap<>();
         int page;
         Inventory inventory;
-        Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen) {
-            this.viewer = viewer; this.owner = owner; this.screen = screen; this.page = page; this.chosen = chosen;
+        Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen, String packId) {
+            this.viewer = viewer; this.owner = owner; this.screen = screen;
+            this.page = page; this.chosen = chosen; this.packId = packId;
         }
         @Override public Inventory getInventory() { return inventory; }
     }
@@ -174,11 +180,15 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             plugin.getLogger().info("Создан файл префиксов: " + prefixConfig + " (правьте его и применяйте через /profile prefix reload)");
         }
         packFolder = plugin.getDataFolder().toPath().resolve("prefixpacks");
-        packs = loadPacks();
         PrefixCatalog loadedPrefixes = PrefixCatalog.defaults();
-        try { loadedPrefixes = PrefixCatalog.load(prefixConfig, packs); }
+        try { loadedPrefixes = PrefixCatalog.load(prefixConfig); }
         catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка prefixes.yml; используются стандартные префиксы", ex); }
         prefixes = loadedPrefixes;
+        try { packs = loadPacks(prefixes); }
+        catch (Exception ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка паков префиксов; паки не используются", ex);
+            packs = PrefixPackCatalog.empty();
+        }
         plugin.getLogger().info("Префиксы профиля: " + prefixes.size() + " шт., файл " + prefixConfig
                 + ", паков " + packs.size());
         cosmeticConfig = plugin.getDataFolder().toPath().resolve("cosmetics.yml");
@@ -226,20 +236,37 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
      * первом запуске, и в неё кладётся тестовый пак pref-pack1 — по нему видно,
      * как писать свои.
      */
-    private PrefixPackCatalog loadPacks() {
-        try {
-            if (!Files.isDirectory(packFolder)) {
-                Files.createDirectories(packFolder);
-                plugin.saveResource("prefixpacks/pref-pack1.yml", false);
-                plugin.getLogger().info("Создан тестовый пак префиксов: " + packFolder.resolve("pref-pack1.yml"));
-            }
-            PrefixPackCatalog loaded = PrefixPackCatalog.load(packFolder);
-            plugin.getLogger().info("Паки префиксов: " + loaded.size() + " шт., папка " + packFolder);
-            return loaded;
-        } catch (Exception ex) {
-            plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка паков префиксов; паки не используются", ex);
-            return PrefixPackCatalog.load(null);
+    private PrefixPackCatalog loadPacks(PrefixCatalog catalog) throws Exception {
+        if (!Files.isDirectory(packFolder)) {
+            Files.createDirectories(packFolder);
+            plugin.saveResource("prefixpacks/pref-pack1.yml", false);
+            plugin.getLogger().info("Создан тестовый пак префиксов: " + packFolder.resolve("pref-pack1.yml"));
         }
+        PrefixPackCatalog loaded = PrefixPackCatalog.load(packFolder, catalog);
+        plugin.getLogger().info("Паки префиксов: " + loaded.size() + " шт., папка " + packFolder);
+        return loaded;
+    }
+
+    /** /profile prefix reload и /f8 reload работают одинаково, проверяя оба файла до применения. */
+    public String reloadPrefixes() throws Exception {
+        PrefixCatalog next = PrefixCatalog.load(prefixConfig);
+        PrefixPackCatalog nextPacks = loadPacks(next);
+        prefixes = next;
+        packs = nextPacks;
+        cards.prefixes(next);
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            try {
+                ProfileData data = profile(player);
+                String equipped = data.equippedPrefix();
+                if (equipped != null && prefixes.get(equipped) == null && data.equipPrefix(null)) savePrefix(data);
+                applyPrefixName(player, data);
+            } catch (RuntimeException ex) {
+                plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применён префикс после reload: " + player.getName(), ex);
+            }
+        }
+        cards.refresh();
+        for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
+        return "Префиксы: " + prefixes.size() + " шт., паки: " + packs.size() + " шт. (prefixes.yml, prefixpacks/*.yml)";
     }
 
     private ProfileData profile(Player player) { return profile(player.getUniqueId(), player.getName()); }
@@ -247,6 +274,15 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private ProfileData profile(UUID owner, String name) {
         if (subjects != null && subjects.preview(owner)) return subjects.profile(owner);
         ProfileData data = storage.get(owner, name);
+        // 10.31 создавал отдельные id <пак>_<file>. Переводим их на общий id
+        // prefixes.yml, иначе ранее выигранные префиксы исчезнут после обновления.
+        boolean migrated = false;
+        for (PrefixPackCatalog.Pack pack : packs.packs()) {
+            for (PrefixCatalog.Prefix prefix : pack.prefixes()) {
+                migrated |= data.migratePrefix(PrefixPackCatalog.sanitize(pack.id() + "_" + prefix.file()), prefix.id());
+            }
+        }
+        if (migrated) savePrefix(data);
         Player online = Bukkit.getPlayer(owner);
         if (online != null && data.rename(online.getName())) storage.changed(owner);
         long earnedAt = constellationMilestone.applyAsLong(owner);
@@ -626,7 +662,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 winner = run.cosmetic
                         ? cosmetics.list().stream().map(CosmeticCatalog.Cosmetic::id)
                                 .filter(candidate -> !data.ownsCosmetic(candidate)).findFirst().orElse(null)
-                        : prefixes.list().stream().map(PrefixCatalog.Prefix::id)
+                        : (run.pack != null && packs.get(run.pack) != null
+                                ? packs.get(run.pack).prefixes() : prefixes.list()).stream()
+                                .map(PrefixCatalog.Prefix::id)
                                 .filter(candidate -> !data.ownsPrefix(candidate)).findFirst().orElse(null);
                 if (!addWon(run.cosmetic, data, winner)) {
                     plugin.getLogger().warning("Кейс " + (run.cosmetic ? "косметики " : "префиксов ")
@@ -684,13 +722,17 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen) {
+        open(viewer, owner, screen, page, chosen, null);
+    }
+
+    private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen, String packId) {
         if (stopping) return;
         if (screen != Screen.PROFILE && !viewer.getUniqueId().equals(owner)) return;
         editing.remove(viewer.getUniqueId());
         try {
             ProfileData data = profile(owner, owner.toString());
             if (screen == Screen.PLACE && !data.medals().containsKey(chosen)) return;
-            Menu menu = new Menu(viewer.getUniqueId(), owner, screen, page, chosen);
+            Menu menu = new Menu(viewer.getUniqueId(), owner, screen, page, chosen, packId);
             String title = switch (screen) {
                 case PROFILE -> "Профиль • " + data.name();
                 case COLLECTION -> "Выбрать медаль";
@@ -701,6 +743,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 case COSMETIC -> "Выбрать косметику";
                 case COSMETIC_CASE -> "Вскрытие кейса косметики";
                 case PACKS -> "Префиксы";
+                case PACK_CONTENTS -> "Содержимое пака";
             };
             menu.inventory = Bukkit.createInventory(menu, 27, Component.text(title, NamedTextColor.DARK_GRAY));
             populate(menu, data);
@@ -771,6 +814,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             populatePacks(menu, data);
             return;
         }
+        if (menu.screen == Screen.PACK_CONTENTS) {
+            populatePackContents(menu, data);
+            return;
+        }
         if (menu.screen == Screen.PREFIX) {
             List<PrefixCatalog.Prefix> all = prefixes.list();
             int pages = Math.max(1, (all.size() + 17) / 18);
@@ -834,6 +881,26 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                         prefix.id().equals(data.equippedPrefix())));
             }
         }
+    }
+
+    /** Содержимое выбранного пака сверху и снизу; в центре — открыть и назад. */
+    private void populatePackContents(Menu menu, ProfileData data) {
+        PrefixPackCatalog.Pack pack = packs.get(menu.packId);
+        if (pack == null) return; // пакет удалён с диска и выполнен reload
+        List<PrefixCatalog.Prefix> entries = pack.prefixes();
+        int pages = Math.max(1, (entries.size() + 17) / 18);
+        menu.page = Math.clamp(menu.page, 0, pages - 1);
+        for (int i = 0; i < 18 && menu.page * 18 + i < entries.size(); i++) {
+            PrefixCatalog.Prefix prefix = entries.get(menu.page * 18 + i);
+            int slot = i < 9 ? i : i + 9; // ряды 0 и 2, не середина
+            menu.inventory.setItem(slot, items.prefixEntry(prefix, data.ownsPrefix(prefix.id()),
+                    prefix.id().equals(data.equippedPrefix())));
+        }
+        if (menu.page > 0) menu.inventory.setItem(10, items.page(false, menu.page, pages));
+        if (menu.page + 1 < pages) menu.inventory.setItem(16, items.page(true, menu.page, pages));
+        menu.inventory.setItem(PACK_BACK_SLOT, items.packBack());
+        menu.inventory.setItem(PACK_OPEN_SLOT, items.packOpen(pack, data.packCases(pack.id()),
+                data.nearestPackExpiry(pack.id()), System.currentTimeMillis()));
     }
 
     private void populateDetails(Menu menu, ProfileData data) {
@@ -958,7 +1025,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             String packId = menu.packsBySlot.get(slot);
             if (packId != null) {
                 PrefixPackCatalog.Pack pack = packs.get(packId);
-                if (pack != null) { clickSound(player); openPackCase(player, data, pack); }
+                if (pack != null) { clickSound(player); open(player, data.owner, Screen.PACK_CONTENTS, 0, null, pack.id()); }
                 return;
             }
             String picked = menu.prefixesBySlot.get(slot);
@@ -971,6 +1038,30 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             }
             if (shift && picked.equals(data.equippedPrefix())) unequipPrefix(player, data);
             else if (!picked.equals(data.equippedPrefix())) equipPrefix(player, data, picked);
+            else clickSound(player);
+            return;
+        }
+        if (menu.screen == Screen.PACK_CONTENTS) {
+            PrefixPackCatalog.Pack pack = packs.get(menu.packId);
+            if (slot == PACK_BACK_SLOT || pack == null) {
+                clickSound(player); open(player, data.owner, Screen.PACKS, 0, null); return;
+            }
+            if (slot == PACK_OPEN_SLOT) { clickSound(player); openPackCase(player, data, pack); return; }
+            if (slot == 10 && menu.page > 0) {
+                clickSound(player); open(player, data.owner, Screen.PACK_CONTENTS, menu.page - 1, null, pack.id()); return;
+            }
+            if (slot == 16 && (menu.page + 1) * 18 < pack.size()) {
+                clickSound(player); open(player, data.owner, Screen.PACK_CONTENTS, menu.page + 1, null, pack.id()); return;
+            }
+            int index = slot >= 0 && slot < 9 ? slot : slot >= 18 && slot < 27 ? slot - 9 : -1;
+            index += menu.page * 18;
+            if (index < 0 || index >= pack.size()) return;
+            String id = pack.prefixes().get(index).id();
+            if (!data.ownsPrefix(id)) {
+                player.sendMessage(ProfileItems.text("У вас нету этого префикса!", NamedTextColor.RED)); return;
+            }
+            if (shift && id.equals(data.equippedPrefix())) unequipPrefix(player, data);
+            else if (!id.equals(data.equippedPrefix())) equipPrefix(player, data, id);
             else clickSound(player);
             return;
         }
@@ -1437,22 +1528,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             return;
         }
         if (args.length == 2 && args[1].equalsIgnoreCase("reload")) {
-            PrefixPackCatalog nextPacks = loadPacks();
-            // Сначала проверяем файлы: состояние не меняется при ошибке.
-            PrefixCatalog next = PrefixCatalog.load(prefixConfig, nextPacks);
-            prefixes = next;
-            packs = nextPacks;
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                try {
-                    ProfileData data = profile(player);
-                    // Надетый префикс исчез из файла: снимаем его, чтобы ник не «завис» без префикса.
-                    String equipped = data.equippedPrefix();
-                    if (equipped != null && prefixes.get(equipped) == null && data.equipPrefix(null)) savePrefix(data);
-                    applyPrefixName(player, data);
-                } catch (RuntimeException ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применён префикс после reload: " + player.getName(), ex); }
-            }
-            for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
-            sender.sendMessage(ProfileItems.text("Префиксы перезагружены: " + prefixes.size() + " (№1–" + prefixes.size() + "). Файл: " + prefixConfig, NamedTextColor.GREEN));
+            String summary = reloadPrefixes();
+            sender.sendMessage(ProfileItems.text("Префиксы перезагружены. " + summary, NamedTextColor.GREEN));
             return;
         }
         if (args.length < 3) throw new IllegalArgumentException("Использование: /profile prefix give|take|list <игрок или UUID> [номер|all]");

@@ -10,7 +10,7 @@ final class CopperWeatheringTest {
 
     @Test
     void обычнаяМедьСтановитсяПотускневшей() {
-        assertEquals("exposed_copper_block", CopperWeathering.next("copper_block"));
+        assertEquals("exposed_copper", CopperWeathering.next("copper_block"));
         assertEquals("exposed_cut_copper", CopperWeathering.next("cut_copper"));
         assertEquals("exposed_copper_grate", CopperWeathering.next("copper_grate"));
         assertEquals("exposed_copper_bulb", CopperWeathering.next("copper_bulb"));
@@ -18,22 +18,23 @@ final class CopperWeatheringTest {
 
     @Test
     void потускневшаяИдётДальшеПоКругуСтупеней() {
-        assertEquals("weathered_copper_block", CopperWeathering.next("exposed_copper_block"));
-        assertEquals("oxidized_copper_block", CopperWeathering.next("weathered_copper_block"));
-        assertNull(CopperWeathering.next("oxidized_copper_block"), "Последняя ступень — тупик");
+        assertEquals("weathered_copper", CopperWeathering.next("exposed_copper"));
+        assertEquals("oxidized_copper", CopperWeathering.next("weathered_copper"));
+        assertNull(CopperWeathering.next("oxidized_copper"), "Последняя ступень — тупик");
     }
 
     @Test
-    void воскЗащищает() {
-        assertNull(CopperWeathering.next("waxed_copper_block"));
-        assertNull(CopperWeathering.next("waxed_weathered_cut_copper"));
-        assertNull(CopperWeathering.next("waxed_exposed_copper_bulb"));
+    void водаСнимаетВоск() {
+        assertEquals("copper_block", CopperWeathering.next("waxed_copper_block"));
+        assertEquals("weathered_cut_copper", CopperWeathering.next("waxed_weathered_cut_copper"));
+        assertEquals("exposed_copper_bulb", CopperWeathering.next("waxed_exposed_copper_bulb"));
+        assertEquals("oxidized_copper", CopperWeathering.next("waxed_oxidized_copper"));
     }
 
     @Test
     void регистрНеВажен() {
-        assertEquals("exposed_copper_block", CopperWeathering.next("COPPER_BLOCK"));
-        assertEquals("weathered_copper_block", CopperWeathering.next("Exposed_Copper_Block"));
+        assertEquals("exposed_copper", CopperWeathering.next("COPPER_BLOCK"));
+        assertEquals("weathered_copper", CopperWeathering.next("Exposed_Copper"));
     }
 
     @Test
@@ -53,8 +54,10 @@ final class CopperWeatheringTest {
 
     @Test
     void состояниеБезСвойствТожеРаботает() {
-        assertEquals("minecraft:exposed_copper_block", CopperWeathering.nextBlockData("minecraft:copper_block"));
-        assertNull(CopperWeathering.nextBlockData("minecraft:oxidized_copper_block"));
+        assertEquals("minecraft:exposed_copper", CopperWeathering.nextBlockData("minecraft:copper_block"));
+        assertEquals("minecraft:copper_block", CopperWeathering.nextBlockData("minecraft:waxed_copper_block"));
+        assertEquals("minecraft:exposed_copper", CopperWeathering.nextBlockData("minecraft:waxed_exposed_copper"));
+        assertNull(CopperWeathering.nextBlockData("minecraft:oxidized_copper"));
         assertNull(CopperWeathering.nextBlockData(null));
     }
 
@@ -67,8 +70,8 @@ final class CopperWeatheringTest {
             state = CopperWeathering.nextBlockData(state);
             path.append(" -> ").append(state);
         }
-        assertEquals("minecraft:copper_block -> minecraft:exposed_copper_block"
-                        + " -> minecraft:weathered_copper_block -> minecraft:oxidized_copper_block",
+        assertEquals("minecraft:copper_block -> minecraft:exposed_copper"
+                        + " -> minecraft:weathered_copper -> minecraft:oxidized_copper",
                 path.toString());
         assertNull(CopperWeathering.nextBlockData(state), "Пятый шаг ничего не меняет");
     }

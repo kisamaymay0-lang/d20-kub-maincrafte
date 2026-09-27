@@ -5,26 +5,40 @@ import org.bukkit.Material;
 import java.util.Locale;
 
 /**
- * Окисление меди на одну ступень: вода «старит» медный блок.
+ * Вода меняет медный блок на одну ступень: старит или снимает воск.
  *
  * <h2>Что здесь считается</h2>
  *
  * В ванили у меди четыре ступени: обычная → {@code exposed} → {@code weathered}
  * → {@code oxidized}. Ступень — это не состояние блока, а отдельный материал,
- * поэтому «окислить» значит подменить материал, сохранив всё остальное:
+ * поэтому «изменить ступень» значит подменить материал, сохранив всё остальное:
  * поворот лестницы, форму плиты, открытость двери. Имена материалов устроены
  * регулярно, хватает приставки:
  *
  * <pre>
- *   copper_block        -> exposed_copper_block
- *   exposed_cut_copper  -> weathered_cut_copper
- *   weathered_copper_grate -> oxidized_copper_grate
- *   oxidized_copper_bulb   -> null  (дальше некуда)
- *   waxed_copper_block     -> null  (воск защищает)
+ *   copper_block            -> exposed_copper
+ *   exposed_cut_copper      -> weathered_cut_copper
+ *   weathered_copper_grate  -> oxidized_copper_grate
+ *   waxed_weathered_copper  -> weathered_copper     (воск снимается)
+ *   oxidized_copper_bulb    -> null                 (дальше некуда)
  * </pre>
  *
  * Приставка работает и на новых медных блоках, которых здесь нет в списке:
  * проверка — существует ли материал с получившимся именем.
+ *
+ * <h2>Воск</h2>
+ *
+ * Вода снимает воск, а не проходит сквозь него: {@code waxed_* → *}. Так
+ * поливать можно <b>любой</b> медный блок, включая вощёный, — иначе вощёная
+ * медь была бы единственной, на которую вода не действует. Ступень при снятии
+ * воска не меняется: сразу после этого блок можно полить ещё раз и состарить.
+ *
+ * <h2>Медная семья</h2>
+ *
+ * Медь — всё, в имени чего есть {@code copper} (блоки, срезы, ступени, плиты,
+ * решётки, лампы, двери и сундуки). Руда и самородки медью не считаются: у
+ * них нет ступеней, материал следующей ступени не существует, и проверка
+ * это отсекает сама.
  *
  * <h2>Почему не «тик окисления»</h2>
  *
@@ -40,27 +54,42 @@ final class CopperWeathering {
 
     private CopperWeathering() { }
 
+    /** Медный ли это материал: окисляется и вощится. */
+    static boolean isCopper(Material material) {
+        if (material == null || material.isAir()) return false;
+        String name = material.name().toLowerCase(Locale.ROOT);
+        return name.contains("copper");
+    }
+
+    /** Навощён ли блок: {@code waxed_copper_block}, {@code waxed_cut_copper_stairs}. */
+    static boolean isWaxed(Material material) {
+        return material != null && material.name().toLowerCase(Locale.ROOT).startsWith(WAXED);
+    }
+
     /**
-     * Следующая ступень окисления по имени материала (в нижнем регистре, как
-     * в {@code Material#name()}) или {@code null}, если окислять нечего:
-     * воск защищает, а полностью окисленная медь — последняя ступень.
+     * Следующее имя материала (в нижнем регистре, как в {@code Material#name()})
+     * или {@code null}, если менять нечего: полностью окисленная медь —
+     * последняя ступень, а у не-меди следующей ступени просто не существует.
+     *
+     * Вощёная медь теряет воск и остаётся на той же ступени.
      */
     static String next(String materialName) {
         if (materialName == null || materialName.isEmpty()) return null;
         String name = materialName.toLowerCase(Locale.ROOT);
-        if (name.startsWith(WAXED) || name.startsWith(OXIDIZED)) return null;
+        if (name.startsWith(WAXED)) return name.substring(WAXED.length());
+        if (name.startsWith(OXIDIZED)) return null;
         if (name.startsWith(EXPOSED)) return WEATHERED + name.substring(EXPOSED.length());
         if (name.startsWith(WEATHERED)) return OXIDIZED + name.substring(WEATHERED.length());
-        return EXPOSED + name;
+        return EXPOSED + (name.equals("copper_block") ? "copper" : name);
     }
 
     /**
-     * Следующая ступень окисления или {@code null}, если её нет либо такого
-     * материала не существует (медь ли это — решает существование следующего
-     * имени: {@code exposed_stone} не существует, значит камень не трогаем).
+     * Следующая ступень окисления либо медь без воска; {@code null}, если это
+     * не медь или следующего материала не существует ({@code exposed_stone} не
+     * существует — значит камень не трогаем).
      */
     static Material next(Material material) {
-        if (material == null || material.isAir()) return null;
+        if (!isCopper(material)) return null;
         String name = next(material.name());
         if (name == null) return null;
         return Material.getMaterial(name.toUpperCase(Locale.ROOT));
@@ -69,9 +98,11 @@ final class CopperWeathering {
     /**
      * Переписать состояние блока ({@code BlockData#getAsString()}) на следующую
      * ступень, сохранив все свойства: {@code minecraft:cut_copper_stairs[
-     * facing=east]} → {@code minecraft:exposed_cut_copper_stairs[facing=east]}.
+     * facing=east]} → {@code minecraft:exposed_cut_copper_stairs[facing=east]},
+     * {@code minecraft:waxed_copper_grate[waterlogged=true]} →
+     * {@code minecraft:copper_grate[waterlogged=true]}.
      *
-     * @return новое состояние или {@code null}, если окислять нечего.
+     * @return новое состояние или {@code null}, если менять нечего.
      */
     static String nextBlockData(String asString) {
         if (asString == null || asString.isEmpty()) return null;

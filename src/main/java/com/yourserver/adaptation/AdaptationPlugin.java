@@ -124,6 +124,7 @@ public void onEnable() {
 
     // Уход за блоками руками: вода по меди и кораллам, блок света спрятанной
     // рамкой — всё это шифт + ПКМ, отдельными слушателями.
+    getServer().getPluginManager().registerEvents(new WaterBottleUse(), this);
     getServer().getPluginManager().registerEvents(new CopperCare(), this);
 
     coralCare = new CoralCare(this, dataWriter);
@@ -259,7 +260,16 @@ public void onEnable() {
         if (winterFishing != null) {
             winterFishing.reloadSettings();
         }
-        return specialCatch == null ? "" : specialCatch.describe();
+        String prefixSummary = "";
+        if (profileManager != null) {
+            try { prefixSummary = profileManager.reloadPrefixes(); }
+            catch (Exception ex) {
+                getLogger().log(java.util.logging.Level.WARNING, "Ошибка перезагрузки prefixes.yml или паков", ex);
+                prefixSummary = "§cПрефиксы и паки НЕ обновлены: " + ex.getMessage();
+            }
+        }
+        String summary = specialCatch == null ? "" : specialCatch.describe();
+        return summary + (summary.isBlank() ? "" : "\n") + prefixSummary;
     }
 
     public void breakAdaptation(Player player) {

@@ -17,6 +17,22 @@ class ProfileDataTest {
     }
 
     @Test
+    void packPrefixMigrationPreservesOwnershipAndEquipment() {
+        ProfileData data = new ProfileData(owner, "Player");
+        assertTrue(data.addPrefix("pref-pack1_pref1"));
+        assertTrue(data.equipPrefix("pref-pack1_pref1"));
+        assertTrue(data.migratePrefix("pref-pack1_pref1", "pref1"));
+        assertFalse(data.ownsPrefix("pref-pack1_pref1"));
+        assertTrue(data.ownsPrefix("pref1"));
+        assertEquals("pref1", data.equippedPrefix());
+        assertFalse(data.migratePrefix("pref-pack1_pref1", "pref1"));
+        assertTrue(data.addPrefix("pref-pack1_pref9"));
+        assertTrue(data.addPrefix("pref9"));
+        assertTrue(data.migratePrefix("pref-pack1_pref9", "pref9"));
+        assertEquals(2, data.ownedPrefixes().size());
+    }
+
+    @Test
     void defaultsAndOwnerOnlyDescription() {
         ProfileData data = new ProfileData(owner, "Player");
         assertEquals("Нет описания.", data.displayedDescription());
