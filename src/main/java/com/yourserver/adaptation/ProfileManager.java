@@ -893,7 +893,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         for (int i = 0; i < 18 && menu.page * 18 + i < entries.size(); i++) {
             PrefixCatalog.Prefix prefix = entries.get(menu.page * 18 + i);
             int slot = i < 9 ? i : i + 9; // ряды 0 и 2, не середина
-            menu.inventory.setItem(slot, items.prefixEntry(prefix, data.ownsPrefix(prefix.id()),
+            menu.inventory.setItem(slot, items.packPrefixEntry(prefix, data.ownsPrefix(prefix.id()),
                     prefix.id().equals(data.equippedPrefix())));
         }
         if (menu.page > 0) menu.inventory.setItem(10, items.page(false, menu.page, pages));

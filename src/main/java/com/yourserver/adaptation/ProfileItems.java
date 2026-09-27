@@ -119,6 +119,14 @@ final class ProfileItems {
         return model(item, prefix.file());
     }
 
+    /** Содержимое пака: имя видно прямо на иконке, даже если префикса ещё нет. */
+    ItemStack packPrefixEntry(PrefixCatalog.Prefix prefix, boolean owned, boolean equipped) {
+        if (owned) return prefixEntry(prefix, true, equipped);
+        return model(named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), List.of(
+                text("№" + prefix.number() + " · ещё не получен", NamedTextColor.RED),
+                text("Можно выбить из кейса этого пака", NamedTextColor.DARK_GRAY))), prefix.file());
+    }
+
     /** Кнопка «Кейс префиксов»: показывает число кейсов у игрока. */
     ItemStack prefixCase(int cases) {
         String count = cases == 1 ? "Есть 1 кейс префиксов" : "Есть " + cases + " кейсов префиксов";

@@ -5,6 +5,11 @@ import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
+import org.bukkit.block.Chest;
+import org.bukkit.block.Container;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -59,6 +64,15 @@ final class CopperCare implements Listener {
         Material stepped = CopperWeathering.next(block.getType());
         if (stepped == null) return;
 
+        // Copper chest и другие медные хранилища: смена материала не должна
+        // выбрасывать или стирать лежащие внутри предметы. Для двойного сундука
+        // берём именно локальный инвентарь одной половины, не общие 54 слота.
+        ItemStack[] contents = null;
+        BlockState oldState = block.getState();
+        if (oldState instanceof Container container) {
+            contents = localInventory(container).getContents();
+        }
+
         String data = CopperWeathering.nextBlockData(block.getBlockData().getAsString());
         boolean applied = false;
         if (data != null) {
@@ -70,6 +84,10 @@ final class CopperCare implements Listener {
             }
         }
         if (!applied) block.setType(stepped, false);
+        if (contents != null && block.getState() instanceof Container container) {
+            Inventory storage = localInventory(container);
+            if (storage.getSize() == contents.length) storage.setContents(contents);
+        }
 
         // Частицы снятия воска: именно они в ванили играют и на меди, и на воске.
         block.getWorld().spawnParticle(
@@ -82,6 +100,10 @@ final class CopperCare implements Listener {
             WaterBottle.consume(player, hand);
         }
         event.setCancelled(true);
+    }
+
+    private static Inventory localInventory(Container container) {
+        return container instanceof Chest chest ? chest.getBlockInventory() : container.getInventory();
     }
 
     /** На месте стоит медный нотный блок плагина (кастомный блок CraftEngine). */
