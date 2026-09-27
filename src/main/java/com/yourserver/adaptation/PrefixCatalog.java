@@ -36,10 +36,6 @@ final class PrefixCatalog {
         return new PrefixCatalog(byId);
     }
 
-    static PrefixCatalog load(Path path) throws Exception {
-        return load(path, null);
-    }
-
     /**
      * Префиксы из {@code prefixes.yml} плюс префиксы паков
      * ({@code plugins/f8-plugin/prefixpacks/*.yml}).
@@ -49,6 +45,15 @@ final class PrefixCatalog {
      * в {@code prefixes.yml}, запись пака пропускается — файл настроек главнее.
      */
     static PrefixCatalog load(Path path, PrefixPackCatalog packs) throws Exception {
+        return load(path).withPacks(packs);
+    }
+
+    /**
+     * Прочитать {@code prefixes.yml}: только свои префиксы, без паков. По этому
+     * каталогу паки находят имена и цвета: пак перечисляет файлы префиксов, а
+     * всё остальное берётся отсюда.
+     */
+    static PrefixCatalog load(Path path) throws Exception {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.loadFromString(Files.readString(path));
         ConfigurationSection section = yaml.getConfigurationSection("prefixes");
@@ -65,21 +70,41 @@ final class PrefixCatalog {
             if (color == null) throw new IllegalArgumentException("Неверный цвет префикса " + cleanId);
             byId.put(cleanId, new Prefix(cleanId, name, color, file, number++));
         }
-        if (packs != null) {
-            for (PrefixPackCatalog.Pack pack : packs.packs()) {
-                for (Prefix entry : pack.prefixes()) {
-                    if (byId.containsKey(entry.id())) continue;
-                    byId.put(entry.id(), new Prefix(entry.id(), entry.name(), entry.color(), entry.file(), number++));
-                }
-            }
-        }
         if (byId.isEmpty()) throw new IllegalArgumentException("Список префиксов пуст");
         return new PrefixCatalog(byId);
+    }
+
+    /**
+     * Тот же каталог, но с префиксами паков. Префикс пака, чей id уже есть
+     * (обычно так и бывает: пак ссылается на префикс из {@code prefixes.yml} по
+     * его файлу), не добавляется второй раз — имя, цвет и номер остаются от
+     * файла настроек.
+     */
+    PrefixCatalog withPacks(PrefixPackCatalog packs) {
+        if (packs == null || packs.size() == 0) return this;
+        Map<String, Prefix> merged = new LinkedHashMap<>(byId);
+        int number = ordered.size() + 1;
+        for (PrefixPackCatalog.Pack pack : packs.packs()) {
+            for (Prefix entry : pack.prefixes()) {
+                if (merged.containsKey(entry.id())) continue;
+                merged.put(entry.id(), new Prefix(entry.id(), entry.name(), entry.color(), entry.file(), number++));
+            }
+        }
+        return new PrefixCatalog(merged);
     }
 
     List<Prefix> list() { return ordered; }
     Prefix get(String id) { return id == null ? null : byId.get(id); }
     int size() { return ordered.size(); }
+
+    /** Префикс по файлу иконки (file: pref1) или null. По этому файлу паки префиксов находят имя и цвет. */
+    Prefix byFile(String file) {
+        if (file == null || file.isEmpty()) return null;
+        for (Prefix prefix : ordered) {
+            if (prefix.file().equalsIgnoreCase(file)) return prefix;
+        }
+        return null;
+    }
 
     /** Префикс по номеру из конфига (1, 2, 3, …) или null. */
     Prefix byNumber(int number) {

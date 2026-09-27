@@ -6,6 +6,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -13,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Паки префиксов: файл пака, срок кейса и свои префиксы внутри. */
+/** Паки префиксов: файл пака, срок кейса и префиксы, взятые из prefixes.yml. */
 final class PrefixPackCatalogTest {
 
     private static final String TEST_PACK = """
@@ -26,6 +28,28 @@ final class PrefixPackCatalogTest {
                 file: pref9
                 color: '#7FF0D2'
             """;
+
+    /** prefixes.yml, по которому паки находят имена и цвета. */
+    private static final String PREFIXES = """
+            prefixes:
+              pref1:
+                name: 'Морозный'
+                color: '#8FE3F5'
+                file: pref1
+              pref2:
+                name: 'Закалённый'
+                color: '#B9C3CE'
+                file: pref2
+              pref9:
+                name: 'Аврора'
+                color: '#7FF0D2'
+                file: pref9
+            """;
+
+    private PrefixCatalog prefixes(@TempDir Path folder) throws Exception {
+        Files.writeString(folder.resolve("prefixes.yml"), PREFIXES);
+        return PrefixCatalog.load(folder.resolve("prefixes.yml"));
+    }
 
     @Test
     void пакЧитаетсяИзСвоегоФайла(@TempDir Path folder) throws Exception {
@@ -42,7 +66,70 @@ final class PrefixPackCatalogTest {
     }
 
     @Test
+    void именаИЦветаБерутсяИзПрефиксов(@TempDir Path folder) throws Exception {
+        // В файле пака — только файлы; имена и цвета приходят из prefixes.yml.
+        Files.writeString(folder.resolve("prefixes.yml"), PREFIXES);
+        Files.writeString(folder.resolve("pref-pack1.yml"), """
+                name: 'Тестовый пак'
+                time-hours: -1
+                prefixes:
+                  - pref1
+                  - pref2
+                """);
+
+        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder, prefixes(folder), null).get("pref-pack1");
+        assertNotNull(pack);
+        assertEquals(2, pack.size());
+        assertEquals("pref1", pack.prefixes().get(0).id(), "префикс пака — тот же префикс из prefixes.yml");
+        assertEquals("Морозный", pack.prefixes().get(0).name());
+        assertEquals("pref1", pack.prefixes().get(0).file());
+        assertEquals(TextColor.fromHexString("#8FE3F5"), pack.prefixes().get(0).color());
+        assertEquals("pref2", pack.prefixes().get(1).id());
+        assertEquals("Закалённый", pack.prefixes().get(1).name());
+        assertEquals(TextColor.fromHexString("#B9C3CE"), pack.prefixes().get(1).color());
+    }
+
+    @Test
+    void имяИЦветМожноПереопределитьНаМесте(@TempDir Path folder) throws Exception {
+        Files.writeString(folder.resolve("prefixes.yml"), PREFIXES);
+        Files.writeString(folder.resolve("pref-pack1.yml"), """
+                name: 'Тестовый пак'
+                prefixes:
+                  - file: pref1
+                    name: 'Своё имя'
+                    color: '#FF0000'
+                """);
+
+        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder, prefixes(folder), null).get("pref-pack1");
+        assertNotNull(pack);
+        assertEquals("pref1", pack.prefixes().get(0).id(), "id остаётся от prefixes.yml");
+        assertEquals("Своё имя", pack.prefixes().get(0).name());
+        assertEquals(TextColor.fromHexString("#FF0000"), pack.prefixes().get(0).color());
+    }
+
+    @Test
+    void файлаНетВПрефиксах — префиксСвойИПредупреждение(@TempDir Path folder) throws Exception {
+        Files.writeString(folder.resolve("prefixes.yml"), PREFIXES);
+        Files.writeString(folder.resolve("pref-pack1.yml"), """
+                name: 'Тестовый пак'
+                prefixes:
+                  - pref1
+                  - pref42
+                """);
+        List<String> warnings = new ArrayList<>();
+
+        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder, prefixes(folder), warnings::add).get("pref-pack1");
+        assertNotNull(pack);
+        assertEquals(2, pack.size(), "неизвестный файл не выбрасывается, а получает имя из файла");
+        assertEquals("pref42", pack.prefixes().get(1).name());
+        assertEquals("pref-pack1_pref42", pack.prefixes().get(1).id());
+        assertEquals(1, warnings.size(), "о неизвестном файле сообщают в журнал");
+        assertTrue(warnings.get(0).contains("pref42"));
+    }
+
+    @Test
     void префиксыПакаПолучаютСвоиIdИИконки(@TempDir Path folder) throws Exception {
+        // Без prefixes.yml пак заводит префиксы сам: id из пака и файла.
         Files.writeString(folder.resolve("pref-pack1.yml"), TEST_PACK);
 
         PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder).get("pref-pack1");
@@ -88,21 +175,19 @@ final class PrefixPackCatalogTest {
     }
 
     @Test
-    void записьБезИмениИлиИконкиПропускается(@TempDir Path folder) throws Exception {
+    void записьБезФайлаПропускается(@TempDir Path folder) throws Exception {
         Files.writeString(folder.resolve("half.yml"), """
                 name: 'Половина'
                 time-hours: 1
                 prefixes:
                   - name: 'Без иконки'
-                  - file: pref4
-                  - name: 'Полный'
-                    file: pref5
+                  - pref1
                 """);
 
         PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder).get("half");
         assertNotNull(pack);
-        assertEquals(1, pack.size(), "Из трёх записей годится одна");
-        assertEquals("Полный", pack.prefixes().get(0).name());
+        assertEquals(1, pack.size(), "Из двух записей годится одна: без файла префикса не бывает");
+        assertEquals("pref1", pack.prefixes().get(0).file());
     }
 
     @Test

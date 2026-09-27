@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
@@ -24,21 +25,29 @@ import java.util.stream.Stream;
  *
  * <h2>Файл пака</h2>
  *
+ * Пак перечисляет только файлы префиксов, а имена и цвета берёт из
+ * {@code prefixes.yml} — по полю {@code file}:
+ *
  * <pre>
  * name: 'Тестовый пак'        # название на сундучке
  * time-hours: 24              # срок кейса в часах с момента выдачи; -1 — бессрочный
- * prefixes:                   # свои префиксы пака
- *   - name: 'Морозный'        # название префикса
- *     file: pref1             # иконка из ресурспака: items/pref1.json + textures/item/pref1.png
- *     color: '#8FE3F5'        # необязательно: цвет названия
+ * prefixes:                   # файлы префиксов из prefixes.yml
+ *   - pref1                   # имя и цвет возьмутся из prefixes.yml
+ *   - file: pref9             # тот же вид, но полем
+ *   - file: pref3             # имя и цвет можно переопределить на месте
+ *     name: 'Своё имя'
+ *     color: '#7FF0D2'
  * </pre>
  *
  * <h2>Откуда берутся id</h2>
  *
- * Префиксы пака — свои, а не ссылки на {@code prefixes.yml}: id собирается из
- * имени пака и иконки ({@code pref-pack1_pref1}) или берётся из поля {@code id},
- * если оно написано руками. Так один и тот же id не прыгает между перезапусками
- * и выданные префиксы не теряются.
+ * Если файл найден в {@code prefixes.yml}, префикс пака — это тот же префикс:
+ * тот же id, имя, цвет и номер. Так один и тот же префикс не появляется дважды
+ * (своим и из пака), а выданный префикс не теряется. Если файла в
+ * {@code prefixes.yml} нет, пак заводит свой префикс: id собирается из имени
+ * пака и файла ({@code pref-pack1_pref1}) или берётся из поля {@code id}, если
+ * оно написано руками, а имя — из поля {@code name} или из самого файла; в
+ * журнал при этом уходит предупреждение.
  *
  * <h2>Срок кейса</h2>
  *
@@ -103,6 +112,15 @@ final class PrefixPackCatalog {
 
     /** Прочитать все {@code *.yml} из папки; битые файлы пропускаются. */
     static PrefixPackCatalog load(Path folder) {
+        return load(folder, null, null);
+    }
+
+    /**
+     * Прочитать все {@code *.yml} из папки. Имена и цвета префиксов паков
+     * берутся из {@code base} ({@code prefixes.yml}) по файлу иконки; всё, чего
+     * в нём нет, сообщается в {@code warn} (обычно — журнал плагина).
+     */
+    static PrefixPackCatalog load(Path folder, PrefixCatalog base, Consumer<String> warn) {
         Map<String, Pack> byId = new LinkedHashMap<>();
         if (folder == null || !Files.isDirectory(folder)) return new PrefixPackCatalog(byId);
         List<Path> files = new ArrayList<>();
@@ -116,7 +134,7 @@ final class PrefixPackCatalog {
         }
         for (Path file : files) {
             try {
-                Pack pack = read(file);
+                Pack pack = read(file, base, warn);
                 if (pack != null) byId.put(pack.id(), pack);
             } catch (Exception ex) {
                 throw new IllegalArgumentException("Пак " + file.getFileName() + ": " + ex.getMessage(), ex);
@@ -125,7 +143,7 @@ final class PrefixPackCatalog {
         return new PrefixPackCatalog(byId);
     }
 
-    private static Pack read(Path file) throws Exception {
+    private static Pack read(Path file, PrefixCatalog base, Consumer<String> warn) throws Exception {
         String fileName = file.getFileName().toString();
         String id = fileName.substring(0, fileName.length() - ".yml".length());
         YamlConfiguration yaml = new YamlConfiguration();
@@ -136,16 +154,43 @@ final class PrefixPackCatalog {
         int timeHours = yaml.getInt("time-hours", yaml.getInt("time", INFINITE));
 
         List<PrefixCatalog.Prefix> prefixes = new ArrayList<>();
-        for (Map<?, ?> raw : yaml.getMapList("prefixes")) {
-            String entryName = ProfileText.clean(text(raw.get("name")));
-            String entryFile = ProfileText.clean(text(raw.get("file")));
-            if (entryName.isEmpty() || entryFile.isEmpty()) continue;
-            String entryId = ProfileText.clean(text(raw.get("id")));
-            if (entryId.isEmpty()) entryId = sanitize(id + "_" + entryFile);
-            TextColor color = TextColor.fromHexString(text(raw.get("color")).isEmpty()
-                    ? "#E6B94B" : text(raw.get("color")));
-            prefixes.add(new PrefixCatalog.Prefix(sanitize(entryId), entryName,
-                    color == null ? TextColor.color(0xE6B94B) : color, entryFile, 0));
+        for (Object raw : yaml.getList("prefixes", List.of())) {
+            String entryFile;
+            String entryName = "";
+            String entryId = "";
+            String entryColor = "";
+            if (raw instanceof Map<?, ?> map) {
+                entryFile = ProfileText.clean(text(map.get("file")));
+                entryName = ProfileText.clean(text(map.get("name")));
+                entryId = ProfileText.clean(text(map.get("id")));
+                entryColor = ProfileText.clean(text(map.get("color")));
+            } else {
+                // Запись целиком — это и есть файл префикса: '- pref1'.
+                entryFile = ProfileText.clean(text(raw));
+            }
+            if (entryFile.isEmpty()) continue;
+
+            PrefixCatalog.Prefix known = base == null ? null : base.byFile(entryFile);
+            String finalId;
+            String finalName;
+            String finalColor;
+            if (known != null) {
+                // Файл есть в prefixes.yml: префикс пака — тот же префикс.
+                finalId = entryId.isEmpty() ? known.id() : entryId;
+                finalName = entryName.isEmpty() ? known.name() : entryName;
+                finalColor = entryColor.isEmpty() ? known.color().asHexString() : entryColor;
+            } else {
+                if (warn != null) {
+                    warn.accept("Пак " + id + ": файл префикса «" + entryFile
+                            + "» не найден в prefixes.yml — имя взято из файла, добавьте префикс в prefixes.yml");
+                }
+                finalId = entryId.isEmpty() ? sanitize(id + "_" + entryFile) : entryId;
+                finalName = entryName.isEmpty() ? entryFile : entryName;
+                finalColor = entryColor.isEmpty() ? "#E6B94B" : entryColor;
+            }
+            TextColor color = TextColor.fromHexString(finalColor);
+            if (color == null) throw new IllegalArgumentException("Неверный цвет префикса " + finalId);
+            prefixes.add(new PrefixCatalog.Prefix(sanitize(finalId), finalName, color, entryFile, 0));
         }
         if (prefixes.isEmpty()) return null;
         return new Pack(sanitize(id), name, timeHours, List.copyOf(prefixes));
@@ -164,7 +209,7 @@ final class PrefixPackCatalog {
             boolean allowed = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
             out.append(allowed ? c : '_');
         }
-        String result = out.toString().replace("_", "_");
+        String result = out.toString();
         while (result.contains("__")) result = result.replace("__", "_");
         return result;
     }
