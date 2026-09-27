@@ -249,6 +249,8 @@ public void onEnable() {
      * Перечитать config.yml и настройки подсистем (/f8 reload).
      * Настройки миниигры и кувшина читаются на ходу, поэтому им reload не нужен;
      * созвездия и зацеп изморози держат копию настроек в памяти — их просим перечитаться.
+     * Префиксы и паки префиксов живут в своих файлах, поэтому их тоже перечитываем:
+     * без этого правки prefixes.yml и prefixpacks/ до перезапуска не доходили.
      */
     public String reloadPluginSettings() {
         ConfigSync.sync(this);   // /f8 reload тоже доводит файлы до полного вида
@@ -259,7 +261,10 @@ public void onEnable() {
         if (winterFishing != null) {
             winterFishing.reloadSettings();
         }
-        return specialCatch == null ? "" : specialCatch.describe();
+        String prefixes = profileManager == null ? "" : profileManager.reloadPrefixes();
+        if (prefixes.isBlank()) return specialCatch == null ? "" : specialCatch.describe();
+        if (specialCatch == null || specialCatch.describe().isBlank()) return prefixes;
+        return prefixes + "\n" + specialCatch.describe();
     }
 
     public void breakAdaptation(Player player) {
