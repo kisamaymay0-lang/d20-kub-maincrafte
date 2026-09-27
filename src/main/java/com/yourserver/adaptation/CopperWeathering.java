@@ -20,7 +20,7 @@ import java.util.Locale;
  *   exposed_cut_copper  -> weathered_cut_copper
  *   weathered_copper_grate -> oxidized_copper_grate
  *   oxidized_copper_bulb   -> null  (дальше некуда)
- *   waxed_copper_block     -> null  (воск защищает)
+ *   waxed_copper_block     -> null  (воск защищает, снять его — unwax)
  * </pre>
  *
  * Приставка работает и на новых медных блоках, которых здесь нет в списке:
@@ -67,6 +67,29 @@ final class CopperWeathering {
     }
 
     /**
+     * Снять воск: {@code waxed_copper_block} → {@code copper_block},
+     * {@code waxed_exposed_cut_copper} → {@code exposed_cut_copper}. Ступень
+     * окисления при этом не меняется — убирается только защита.
+     *
+     * @return имя без воска или {@code null}, если воска и не было.
+     */
+    static String unwax(String materialName) {
+        if (materialName == null || materialName.isEmpty()) return null;
+        String name = materialName.toLowerCase(Locale.ROOT);
+        if (!name.startsWith(WAXED)) return null;
+        String bare = name.substring(WAXED.length());
+        return bare.isEmpty() ? null : bare;
+    }
+
+    /** Снять воск с блока или {@code null}, если воска на нём нет. */
+    static Material unwax(Material material) {
+        if (material == null || material.isAir()) return null;
+        String name = unwax(material.name());
+        if (name == null) return null;
+        return Material.getMaterial(name.toUpperCase(Locale.ROOT));
+    }
+
+    /**
      * Переписать состояние блока ({@code BlockData#getAsString()}) на следующую
      * ступень, сохранив все свойства: {@code minecraft:cut_copper_stairs[
      * facing=east]} → {@code minecraft:exposed_cut_copper_stairs[facing=east]}.
@@ -84,5 +107,25 @@ final class CopperWeathering {
         String stepped = next(name);
         if (stepped == null) return null;
         return namespace + ":" + stepped + states;
+    }
+
+    /**
+     * Переписать состояние блока ({@code BlockData#getAsString()}), сняв воск и
+     * сохранив все свойства: {@code minecraft:waxed_exposed_cut_copper_stairs[
+     * facing=east]} → {@code minecraft:exposed_cut_copper_stairs[facing=east]}.
+     *
+     * @return новое состояние или {@code null}, если воска на блоке нет.
+     */
+    static String unwaxBlockData(String asString) {
+        if (asString == null || asString.isEmpty()) return null;
+        int bracket = asString.indexOf('[');
+        String id = bracket < 0 ? asString : asString.substring(0, bracket);
+        String states = bracket < 0 ? "" : asString.substring(bracket);
+        int colon = id.indexOf(':');
+        String namespace = colon < 0 ? "minecraft" : id.substring(0, colon);
+        String name = colon < 0 ? id : id.substring(colon + 1);
+        String bare = unwax(name);
+        if (bare == null) return null;
+        return namespace + ":" + bare + states;
     }
 }
