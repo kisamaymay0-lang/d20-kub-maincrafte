@@ -1054,8 +1054,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 clickSound(player); open(player, data.owner, Screen.PACK_CONTENTS, menu.page + 1, null, pack.id()); return;
             }
             int index = slot >= 0 && slot < 9 ? slot : slot >= 18 && slot < 27 ? slot - 9 : -1;
+            if (index < 0) return;
             index += menu.page * 18;
-            if (index < 0 || index >= pack.size()) return;
+            if (index >= pack.size()) return;
             String id = pack.prefixes().get(index).id();
             if (!data.ownsPrefix(id)) {
                 player.sendMessage(ProfileItems.text("У вас нету этого префикса!", NamedTextColor.RED)); return;
