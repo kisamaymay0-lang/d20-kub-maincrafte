@@ -5,6 +5,8 @@ import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.block.Block;
+import org.bukkit.block.Chest;
+import org.bukkit.block.Container;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -12,6 +14,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
 /**
@@ -23,20 +26,22 @@ import org.bukkit.inventory.ItemStack;
  * <ul>
  *   <li><b>На любом медном блоке.</b> Обычный, потемневший, состаренный,
  *       окисленный — всех форм: блок, огранённый блок, лестница, плита, решётка,
- *       лампа, дверь, люк, светошахта. Ступень меняется по приставке имени:
- *       {@code copper_block} → {@code exposed_copper_block} →
- *       {@code weathered_copper_block} → {@code oxidized_copper_block}, а все
- *       состояния блока (поворот лестницы, форма плиты, открытость двери,
- *       водность решётки) сохраняются: подменяется только имя материала в
- *       строке {@code BlockData}, а не весь блок.</li>
+ *       лампа, дверь, люк, сундук, светошахта. Ступень меняется по приставке
+ *       имени: {@code copper_block} → {@code exposed_copper} →
+ *       {@code weathered_copper} → {@code oxidized_copper} (у блока целиком
+ *       приставки {@code _block} в следующих ступенях нет), а все состояния
+ *       блока (поворот лестницы, форма плиты, открытость двери, водность
+ *       решётки) сохраняются: подменяется только имя материала в строке
+ *       {@code BlockData}, а не весь блок. У медного сундука лежащие внутри
+ *       предметы возвращаются на место — подмена материала их не трогает.</li>
  *   <li><b>На вощёной меди.</b> Вода смывает воск: {@code waxed_copper_block}
  *       становится {@code copper_block}, ступень та же. Дальше такая медь
  *       стареет как обычная — воск именно для того и нужен, чтобы медь не
  *       старела, и снятый воск возвращает её в общий круг.</li>
  *   <li><b>На медном предмете, который можно поставить.</b> Шифт + ПКМ водой
  *       в воздух, когда в другой руке лежит медный предмет (блок, дверь, люк,
- *       решётку…): стареет сам предмет, и его можно поставить уже
- *       окисленным.</li>
+ *       сундук, решётку…): стареет сам предмет, и его можно поставить уже
+ *       окисленным. Предмет в главной руке, бутылка в левой — тоже работает.</li>
  * </ul>
  *
  * <h2>Чего здесь нет</h2>
@@ -81,6 +86,18 @@ final class CopperCare implements Listener {
         // Сначала пробуем следующую ступень, а вощёной меди вода смывает воск.
         String data = CopperWeathering.nextBlockData(block.getBlockData().getAsString());
         if (data == null) data = CopperWeathering.unwaxBlockData(block.getBlockData().getAsString());
+        Material stepped = CopperWeathering.next(block.getType());
+        if (stepped == null) stepped = CopperWeathering.unwax(block.getType());
+        if (data == null && stepped == null) return; // Полностью окисленная медь: старить нечего.
+
+        // Медный сундук и другие медные хранилища: подмена материала не должна
+        // выбрасывать или стирать лежащие внутри предметы. У двойного сундука
+        // берём локальный инвентарь одной половины, а не общие 54 слота.
+        ItemStack[] contents = null;
+        if (block.getState() instanceof Container container) {
+            contents = localInventory(container).getContents();
+        }
+
         boolean applied = false;
         if (data != null) {
             try {
@@ -90,11 +107,11 @@ final class CopperCare implements Listener {
                 // Состояние новой ступени не совпало — подменим только материал.
             }
         }
-        if (!applied) {
-            Material stepped = CopperWeathering.next(block.getType());
-            if (stepped == null) stepped = CopperWeathering.unwax(block.getType());
-            if (stepped == null) return; // Полностью окисленная медь: старить нечего.
-            block.setType(stepped, false);
+        if (!applied) block.setType(stepped, false);
+
+        if (contents != null && block.getState() instanceof Container container) {
+            Inventory storage = localInventory(container);
+            if (storage.getSize() == contents.length) storage.setContents(contents);
         }
 
         // Частицы снятия воска: именно они в ванили играют на меди.
@@ -147,6 +164,11 @@ final class CopperCare implements Listener {
             WaterBottle.consume(player, bottleHand);
         }
         return true;
+    }
+
+    /** Инвентарь одной половины сундука: у двойного сундука getInventory даёт все 54 слотов. */
+    private static Inventory localInventory(Container container) {
+        return container instanceof Chest chest ? chest.getBlockInventory() : container.getInventory();
     }
 
     /** На месте стоит кастомный блок CraftEngine (например, медный нотный блок). */

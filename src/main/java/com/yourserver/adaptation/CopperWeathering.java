@@ -16,7 +16,7 @@ import java.util.Locale;
  * регулярно, хватает приставки:
  *
  * <pre>
- *   copper_block        -> exposed_copper_block
+ *   copper_block        -> exposed_copper
  *   exposed_cut_copper  -> weathered_cut_copper
  *   weathered_copper_grate -> oxidized_copper_grate
  *   oxidized_copper_bulb   -> null  (дальше некуда)
@@ -25,6 +25,15 @@ import java.util.Locale;
  *
  * Приставка работает и на новых медных блоках, которых здесь нет в списке:
  * проверка — существует ли материал с получившимся именем.
+ *
+ * <h2>Одно исключение</h2>
+ *
+ * Медный блок целиком называется {@code copper_block}, а его следующие ступени
+ * — {@code exposed_copper}, {@code weathered_copper}, {@code oxidized_copper}:
+ * приставка {@code exposed_} дала бы {@code exposed_copper_block}, которого в
+ * игре нет. Поэтому для блока приставка заменяется на «пустую», и полив
+ * {@code copper_block} → {@code exposed_copper} → {@code weathered_copper} →
+ * {@code oxidized_copper} работает, как в ванили.
  *
  * <h2>Почему не «тик окисления»</h2>
  *
@@ -37,6 +46,8 @@ final class CopperWeathering {
     private static final String WEATHERED = "weathered_";
     private static final String OXIDIZED = "oxidized_";
     private static final String WAXED = "waxed_";
+    /** Медный блок целиком: единственная ступень без приставки в имени. */
+    private static final String COPPER_BLOCK = "copper_block";
 
     private CopperWeathering() { }
 
@@ -51,7 +62,9 @@ final class CopperWeathering {
         if (name.startsWith(WAXED) || name.startsWith(OXIDIZED)) return null;
         if (name.startsWith(EXPOSED)) return WEATHERED + name.substring(EXPOSED.length());
         if (name.startsWith(WEATHERED)) return OXIDIZED + name.substring(WEATHERED.length());
-        return EXPOSED + name;
+        // Единственное исключение: следующая ступень медного блока — exposed_copper,
+        // а не exposed_copper_block (такого материала в игре нет).
+        return EXPOSED + (name.equals(COPPER_BLOCK) ? "copper" : name);
     }
 
     /**
