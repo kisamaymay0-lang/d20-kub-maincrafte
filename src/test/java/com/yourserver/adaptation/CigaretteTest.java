@@ -101,6 +101,13 @@ final class CigaretteTest {
     }
 
     @Test
+    void послеУходаТошнотыСлабостьИУтомлениеПонижаютсяДоПервогоУровня() {
+        assertEquals(0, Cigarette.withdrawalAmplifierForStage(1), "первая стадия — уровень I");
+        assertEquals(1, Cigarette.withdrawalAmplifierForStage(2), "вторая стадия — уровень II");
+        assertEquals(0, Cigarette.withdrawalAmplifierForStage(3), "после тошноты снова уровень I");
+    }
+
+    @Test
     void сообщенияОЗависимостиИспользуютСерыйИКрасныйЦвета() {
         assertEquals(NamedTextColor.GRAY, Cigarette.withdrawalMessage(1).color(), "первая стадия — светло-серая");
         assertEquals(NamedTextColor.RED, Cigarette.withdrawalMessage(2).color(), "вторая стадия — красная");

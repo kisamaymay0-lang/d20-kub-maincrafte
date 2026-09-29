@@ -782,11 +782,15 @@ final class Cigarette implements Listener {
         return stage == 1 ? EARLY_CRAVING_MESSAGE : SEVERE_CRAVING_MESSAGE;
     }
 
+    static int withdrawalAmplifierForStage(int stage) {
+        return stage == 2 ? 1 : 0;
+    }
+
     private void applyWithdrawalStage(Player player, AddictionState state) {
         if (state.stage < 1 || state.stage > 3) {
             return;
         }
-        int amplifier = state.stage == 1 ? 0 : 1;
+        int amplifier = withdrawalAmplifierForStage(state.stage);
         setManagedEffect(player, state, PotionEffectType.WEAKNESS, amplifier);
         setManagedEffect(player, state, PotionEffectType.MINING_FATIGUE, amplifier);
         if (state.stage == 2) {
@@ -907,10 +911,26 @@ final class Cigarette implements Listener {
             return;
         }
         int remaining = bars(item);
+        ItemStack unlitRemainder = null;
+        if (item.getAmount() > 1) {
+            unlitRemainder = item.clone();
+            unlitRemainder.setAmount(item.getAmount() - 1);
+        }
         ItemStack fired = create(true, variant(item));
-        fired.setAmount(item.getAmount());
+        fired.setAmount(1);
         setBars(fired, remaining);
         setHandItem(player, hand, fired);
+        if (unlitRemainder != null) {
+            for (ItemStack overflow : player.getInventory().addItem(unlitRemainder).values()) {
+                player.getWorld().dropItemNaturally(player.getLocation(), overflow);
+            }
+        }
+        EquipmentSlot flintHand = other(hand);
+        ItemStack flintAndSteel = handItem(player, flintHand);
+        if (isFlintAndSteel(flintAndSteel)) {
+            // ItemStack.damage uses vanilla damage rules, including Unbreaking and break events.
+            setHandItem(player, flintHand, flintAndSteel.damage(1, player));
+        }
         player.updateInventory();
         litAtTick.put(player.getUniqueId(), Bukkit.getCurrentTick() + 1);
         player.playSound(player.getLocation(), Sound.ITEM_FLINTANDSTEEL_USE, 0.5F, 1.2F);
