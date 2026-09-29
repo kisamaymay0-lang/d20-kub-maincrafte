@@ -106,9 +106,9 @@ final class Cigarette implements Listener {
     /** Тихий ванильный треск горящего огня, повторяемый при затяжке. */
     private static final String INHALE_SOUND = "minecraft:block.fire.ambient";
     private static final long INHALE_SOUND_REPEAT_TICKS = 20L;
-    /** Короткое шипение при закуривании и лёгкий треск при выдохе. */
-    private static final Sound LIGHT_HISS_SOUND = Sound.BLOCK_FIRE_EXTINGUISH;
-    private static final Sound EXHALE_SOUND = Sound.BLOCK_CAMPFIRE_CRACKLE;
+    /** Ванильные идентификаторы: строковые ключи не требуют Bukkit registry в unit-тестах. */
+    private static final String LIGHT_HISS_SOUND = "minecraft:block.fire.extinguish";
+    private static final String EXHALE_SOUND = "minecraft:block.campfire.crackle";
     /** Звука во время тяги быть не должно: специально «пустой» ванильный звук. */
     private static final Key SILENT_SOUND = Key.key("intentionally_empty");
     /** Как часто перерисовываем шкалу и проверяем, не кончился ли запас. */
