@@ -45,6 +45,15 @@ final class CigaretteTest {
     }
 
     @Test
+    void выбрасывательТратитДоШестнадцатиПалочекЗаСрабатывание() {
+        assertEquals(16, Cigarette.dispenserBarsToSmoke(64));
+        assertEquals(16, Cigarette.dispenserBarsToSmoke(16));
+        assertEquals(5, Cigarette.dispenserBarsToSmoke(5), "последний неполный запас тоже выкуривается");
+        assertEquals(0, Cigarette.dispenserBarsToSmoke(0));
+        assertEquals(0, Cigarette.dispenserBarsToSmoke(-1));
+    }
+
+    @Test
     void большаяТягаНеДлиннееТридцатиДвухПалочекИНеБольшеЗапаса() {
         assertEquals(Cigarette.BIG_BARS_PER_PUFF, Cigarette.barsFor(3600, Cigarette.RESERVE),
                 "держи ПКМ хоть минуту — у большой сигареты максимум 32 палочки");

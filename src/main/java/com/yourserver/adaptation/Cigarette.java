@@ -12,6 +12,13 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
+import org.bukkit.block.Dispenser;
+import org.bukkit.block.Dropper;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Directional;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
@@ -23,11 +30,13 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -63,7 +72,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * перехватывает ПКМ у блока, чтобы действие работало в обоих случаях.
  *
  * <p>Шкала пополняется на палочку каждые 0,2 секунды. После отпускания изо рта
- * непрерывно вылетают частицы уютного дыма костра в текущем направлении
+ * непрерывно вылетают частицы дымка серного гейзера в текущем направлении
  * взгляда; каждая набранная палочка даёт ровно 0,2 секунды выдоха. Запас
  * зависит от модели: 64, 16 или 32 палочки; когда запас кончается, сигарета
  * ломается и исчезает. Стак — до восьми сигарет.
@@ -147,6 +156,10 @@ final class Cigarette implements Listener {
     /** Летящий дым: по одному потоку на игрока, новый обрывает старый. */
     private final Map<UUID, Smoke> smoke = new HashMap<>();
 
+    /** Дымы, запущенные редстоун-выбрасывателями/раздатчиками. */
+    private final Set<DeviceSmoke> deviceSmokes = new HashSet<>();
+    private final Map<Block, Integer> machineActivationTicks = new HashMap<>();
+
     /** Задачи повторения звука вдоха, пока игрок держит ПКМ. */
     private final Map<UUID, BukkitTask> inhaleSounds = new HashMap<>();
 
@@ -197,6 +210,9 @@ final class Cigarette implements Listener {
             flow.stop();
         }
         smoke.clear();
+        for (DeviceSmoke flow : new ArrayList<>(deviceSmokes)) flow.stop();
+        deviceSmokes.clear();
+        machineActivationTicks.clear();
         puffs.clear();
         litAtTick.clear();
         smokingWindows.clear();
@@ -355,6 +371,153 @@ final class Cigarette implements Listener {
 
     private static int barsPerPuff(ItemStack item) {
         return variant(item) == Variant.BIG ? BIG_BARS_PER_PUFF : BARS_PER_PUFF;
+    }
+
+    /** Redstone machines smoke 16 bars from a cigarette instead of ejecting it. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onMachineDispense(BlockDispenseEvent event) {
+        Material blockType = event.getBlock().getType();
+        if (blockType != Material.DROPPER && blockType != Material.DISPENSER) return;
+        if (!isCigarette(event.getItem())) return;
+        Block block = event.getBlock();
+        if (!claimMachineActivation(block)) {
+            event.setCancelled(true);
+            return;
+        }
+        Inventory inventory = machineInventory(block);
+        if (inventory != null && smokeFromInventory(block, inventory, event.getItem())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Dropper-to-container transfers do not consistently fire BlockDispenseEvent. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onDropperTransfer(InventoryMoveItemEvent event) {
+        if (!(event.getSource().getHolder() instanceof Dropper source)
+                || !(event.getInitiator().getHolder() instanceof Dropper initiator)
+                || !source.getBlock().equals(initiator.getBlock())
+                || !isCigarette(event.getItem())) return;
+        Block block = source.getBlock();
+        if (!claimMachineActivation(block)) {
+            event.setCancelled(true);
+            return;
+        }
+        ItemStack requested = event.getItem().clone();
+        // A dropper may have removed the item before firing InventoryMoveItemEvent.
+        // Cancel first and consume from the restored source inventory on the next tick.
+        event.setCancelled(true);
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            Inventory inventory = machineInventory(block);
+            if (inventory != null) smokeFromInventory(block, inventory, requested);
+        });
+    }
+
+    private boolean claimMachineActivation(Block block) {
+        int now = Bukkit.getCurrentTick();
+        machineActivationTicks.entrySet().removeIf(entry -> now - entry.getValue() > 2);
+        Integer previous = machineActivationTicks.get(block);
+        if (previous != null && now - previous <= 1) return false;
+        machineActivationTicks.put(block, now);
+        return true;
+    }
+
+    private static Inventory machineInventory(Block block) {
+        BlockState state = block.getState();
+        if (state instanceof Dropper dropper) return dropper.getInventory();
+        if (state instanceof Dispenser dispenser) return dispenser.getInventory();
+        return null;
+    }
+
+    /** Consume one 16-bar machine puff, update the real block inventory, then vent outward. */
+    private boolean smokeFromInventory(Block block, Inventory inventory, ItemStack dispensed) {
+        BlockData data = block.getBlockData();
+        if (!(data instanceof Directional directional)) return false;
+        Vector facing = directional.getFacing().getDirection().normalize();
+        for (int slot = 0; slot < inventory.getSize(); slot++) {
+            ItemStack stored = inventory.getItem(slot);
+            if (!isCigarette(stored) || !stored.isSimilar(dispensed)) continue;
+            int spent = dispenserBarsToSmoke(bars(stored));
+            if (spent <= 0) return false;
+            int remaining = bars(stored) - spent;
+            if (remaining > 0) {
+                setBars(stored, remaining);
+                inventory.setItem(slot, stored);
+            } else if (stored.getAmount() > 1) {
+                stored.setAmount(stored.getAmount() - 1);
+                setBars(stored, reserve(stored));
+                inventory.setItem(slot, stored);
+            } else {
+                inventory.clear(slot);
+            }
+            smoke(block, facing, spent);
+            return true;
+        }
+        return false;
+    }
+
+    static int dispenserBarsToSmoke(int available) {
+        return Math.clamp(available, 0, BARS_PER_PUFF);
+    }
+
+    private void smoke(Block block, Vector facing, int bars) {
+        DeviceSmoke flow = new DeviceSmoke(block, facing, bars);
+        deviceSmokes.add(flow);
+        flow.start();
+    }
+
+    private final class DeviceSmoke implements Runnable {
+        private final Block block;
+        private final Vector facing;
+        private final int total;
+        private final int perTick;
+        private int tick;
+        private BukkitTask task;
+
+        DeviceSmoke(Block block, Vector facing, int bars) {
+            this.block = block;
+            this.facing = facing.clone();
+            this.total = exhaleTicks(bars);
+            this.perTick = smokeParticlesPerTick(bars);
+        }
+
+        void start() {
+            task = Bukkit.getScheduler().runTaskTimer(plugin, this, 0L, 1L);
+        }
+
+        void stop() {
+            if (task != null) {
+                task.cancel();
+                task = null;
+            }
+            deviceSmokes.remove(this);
+        }
+
+        @Override
+        public void run() {
+            if (tick >= total || !block.getWorld().isChunkLoaded(block.getX() >> 4, block.getZ() >> 4)) {
+                stop();
+                return;
+            }
+            World world = block.getWorld();
+            Location origin = block.getLocation().add(0.5, 0.5, 0.5).add(facing.clone().multiply(0.55));
+            for (int i = 0; i < perTick; i++) {
+                double distance = 0.12D + (i % 4) * 0.16D;
+                Location spot = origin.clone().add(facing.clone().multiply(distance)).add(jitter());
+                world.spawnParticle(Particle.GEYSER_POOF, spot, 0,
+                        facing.getX() * SMOKE_PUSH,
+                        facing.getY() * SMOKE_PUSH + 0.01D,
+                        facing.getZ() * SMOKE_PUSH,
+                        1.0D, new Particle.GeyserBase(1, 0.0F));
+            }
+            tick++;
+        }
+
+        private Vector jitter() {
+            ThreadLocalRandom random = ThreadLocalRandom.current();
+            return new Vector((random.nextDouble() - 0.5D) * 0.04D,
+                    (random.nextDouble() - 0.5D) * 0.04D,
+                    (random.nextDouble() - 0.5D) * 0.04D);
+        }
     }
 
     /**
@@ -893,7 +1056,8 @@ final class Cigarette implements Listener {
     private void breakUp(Player player, EquipmentSlot hand) {
         player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.7F, 1.0F);
         Location where = mouth(player);
-        player.getWorld().spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, where, 4, 0.04D, 0.04D, 0.04D, 0.01D);
+        player.getWorld().spawnParticle(Particle.GEYSER_POOF, where, 4, 0.04D, 0.04D, 0.04D, 0.01D,
+                new Particle.GeyserBase(1, 0.0F));
         ItemStack item = handItem(player, hand);
         if (item != null && item.getAmount() > 1) {
             item.setAmount(item.getAmount() - 1);
@@ -937,7 +1101,8 @@ final class Cigarette implements Listener {
         player.playSound(mouth(player), LIGHT_HISS_SOUND, SoundCategory.BLOCKS, 0.18F, 1.35F);
         Location where = mouth(player);
         player.getWorld().spawnParticle(Particle.FLAME, where, 5, 0.04D, 0.04D, 0.04D, 0.01D);
-        player.getWorld().spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, where, 2, 0.02D, 0.02D, 0.02D, 0.01D);
+        player.getWorld().spawnParticle(Particle.GEYSER_POOF, where, 2, 0.02D, 0.02D, 0.02D, 0.01D,
+                new Particle.GeyserBase(1, 0.0F));
     }
 
     /**
@@ -1099,13 +1264,14 @@ final class Cigarette implements Listener {
                 double distance = 0.18D + (i % 4) * 0.16D;
                 Location spot = origin.clone().add(dir.clone().multiply(distance)).add(jitter());
                 player.getWorld().spawnParticle(
-                        Particle.CAMPFIRE_COSY_SMOKE,
+                        Particle.GEYSER_POOF,
                         spot,
                         0,
                         dir.getX() * SMOKE_PUSH,
                         dir.getY() * SMOKE_PUSH + 0.01D,
                         dir.getZ() * SMOKE_PUSH,
-                        1.0D
+                        1.0D,
+                        new Particle.GeyserBase(1, 0.0F)
                 );
             }
             tick++;
