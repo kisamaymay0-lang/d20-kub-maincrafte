@@ -77,7 +77,15 @@ class ProfileIconsTest {
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("empty_cod", "empty_salmon", "red_caviar", "black_caviar",
                 "caviar_sandwich_red", "caviar_sandwich_black", "water_flask", "poison_flask")));
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich")));
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of(
+                "rime_potion", "rime_potion_splash", "rime_potion_lingering")));
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("ancient_jug")));
-        assertEquals(14, F8Command.ITEM_CATALOG.stream().distinct().count());
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("crab_claw")));
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of(
+                "cigarette", "cigarette_lit",
+                "cigarette_small", "cigarette_small_lit",
+                "cigarette_regular", "cigarette_regular_lit")),
+                "В каталоге есть холодная и горящая модель каждой сигареты");
+        assertEquals(24, F8Command.ITEM_CATALOG.stream().distinct().count());
     }
 }
