@@ -79,6 +79,8 @@ class ProfileIconsTest {
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich")));
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("ancient_jug")));
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("crab_claw")));
-        assertEquals(15, F8Command.ITEM_CATALOG.stream().distinct().count());
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("cigarette", "cigarette_lit")),
+                "В каталоге две сигареты: холодная и горящая");
+        assertEquals(17, F8Command.ITEM_CATALOG.stream().distinct().count());
     }
 }
