@@ -101,6 +101,13 @@ final class CigaretteTest {
     }
 
     @Test
+    void сообщенияОЗависимостиИспользуютСерыйИКрасныйЦвета() {
+        assertEquals(NamedTextColor.GRAY, Cigarette.withdrawalMessage(1).color(), "первая стадия — светло-серая");
+        assertEquals(NamedTextColor.RED, Cigarette.withdrawalMessage(2).color(), "вторая стадия — красная");
+        assertEquals(NamedTextColor.RED, Cigarette.withdrawalMessage(3).color(), "третья стадия — красная");
+    }
+
+    @Test
     void уРазныхМоделейОтдельныйЗапас() {
         assertEquals(64, Cigarette.RESERVE, "большая сигарета");
         assertEquals(16, Cigarette.SMALL_RESERVE, "маленькая sigareta-small");

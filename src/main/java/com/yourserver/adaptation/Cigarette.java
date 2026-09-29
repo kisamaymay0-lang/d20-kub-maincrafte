@@ -116,7 +116,7 @@ final class Cigarette implements Listener {
     static final int WITHDRAWAL_STAGE_TICKS = 20 * 60 * 4;
     private static final long WITHDRAWAL_MESSAGE_REPEAT_TICKS = 40L;
     private static final Component EARLY_CRAVING_MESSAGE = Component.text(
-            "Эх... сигаретку бы закурить...", NamedTextColor.DARK_GRAY);
+            "Эх... сигаретку бы закурить...", NamedTextColor.GRAY);
     private static final Component SEVERE_CRAVING_MESSAGE = Component.text(
             "Ну же! Закури чего нибудь!...", NamedTextColor.RED);
     /** Долгое использование: выдох происходит по отпусканию ПКМ, не по таймеру. */
@@ -596,9 +596,9 @@ final class Cigarette implements Listener {
         if (spent <= 0) {
             return;
         }
-        if (addictions.containsKey(player.getUniqueId())) {
-            startOrResetAddiction(player);
-        }
+        // Любая реальная затяжка начинает зависимость, если её ещё не было,
+        // либо сбрасывает цикл после повторного курения.
+        startOrResetAddiction(player);
         smoke(player, spent);
         countSmokingBars(player, spent);
         int rest = bars(item) - spent;
@@ -659,7 +659,7 @@ final class Cigarette implements Listener {
         }
     }
 
-    /** Первая полная сигарета запускает таймер; любая следующая затяжка его сбрасывает. */
+    /** Первая реальная затяжка запускает таймер; любая следующая сбрасывает цикл зависимости. */
     private void startOrResetAddiction(Player player) {
         UUID id = player.getUniqueId();
         AddictionState state = addictions.computeIfAbsent(id, ignored -> new AddictionState());
@@ -778,7 +778,7 @@ final class Cigarette implements Listener {
         stopWithdrawalMessagesIfIdle();
     }
 
-    private static Component withdrawalMessage(int stage) {
+    static Component withdrawalMessage(int stage) {
         return stage == 1 ? EARLY_CRAVING_MESSAGE : SEVERE_CRAVING_MESSAGE;
     }
 
@@ -898,9 +898,6 @@ final class Cigarette implements Listener {
             setHandItem(player, hand, new ItemStack(Material.AIR));
         }
         player.updateInventory();
-        if (!addictions.containsKey(player.getUniqueId())) {
-            startOrResetAddiction(player);
-        }
     }
 
     /** Поджиг: огниво щёлкнуло, модель сменилась на горящую, имя то же. */
