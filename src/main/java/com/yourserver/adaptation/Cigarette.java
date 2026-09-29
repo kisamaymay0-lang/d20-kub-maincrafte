@@ -16,6 +16,7 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
+import org.bukkit.SoundCategory;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
@@ -67,8 +68,8 @@ final class Cigarette implements Listener {
 
     /** Палочек в одной тяге и скрытый запас вариантов сигареты. */
     static final int BARS_PER_PUFF = 16;
-    static final int FULL_PUFFS = 4;
-    static final int RESERVE = BARS_PER_PUFF * FULL_PUFFS;
+    static final int BIG_BARS_PER_PUFF = 32;
+    static final int RESERVE = BIG_BARS_PER_PUFF * 2;
     static final int SMALL_RESERVE = 16;
     static final int REGULAR_RESERVE = 32;
 
@@ -102,6 +103,12 @@ final class Cigarette implements Listener {
     static final int MAX_STACK_SIZE = 8;
     /** Долгое использование: выдох происходит по отпусканию ПКМ, не по таймеру. */
     private static final float USE_SECONDS = 3600.0F;
+    /** Тихий ванильный треск горящего огня, повторяемый при затяжке. */
+    private static final String INHALE_SOUND = "minecraft:block.fire.ambient";
+    private static final long INHALE_SOUND_REPEAT_TICKS = 20L;
+    /** Короткое шипение при закуривании и лёгкий треск при выдохе. */
+    private static final Sound LIGHT_HISS_SOUND = Sound.BLOCK_FIRE_EXTINGUISH;
+    private static final Sound EXHALE_SOUND = Sound.BLOCK_CAMPFIRE_CRACKLE;
     /** Звука во время тяги быть не должно: специально «пустой» ванильный звук. */
     private static final Key SILENT_SOUND = Key.key("intentionally_empty");
     /** Как часто перерисовываем шкалу и проверяем, не кончился ли запас. */
@@ -120,13 +127,16 @@ final class Cigarette implements Listener {
     /** Летящий дым: по одному потоку на игрока, новый обрывает старый. */
     private final Map<UUID, Smoke> smoke = new HashMap<>();
 
+    /** Задачи повторения звука вдоха, пока игрок держит ПКМ. */
+    private final Map<UUID, BukkitTask> inhaleSounds = new HashMap<>();
+
     /** Тик поджига: второе событие руки в том же нажатии не начинает тягу. */
     private final Map<UUID, Integer> litAtTick = new HashMap<>();
 
     private BukkitTask ticker;
 
     /** Тяга: рука, в которой сигарета, и тик, с которого игрок держит ПКМ. */
-    private record Puff(EquipmentSlot hand, int since) { }
+    private record Puff(EquipmentSlot hand, int since, int capacity) { }
 
     Cigarette(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -146,6 +156,13 @@ final class Cigarette implements Listener {
         smoke.clear();
         puffs.clear();
         litAtTick.clear();
+        for (BukkitTask task : inhaleSounds.values()) {
+            task.cancel();
+        }
+        inhaleSounds.clear();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            player.stopSound(INHALE_SOUND, SoundCategory.BLOCKS);
+        }
     }
 
     /** Холодная большая сигарета: модель sigareta-big, запас 64. */
@@ -276,6 +293,10 @@ final class Cigarette implements Listener {
         return variant(item).reserve;
     }
 
+    private static int barsPerPuff(ItemStack item) {
+        return variant(item) == Variant.BIG ? BIG_BARS_PER_PUFF : BARS_PER_PUFF;
+    }
+
     /**
      * Любой обычный ПКМ горящей сигаретой запускает тягу — и в воздух, и по
      * блоку. Сигарета забирает клик у блока, чтобы ваниль не погасила начало
@@ -378,11 +399,39 @@ final class Cigarette implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         puffs.remove(event.getPlayer().getUniqueId());
+        stopInhaleSound(event.getPlayer());
         litAtTick.remove(event.getPlayer().getUniqueId());
         Smoke flow = smoke.remove(event.getPlayer().getUniqueId());
         if (flow != null) {
             flow.stop();
         }
+    }
+
+    /** Запускает звук затяжки и повторяет короткую звуковую петлю, пока держат ПКМ. */
+    private void startInhaleSound(Player player) {
+        stopInhaleSound(player);
+        UUID id = player.getUniqueId();
+        playInhaleSound(player);
+        BukkitTask task = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            if (!player.isOnline() || !puffs.containsKey(id)) {
+                stopInhaleSound(player);
+                return;
+            }
+            playInhaleSound(player);
+        }, INHALE_SOUND_REPEAT_TICKS, INHALE_SOUND_REPEAT_TICKS);
+        inhaleSounds.put(id, task);
+    }
+
+    private static void playInhaleSound(Player player) {
+        player.playSound(player.getLocation(), INHALE_SOUND, SoundCategory.BLOCKS, 0.16F, 1.25F);
+    }
+
+    private void stopInhaleSound(Player player) {
+        BukkitTask task = inhaleSounds.remove(player.getUniqueId());
+        if (task != null) {
+            task.cancel();
+        }
+        player.stopSound(INHALE_SOUND, SoundCategory.BLOCKS);
     }
 
     /**
@@ -398,6 +447,10 @@ final class Cigarette implements Listener {
             Puff puff = entry.getValue();
             if (player == null) {
                 it.remove();
+                BukkitTask soundTask = inhaleSounds.remove(entry.getKey());
+                if (soundTask != null) {
+                    soundTask.cancel();
+                }
                 continue;
             }
             ItemStack item = handItem(player, puff.hand());
@@ -408,8 +461,9 @@ final class Cigarette implements Listener {
                 continue;
             }
             int left = bars(item);
-            int filled = barsFor(tick - puff.since(), left);
-            showGauge(player, filled);
+            int capacity = puff.capacity();
+            int filled = barsFor(tick - puff.since(), left, capacity);
+            showGauge(player, filled, capacity);
         }
     }
 
@@ -424,19 +478,22 @@ final class Cigarette implements Listener {
         if (!isCigarette(item) || !isLit(item)) {
             return;
         }
-        puffs.put(player.getUniqueId(), new Puff(hand, Bukkit.getCurrentTick()));
-        showGauge(player, 0);
+        int capacity = barsPerPuff(item);
+        puffs.put(player.getUniqueId(), new Puff(hand, Bukkit.getCurrentTick(), capacity));
+        startInhaleSound(player);
+        showGauge(player, 0, capacity);
     }
 
     /** Тяга закончилась отпусканием: дым и расход запаса. */
     private void finish(Player player, Puff puff) {
+        stopInhaleSound(player);
         ItemStack item = handItem(player, puff.hand());
         if (!isCigarette(item) || !isLit(item)) {
             player.sendActionBar(Component.empty());
             return;
         }
         int held = Bukkit.getCurrentTick() - puff.since();
-        spend(player, puff.hand(), barsForRelease(held, bars(item)));
+        spend(player, puff.hand(), barsForRelease(held, bars(item), puff.capacity()));
     }
 
     /**
@@ -490,6 +547,7 @@ final class Cigarette implements Listener {
         player.updateInventory();
         litAtTick.put(player.getUniqueId(), Bukkit.getCurrentTick() + 1);
         player.playSound(player.getLocation(), Sound.ITEM_FLINTANDSTEEL_USE, 0.5F, 1.2F);
+        player.playSound(mouth(player), LIGHT_HISS_SOUND, SoundCategory.BLOCKS, 0.18F, 1.35F);
         Location where = mouth(player);
         player.getWorld().spawnParticle(Particle.FLAME, where, 5, 0.04D, 0.04D, 0.04D, 0.01D);
         player.getWorld().spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, where, 2, 0.02D, 0.02D, 0.02D, 0.01D);
@@ -504,20 +562,27 @@ final class Cigarette implements Listener {
         if (old != null) {
             old.stop();
         }
+        player.playSound(mouth(player), EXHALE_SOUND, SoundCategory.BLOCKS, 0.24F, 1.35F);
         Smoke flow = new Smoke(player, filled);
         smoke.put(player.getUniqueId(), flow);
         flow.start();
     }
 
-    /** Шкала тяги: "[ |||||||||||||||| ]", палочки слева направо желтеют. */
-    private static void showGauge(Player player, int filled) {
-        player.sendActionBar(gauge(filled));
+    /** Шкала тяги нужной модели, набитые палочки слева направо желтеют. */
+    private static void showGauge(Player player, int filled, int capacity) {
+        player.sendActionBar(gauge(filled, capacity));
     }
 
-    /** Та же шкала одной строкой: 16 палочек, набитые — жёлтые. */
+    /** Большая сигарета — вариант по умолчанию — показывает шкалу на 32 палочки. */
     static Component gauge(int filled) {
+        return gauge(filled, BIG_BARS_PER_PUFF);
+    }
+
+    /** Шкала с динамической ёмкостью: 16 палочек у обычных и 32 у большой. */
+    static Component gauge(int filled, int capacity) {
+        int size = Math.clamp(capacity, 1, BIG_BARS_PER_PUFF);
         Component gauge = Component.text("[ ", NamedTextColor.DARK_GRAY);
-        for (int i = 0; i < BARS_PER_PUFF; i++) {
+        for (int i = 0; i < size; i++) {
             gauge = gauge.append(Component.text("|", i < filled ? NamedTextColor.YELLOW : NamedTextColor.DARK_GRAY));
         }
         return gauge.append(Component.text(" ]", NamedTextColor.DARK_GRAY));
@@ -528,24 +593,37 @@ final class Cigarette implements Listener {
      * раньше первой палочки finish() всё равно даёт минимальную тягу на выдох.
      */
     static int barsFor(int ticks, int left) {
+        return barsFor(ticks, left, BIG_BARS_PER_PUFF);
+    }
+
+    static int barsFor(int ticks, int left, int capacity) {
         if (ticks <= 0 || left <= 0) {
             return 0;
         }
-        return Math.clamp(Math.min(BARS_PER_PUFF, ticks / TICKS_PER_BAR), 0, left);
+        return Math.clamp(Math.min(Math.clamp(capacity, 1, BIG_BARS_PER_PUFF), ticks / TICKS_PER_BAR), 0, left);
     }
 
     /** При отпускании любая ненулевая тяга даёт минимум одну палочку выдоха. */
     static int barsForRelease(int ticks, int left) {
-        int filled = barsFor(ticks, left);
+        return barsForRelease(ticks, left, BIG_BARS_PER_PUFF);
+    }
+
+    static int barsForRelease(int ticks, int left, int capacity) {
+        int filled = barsFor(ticks, left, capacity);
         return ticks > 0 && filled == 0 ? Math.min(1, Math.max(0, left)) : filled;
     }
 
     /**
      * Сколько тиков выдыхается дым: ровно 0,2 секунды на каждую набранную
-     * палочку. Одна палочка — 4 тика; 16 палочек — 3,2 секунды.
+     * палочку. Одна палочка — 4 тика; 32 палочки у большой — 6,4 секунды.
      */
     static int exhaleTicks(int bars) {
-        return Math.clamp(bars, 0, BARS_PER_PUFF) * TICKS_PER_BAR;
+        return Math.clamp(bars, 0, BIG_BARS_PER_PUFF) * TICKS_PER_BAR;
+    }
+
+    /** Больше набранных палочек — гуще дым; большая полная тяга даёт 10 частиц за тик. */
+    static int smokeParticlesPerTick(int bars) {
+        return 2 + Math.clamp(bars, 0, BIG_BARS_PER_PUFF) / 4;
     }
 
     /** Рот: чуть впереди и ниже глаз, чтобы дым шёл из лица, а не из центра головы. */
@@ -603,7 +681,7 @@ final class Cigarette implements Listener {
         Smoke(Player player, int bars) {
             this.player = player;
             this.total = exhaleTicks(bars);
-            this.perTick = 2 + bars / 4;
+            this.perTick = smokeParticlesPerTick(bars);
         }
 
         void start() {
