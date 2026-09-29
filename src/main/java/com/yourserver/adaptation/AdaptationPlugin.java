@@ -51,6 +51,8 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private CaviarListener caviarListener;
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
+    /** Сигарета из /f8: тикает шкалу тяги и дым, поэтому нужен доступ на выключении. */
+    private Cigarette cigarette;
     /** Политые кораллы: список живёт в файле, поэтому нужен доступ на выключении. */
     private CoralCare coralCare;
     private SpecialCatch specialCatch;
@@ -134,6 +136,9 @@ public void onEnable() {
 
     ancientJug = new AncientJug(this, dataWriter);
     getServer().getPluginManager().registerEvents(ancientJug, this);
+
+    // Сигарета: слушает клики сама, поэтому registerEvents внутри конструктора.
+    cigarette = new Cigarette(this);
 
     // Миниигра особого предмета биома: вылавливается вместо обычной рыбы.
     specialCatch = new SpecialCatch(this, ancientJug, winterFishing);
@@ -236,6 +241,9 @@ public void onEnable() {
         }
         if (ancientJug != null) {
             ancientJug.disable();
+        }
+        if (cigarette != null) {
+            cigarette.disable();
         }
         if (coralCare != null) {
             coralCare.flush();
