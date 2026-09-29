@@ -15,7 +15,6 @@ import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
-import org.bukkit.block.Dispenser;
 import org.bukkit.block.Dropper;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Directional;
@@ -158,7 +157,7 @@ final class Cigarette implements Listener {
     /** Летящий дым: по одному потоку на игрока, новый обрывает старый. */
     private final Map<UUID, Smoke> smoke = new HashMap<>();
 
-    /** Дымы, запущенные редстоун-выбрасывателями/раздатчиками. */
+    /** Дымы, запущенные редстоун-выбрасывателями. */
     private final Set<DeviceSmoke> deviceSmokes = new HashSet<>();
     private final Map<Block, Integer> machineActivationTicks = new HashMap<>();
 
@@ -375,14 +374,18 @@ final class Cigarette implements Listener {
         return variant(item) == Variant.BIG ? BIG_BARS_PER_PUFF : BARS_PER_PUFF;
     }
 
-    /** Redstone machines smoke 16 bars from a cigarette instead of ejecting it. */
+    /** Redstone droppers smoke 16 bars from a cigarette instead of ejecting it. */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onMachineDispense(BlockDispenseEvent event) {
         Block block = event.getBlock();
         Material blockType = block.getType();
-        if (blockType != Material.DROPPER && blockType != Material.DISPENSER) return;
+        if (blockType != Material.DROPPER) return;
         Inventory inventory = machineInventory(block);
         if (inventory == null || (!isCigarette(event.getItem()) && !containsCigarette(inventory))) return;
+        if (isDeviceSmoking(block)) {
+            event.setCancelled(true);
+            return;
+        }
         if (!claimMachineActivation(block)) {
             event.setCancelled(true);
             return;
@@ -410,6 +413,10 @@ final class Cigarette implements Listener {
         Block block = source.getBlock();
         ItemStack requested = event.getItem().clone();
         if (!isCigarette(requested) && !containsCigarette(event.getSource())) return;
+        if (isDeviceSmoking(block)) {
+            event.setCancelled(true);
+            return;
+        }
         if (!claimMachineActivation(block)) {
             event.setCancelled(true);
             return;
@@ -423,8 +430,17 @@ final class Cigarette implements Listener {
     private void scheduleMachineSmoke(Block block, ItemStack requested) {
         Bukkit.getScheduler().runTask(plugin, () -> {
             Inventory inventory = machineInventory(block);
-            if (inventory != null) smokeFromInventory(block, inventory, requested);
+            if (inventory != null && !isDeviceSmoking(block)) {
+                smokeFromInventory(block, inventory, requested);
+            }
         });
+    }
+
+    private boolean isDeviceSmoking(Block block) {
+        for (DeviceSmoke flow : deviceSmokes) {
+            if (flow.block.equals(block)) return true;
+        }
+        return false;
     }
 
     private static boolean containsCigarette(Inventory inventory) {
@@ -446,11 +462,10 @@ final class Cigarette implements Listener {
     private static Inventory machineInventory(Block block) {
         BlockState state = block.getState();
         if (state instanceof Dropper dropper) return dropper.getInventory();
-        if (state instanceof Dispenser dispenser) return dispenser.getInventory();
         return null;
     }
 
-    /** Consume one 16-bar machine puff, update the real block inventory, then vent outward. */
+    /** Consume one 16-bar dropper puff, update its inventory, then vent outward. */
     private boolean smokeFromInventory(Block block, Inventory inventory, ItemStack dispensed) {
         BlockData data = block.getBlockData();
         if (!(data instanceof Directional directional)) return false;
@@ -459,7 +474,7 @@ final class Cigarette implements Listener {
             ItemStack stored = inventory.getItem(slot);
             if (!isCigarette(stored)) continue;
             if (isCigarette(dispensed) && !sameCigaretteType(stored, dispensed)) continue;
-            int spent = dispenserBarsToSmoke(bars(stored));
+            int spent = dropperBarsToSmoke(bars(stored));
             if (spent <= 0) return false;
             int remaining = bars(stored) - spent;
             if (remaining > 0) {
@@ -482,7 +497,7 @@ final class Cigarette implements Listener {
         return variant(first) == variant(second) && isLit(first) == isLit(second);
     }
 
-    static int dispenserBarsToSmoke(int available) {
+    static int dropperBarsToSmoke(int available) {
         return Math.clamp(available, 0, BARS_PER_PUFF);
     }
 
@@ -565,6 +580,11 @@ final class Cigarette implements Listener {
         }
         Player player = event.getPlayer();
         UUID playerId = player.getUniqueId();
+        if (smoke.containsKey(playerId) && isCigarette(handItem(player, hand))) {
+            event.setUseInteractedBlock(Event.Result.DENY);
+            event.setUseItemInHand(Event.Result.DENY);
+            return;
+        }
         int now = Bukkit.getCurrentTick();
         Integer litTick = litAtTick.get(playerId);
         if (litTick != null) {
@@ -1198,10 +1218,10 @@ final class Cigarette implements Listener {
         return Math.clamp(bars, 0, BIG_BARS_PER_PUFF) * TICKS_PER_BAR;
     }
 
-    /** Количество частиц уменьшено на 20%; большие тяги остаются гуще. */
+    /** Количество частиц уменьшено примерно вдвое; большие тяги остаются гуще. */
     static int smokeParticlesPerTick(int bars) {
         int original = 2 + Math.clamp(bars, 0, BIG_BARS_PER_PUFF) / 4;
-        return Math.max(1, (original * 4 + 2) / 5);
+        return Math.max(1, original / 2);
     }
 
     /** Рот: чуть впереди и ниже глаз, чтобы дым шёл из лица, а не из центра головы. */

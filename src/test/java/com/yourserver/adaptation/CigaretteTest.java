@@ -46,11 +46,11 @@ final class CigaretteTest {
 
     @Test
     void выбрасывательТратитДоШестнадцатиПалочекЗаСрабатывание() {
-        assertEquals(16, Cigarette.dispenserBarsToSmoke(64));
-        assertEquals(16, Cigarette.dispenserBarsToSmoke(16));
-        assertEquals(5, Cigarette.dispenserBarsToSmoke(5), "последний неполный запас тоже выкуривается");
-        assertEquals(0, Cigarette.dispenserBarsToSmoke(0));
-        assertEquals(0, Cigarette.dispenserBarsToSmoke(-1));
+        assertEquals(16, Cigarette.dropperBarsToSmoke(64));
+        assertEquals(16, Cigarette.dropperBarsToSmoke(16));
+        assertEquals(5, Cigarette.dropperBarsToSmoke(5), "последний неполный запас тоже выкуривается");
+        assertEquals(0, Cigarette.dropperBarsToSmoke(0));
+        assertEquals(0, Cigarette.dropperBarsToSmoke(-1));
     }
 
     @Test
@@ -155,13 +155,13 @@ final class CigaretteTest {
         assertEquals(128, Cigarette.exhaleTicks(Cigarette.BIG_BARS_PER_PUFF), "большая полная тяга — 6,4 секунды");
         assertEquals(128, Cigarette.exhaleTicks(Cigarette.BIG_BARS_PER_PUFF + 50), "не более 32 палочек");
         assertEquals(128, Cigarette.exhaleTicks(Cigarette.RESERVE), "запас не меняет предел одной большой тяги");
-        assertEquals(5, Cigarette.smokeParticlesPerTick(Cigarette.BARS_PER_PUFF),
-                "обычная полная тяга даёт на 20% меньше частиц за тик");
-        assertEquals(8, Cigarette.smokeParticlesPerTick(Cigarette.BIG_BARS_PER_PUFF),
-                "большая полная тяга даёт на 20% меньше частиц за тик");
-        assertEquals(1024, Cigarette.exhaleTicks(Cigarette.BIG_BARS_PER_PUFF)
+        assertEquals(3, Cigarette.smokeParticlesPerTick(Cigarette.BARS_PER_PUFF),
+                "обычная полная тяга даёт вдвое меньше частиц за тик");
+        assertEquals(5, Cigarette.smokeParticlesPerTick(Cigarette.BIG_BARS_PER_PUFF),
+                "большая полная тяга даёт вдвое меньше частиц за тик");
+        assertEquals(640, Cigarette.exhaleTicks(Cigarette.BIG_BARS_PER_PUFF)
                 * Cigarette.smokeParticlesPerTick(Cigarette.BIG_BARS_PER_PUFF),
-                "полный выдох большой сигареты даёт на 20% меньше частиц дыма");
+                "полный выдох большой сигареты даёт вдвое меньше частиц дыма");
         assertEquals(0, Cigarette.exhaleTicks(-5), "отрицательных палочек не бывает");
         assertEquals(8, Cigarette.MAX_STACK_SIZE, "в стаке не больше восьми сигарет");
     }
