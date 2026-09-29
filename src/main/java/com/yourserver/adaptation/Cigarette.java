@@ -47,22 +47,17 @@ import java.util.concurrent.ThreadLocalRandom;
  * «Сигарета»: имя не меняется от поджига, описания у предмета нет.
  *
  * <p>Поджиг: огниво во второй руке, сигарета в главной, шифт + ПКМ — модель
- * меняется на горящую. Поджиг и тяга работают и по блоку, и в воздухе: пока на
- * сигарете нет съедобного компонента, клиент не присылает «ПКМ в воздух»
- * вовсе, и потому без компонентов жест ловился только по блоку.
+ * меняется на горящую. Любой ПКМ горящей сигаретой начинает тягу, и в воздух,
+ * и по блоку. Тягу держат, отпускают — идёт выдох. Анимация трубения в козий
+ * рог видна и самому игроку от первого лица; само «съедение» запрещено в
+ * {@link #onEat}. Сигарета перехватывает ПКМ у блока, чтобы действие работало
+ * в обоих случаях.
  *
- * <p>Тяга: ПКМ держать, отпустить — выдох. Анимация трубения в козий рог видна
- * и самому игроку от первого лица: предмет помечен съедобным компонентом с
- * огромным временем использования, само «съедение» запрещено в {@link #onEat}.
- * Над инвентарём висит шкала тяги, на отпускании ПКМ изо рта летит дым по
- * направлению взгляда. Без шифта ваниль первой отдаёт ПКМ блоку, с которым
- * умеет взаимодействовать (сундук, дверь, рычаг): там взаимодействие и
- * случается. С шифтом игрок игнорирует все блоки и курит в любом случае.
- *
- * <p>Дым белый везде, кроме полной тяги: тогда облако густое и тёмное. Чем
- * длиннее затяжка, тем дольше выдох — от секунды до восьми секунд. Запас — 64
- * палочки, четыре полные тяги; когда запас кончается, сигарета ломается и
- * исчезает.
+ * <p>Шкала пополняется на палочку каждые 0,2 секунды. После отпускания изо рта
+ * непрерывно вылетают частицы уютного дыма костра в текущем направлении
+ * взгляда, выдох длится от 0,5 до 8 секунд. Запас — 64 палочки, четыре полных
+ * тяги; когда запас кончается, сигарета ломается и исчезает. Стак — до восьми
+ * сигарет.
  */
 final class Cigarette implements Listener {
 
@@ -83,26 +78,24 @@ final class Cigarette implements Listener {
     static final int FULL_PUFFS = 4;
     static final int RESERVE = BARS_PER_PUFF * FULL_PUFFS;
 
-    /** Одна палочка — полсекунды тяги. */
-    private static final int TICKS_PER_BAR = 10;
+    /** Одна палочка — 0,2 секунды тяги. */
+    private static final int TICKS_PER_BAR = 4;
+    /** Сигареты объединяются максимум по восемь штук в стаке. */
+    static final int MAX_STACK_SIZE = 8;
     /** Время «использования»: тянуть можно сколько угодно, обрыва нет. */
     private static final float USE_SECONDS = 3600.0F;
     /** Звука во время тяги быть не должно: специально «пустой» ванильный звук. */
     private static final Key SILENT_SOUND = Key.key("intentionally_empty");
     /** Как часто перерисовываем шкалу и проверяем, не кончился ли запас. */
     private static final long PERIOD = 2L;
-    /** Выдох после тяги: от секунды до восьми, полсекунды на палочку. */
-    private static final double EXHALE_MIN_SECONDS = 1.0D;
+    /** Выдох после тяги: от половины секунды до восьми, полсекунды на палочку. */
+    private static final double EXHALE_MIN_SECONDS = 0.5D;
     private static final double EXHALE_MAX_SECONDS = 8.0D;
     /** Начало струи дыма: чуть впереди и ниже глаз, чтобы шёл изо рта. */
     private static final double MOUTH_AHEAD = 0.28D;
     private static final double MOUTH_DOWN = 0.12D;
-    /** Струя уходит на 0.22 блока за тик, длительность зависит от затяжки. */
-    private static final double SMOKE_STEP = 0.22D;
-    private static final double SMOKE_RISE = 0.02D;
-    /** Сама частица летит медленно и чуть вверх, как настоящий дым. */
-    private static final double SMOKE_PUSH = 0.05D;
-    private static final double SMOKE_LIFT = 0.012D;
+    /** Расстояние выброса дыма перед ртом. */
+    private static final double SMOKE_PUSH = 0.04D;
 
     private final JavaPlugin plugin;
 
@@ -180,6 +173,7 @@ final class Cigarette implements Listener {
                 .sound(SILENT_SOUND)
                 .hasConsumeParticles(false)
                 .build(), "consumable");
+        apply(item, DataComponentTypes.MAX_STACK_SIZE, MAX_STACK_SIZE, "max_stack_size");
         return item;
     }
 
@@ -222,20 +216,12 @@ final class Cigarette implements Listener {
     }
 
     /**
-     * ПКМ сигаретой — и по блоку, и в воздухе. Поджиг: шифт + ПКМ с огнивом в
-     * другой руке. Тяга: ПКМ держать, отпустить — выдох.
-     *
-     * <p>Клик отдаём ванили гранулами, а не отменой целиком: {@code
-     * setUseInteractedBlock} решает, трогать ли блок, {@code setUseItemInHand} —
-     * начинать ли использование предмета (анимацию трубения в козий рог и
-     * держание ПКМ). Отмена события целиком гасила и то и другое, поэтому жест
-     * жил только когда клиент присылал клик по блоку.
-     *
-     * <p>С шифтом игрок игнорирует все блоки и курит всегда. Без шифта ваниль
-     * первой отдаёт ПКМ блоку, с которым умеет взаимодействовать: сундук
-     * откроется, дверь — и сигарета не тронется.
+     * Любой обычный ПКМ горящей сигаретой запускает тягу — и в воздух, и по
+     * блоку. Сигарета забирает клик у блока, чтобы ваниль не погасила начало
+     * использования предмета; огниво в другой руке по-прежнему зажигает её
+     * при шифт + ПКМ.
      */
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
     public void onUse(PlayerInteractEvent event) {
         Action action = event.getAction();
         if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) {
@@ -247,7 +233,7 @@ final class Cigarette implements Listener {
         }
         Player player = event.getPlayer();
 
-        if (isCigarette(event.getItem())) {
+        if (isCigarette(handItem(player, hand))) {
             // Сигареты в обеих руках: клик считаем один раз, по главной руке.
             if (hand == EquipmentSlot.OFF_HAND && isCigarette(player.getInventory().getItemInMainHand())) {
                 return;
@@ -257,20 +243,19 @@ final class Cigarette implements Listener {
                     && isFlintAndSteel(handItem(player, other(hand)))) {
                 light(player, hand);
             }
-            if (isLit(handItem(player, hand)) && (player.isSneaking() || !blocksInteraction(event))) {
-                // Горящая тянется: тяга начинается сразу, ваниль поднимает предмет ко рту.
+            if (isLit(handItem(player, hand))) {
+                // Не даём блоку перехватить клик; предмет используется и в воздухе, и по блоку.
                 event.setUseInteractedBlock(Event.Result.DENY);
                 event.setUseItemInHand(Event.Result.ALLOW);
                 hold(player, hand);
-            } else if (!isLit(handItem(player, hand))) {
-                // Холодной сигарете трубеть нечем: ни анимации, ни шкалы.
+            } else {
                 event.setUseItemInHand(Event.Result.DENY);
             }
             return;
         }
 
         // Огниво в этой руке, холодная сигарета в другой: тот же поджиг, только руками наоборот.
-        if (player.isSneaking() && isFlintAndSteel(event.getItem())) {
+        if (player.isSneaking() && isFlintAndSteel(handItem(player, hand))) {
             if (hand == EquipmentSlot.OFF_HAND && isFlintAndSteel(player.getInventory().getItemInMainHand())) {
                 return;
             }
@@ -278,27 +263,11 @@ final class Cigarette implements Listener {
             ItemStack cigarette = handItem(player, cigaretteHand);
             if (isCigarette(cigarette) && !isLit(cigarette)) {
                 light(player, cigaretteHand);
-                // Огниво в воздухе ничего не зажжёт, а вторая рука должна начать тягу.
                 event.setUseInteractedBlock(Event.Result.DENY);
                 event.setUseItemInHand(Event.Result.ALLOW);
                 hold(player, cigaretteHand);
             }
         }
-    }
-
-    /**
-     * Впереди блок, с которым ваниль умеет взаимодействовать: сундук, дверь,
-     * рычаг, наковальня. Такой блок забирает ПКМ себе, и только шифт его
-     * отменяет — тогда сигарета тянется не глядя на блок.
-     */
-    private static boolean blocksInteraction(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) {
-            return false;
-        }
-        if (event.getClickedBlock() == null) {
-            return false;
-        }
-        return event.useInteractedBlock() != Event.Result.DENY;
     }
 
     /** Отпустили ПКМ: сколько набилось затяжек — столько дыма. */
@@ -391,7 +360,8 @@ final class Cigarette implements Listener {
             player.sendActionBar(Component.empty());
             return;
         }
-        spend(player, puff.hand(), barsFor(Bukkit.getCurrentTick() - puff.since(), bars(item)));
+        int held = Bukkit.getCurrentTick() - puff.since();
+        spend(player, puff.hand(), barsForRelease(held, bars(item)));
     }
 
     /**
@@ -420,7 +390,7 @@ final class Cigarette implements Listener {
     private void breakUp(Player player, EquipmentSlot hand) {
         player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.7F, 1.0F);
         Location where = mouth(player);
-        player.getWorld().spawnParticle(Particle.SMOKE, where, 12, 0.08D, 0.08D, 0.08D, 0.02D);
+        player.getWorld().spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, where, 4, 0.04D, 0.04D, 0.04D, 0.01D);
         ItemStack item = handItem(player, hand);
         if (item != null && item.getAmount() > 1) {
             item.setAmount(item.getAmount() - 1);
@@ -444,7 +414,7 @@ final class Cigarette implements Listener {
         player.playSound(player.getLocation(), Sound.ITEM_FLINTANDSTEEL_USE, 0.5F, 1.2F);
         Location where = mouth(player);
         player.getWorld().spawnParticle(Particle.FLAME, where, 5, 0.04D, 0.04D, 0.04D, 0.01D);
-        player.getWorld().spawnParticle(Particle.SMOKE, where, 3, 0.04D, 0.04D, 0.04D, 0.01D);
+        player.getWorld().spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, where, 2, 0.02D, 0.02D, 0.02D, 0.01D);
     }
 
     /**
@@ -476,8 +446,8 @@ final class Cigarette implements Listener {
     }
 
     /**
-     * Сколько палочек набилось за тики тяги: полсекунды на палочку, но не
-     * больше одной тяги и не больше оставшегося запаса.
+     * Сколько палочек набилось за тики тяги: одна за 0,2 секунды. При отпускании
+     * раньше первой палочки finish() всё равно даёт минимальную тягу на выдох.
      */
     static int barsFor(int ticks, int left) {
         if (ticks <= 0 || left <= 0) {
@@ -486,10 +456,15 @@ final class Cigarette implements Listener {
         return Math.clamp(Math.min(BARS_PER_PUFF, ticks / TICKS_PER_BAR), 0, left);
     }
 
+    /** При отпускании любая ненулевая тяга даёт минимум одну палочку выдоха. */
+    static int barsForRelease(int ticks, int left) {
+        int filled = barsFor(ticks, left);
+        return ticks > 0 && filled == 0 ? Math.min(1, Math.max(0, left)) : filled;
+    }
+
     /**
-     * Сколько тиков игрок выдыхает дым после тяги: полсекунды выдоха на
-     * палочку, но не короче секунды и не длиннее восьми. Полная тяга (шестнадцать
-     * палочек) — ровно восемь секунд, самая короткая — секунда.
+     * Сколько тиков игрок непрерывно выдыхает дым после тяги: полсекунды на
+     * палочку, минимум полсекунды, максимум восемь секунд.
      */
     static int exhaleTicks(int bars) {
         double seconds = Math.max(EXHALE_MIN_SECONDS, Math.min(EXHALE_MAX_SECONDS, bars * 0.5D));
@@ -536,34 +511,21 @@ final class Cigarette implements Listener {
     }
 
     /**
-     * Один выдох: струя летит изо рта по направлению взгляда, а потом облако
-     * держится на месте и ползёт вверх. Длительность выдоха зависит от тяги —
-     * от секунды до восьми секунд, дым белый, и только полная тяга даёт густое
-     * тёмное облако.
+     * Один непрерывный выдох. Каждый тик берёт новое положение рта и новое
+     * направление взгляда, поэтому поток всё время поворачивает вместе с игроком.
      */
     private final class Smoke implements Runnable {
 
         private final Player player;
-        private final Vector dir;
-        private final Location at;
-        /** Струя изо рта: короткий рывок вперёд, дальше облако просто висит. */
-        private final int jetSteps;
-        /** Сколько всего тиков длится выдох. */
         private final int total;
         private final int perTick;
-        private final Particle particle;
         private int tick;
         private BukkitTask task;
 
         Smoke(Player player, int bars) {
             this.player = player;
-            this.dir = player.getEyeLocation().getDirection().normalize();
-            this.at = mouth(player);
             this.total = exhaleTicks(bars);
-            this.jetSteps = Math.min(total, 4 + bars / 2);
-            this.perTick = 1 + bars / 6;
-            // Только полная тяга идёт густым тёмным дымом, весь остальной — белый.
-            this.particle = bars >= BARS_PER_PUFF ? Particle.LARGE_SMOKE : Particle.SMOKE;
+            this.perTick = 2 + bars / 4;
         }
 
         void start() {
@@ -580,43 +542,40 @@ final class Cigarette implements Listener {
         @Override
         public void run() {
             if (tick >= total || !player.isOnline()) {
-                // Выдох кончился: снимаем себя, чтобы не копить отработавшие задачи.
                 stop();
                 if (smoke.get(player.getUniqueId()) == this) {
                     smoke.remove(player.getUniqueId());
                 }
                 return;
             }
-            boolean jet = tick < jetSteps;
+            Location origin = mouth(player);
+            Vector dir = player.getEyeLocation().getDirection().normalize();
+            // Новые частицы рождаются непрерывно вдоль текущего взгляда, а не
+            // по направлению взгляда в момент отпускания ПКМ.
             for (int i = 0; i < perTick; i++) {
-                Location spot = at.clone().add(jitter());
-                // Ноль частиц со скоростью вместо разброса: дым летит, а не висит.
+                double distance = 0.18D + (i % 4) * 0.16D;
+                Location spot = origin.clone().add(dir.clone().multiply(distance)).add(jitter());
                 player.getWorld().spawnParticle(
-                        particle,
+                        Particle.CAMPFIRE_COSY_SMOKE,
                         spot,
                         0,
                         dir.getX() * SMOKE_PUSH,
-                        dir.getY() * SMOKE_PUSH + (jet ? SMOKE_LIFT : SMOKE_LIFT * 3.0D),
+                        dir.getY() * SMOKE_PUSH + 0.01D,
                         dir.getZ() * SMOKE_PUSH,
                         1.0D
                 );
             }
-            if (jet) {
-                at.add(dir.getX() * SMOKE_STEP, dir.getY() * SMOKE_STEP + SMOKE_RISE, dir.getZ() * SMOKE_STEP);
-            } else {
-                // Рывок кончился: облако осталось на месте и медленно ползёт вверх.
-                at.add(0, SMOKE_RISE * 2.0D, 0);
-            }
             tick++;
         }
 
-        private static Vector jitter() {
+        private Vector jitter() {
             ThreadLocalRandom random = ThreadLocalRandom.current();
             return new Vector(
-                    (random.nextDouble() - 0.5D) * 0.1D,
-                    (random.nextDouble() - 0.5D) * 0.1D,
-                    (random.nextDouble() - 0.5D) * 0.1D
+                    (random.nextDouble() - 0.5D) * 0.04D,
+                    (random.nextDouble() - 0.5D) * 0.04D,
+                    (random.nextDouble() - 0.5D) * 0.04D
             );
         }
     }
+
 }
