@@ -90,6 +90,17 @@ final class CigaretteTest {
     }
 
     @Test
+    void настраиваемыеТаймерыМожноУскоритьДляИгровойПроверки() {
+        int firstStage = 200;
+        int interval = 80;
+        assertEquals(0, Cigarette.withdrawalStageForTicks(firstStage - 1, firstStage, interval));
+        assertEquals(1, Cigarette.withdrawalStageForTicks(firstStage, firstStage, interval));
+        assertEquals(2, Cigarette.withdrawalStageForTicks(firstStage + interval, firstStage, interval));
+        assertEquals(3, Cigarette.withdrawalStageForTicks(firstStage + 2 * interval, firstStage, interval));
+        assertEquals(4, Cigarette.withdrawalStageForTicks(firstStage + 3 * interval, firstStage, interval));
+    }
+
+    @Test
     void уРазныхМоделейОтдельныйЗапас() {
         assertEquals(64, Cigarette.RESERVE, "большая сигарета");
         assertEquals(16, Cigarette.SMALL_RESERVE, "маленькая sigareta-small");

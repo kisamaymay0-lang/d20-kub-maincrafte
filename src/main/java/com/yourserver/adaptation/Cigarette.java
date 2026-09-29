@@ -138,6 +138,8 @@ final class Cigarette implements Listener {
     private static final double SMOKE_PUSH = 0.04D;
 
     private final JavaPlugin plugin;
+    private final int firstWithdrawalTicks;
+    private final int withdrawalStageTicks;
 
     /** Кто сейчас тянет сигарету: рука и тик начала. */
     private final Map<UUID, Puff> puffs = new HashMap<>();
@@ -177,6 +179,10 @@ final class Cigarette implements Listener {
 
     Cigarette(JavaPlugin plugin) {
         this.plugin = plugin;
+        this.firstWithdrawalTicks = configuredTicks(plugin, "cigarette.addiction.first-stage-ticks",
+                FIRST_WITHDRAWAL_TICKS);
+        this.withdrawalStageTicks = configuredTicks(plugin, "cigarette.addiction.interval-ticks",
+                WITHDRAWAL_STAGE_TICKS);
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         ticker = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, PERIOD, PERIOD);
     }
@@ -666,7 +672,7 @@ final class Cigarette implements Listener {
         }
         state.stage = 0;
         state.lastSmokeTick = Bukkit.getCurrentTick();
-        scheduleAddictionTransition(id, state, FIRST_WITHDRAWAL_TICKS);
+        scheduleAddictionTransition(id, state, firstWithdrawalTicks);
     }
 
     private void scheduleAddictionTransition(UUID id, AddictionState state, long delay) {
@@ -684,7 +690,7 @@ final class Cigarette implements Listener {
         }
         state.transitionTask = null;
         int elapsed = Bukkit.getCurrentTick() - state.lastSmokeTick;
-        int nextStage = withdrawalStageForTicks(elapsed);
+        int nextStage = withdrawalStageForTicks(elapsed, firstWithdrawalTicks, withdrawalStageTicks);
         Player player = Bukkit.getPlayer(id);
         if (nextStage >= 4) {
             if (player != null) {
@@ -697,7 +703,7 @@ final class Cigarette implements Listener {
             return;
         }
         if (nextStage == 0) {
-            scheduleAddictionTransition(id, state, FIRST_WITHDRAWAL_TICKS - elapsed);
+            scheduleAddictionTransition(id, state, firstWithdrawalTicks - elapsed);
             return;
         }
         state.stage = nextStage;
@@ -705,26 +711,42 @@ final class Cigarette implements Listener {
             applyWithdrawalStage(player, state);
             startWithdrawalMessages(player, state);
         }
-        long nextBoundary = (long) FIRST_WITHDRAWAL_TICKS
-                + (long) nextStage * WITHDRAWAL_STAGE_TICKS;
+        long nextBoundary = (long) firstWithdrawalTicks
+                + (long) nextStage * withdrawalStageTicks;
         scheduleAddictionTransition(id, state, nextBoundary - elapsed);
     }
 
     /** 0=нет ломки, 1=слабая, 2=сильная с тошнотой, 3=сильная без тошноты, 4=зависимость прошла. */
     static int withdrawalStageForTicks(int elapsedTicks) {
-        if (elapsedTicks < FIRST_WITHDRAWAL_TICKS) {
+        return withdrawalStageForTicks(elapsedTicks, FIRST_WITHDRAWAL_TICKS, WITHDRAWAL_STAGE_TICKS);
+    }
+
+    static int withdrawalStageForTicks(int elapsedTicks, int firstStageTicks, int intervalTicks) {
+        long elapsed = elapsedTicks;
+        long first = firstStageTicks;
+        long interval = intervalTicks;
+        if (elapsed < first) {
             return 0;
         }
-        if (elapsedTicks < FIRST_WITHDRAWAL_TICKS + WITHDRAWAL_STAGE_TICKS) {
+        if (elapsed < first + interval) {
             return 1;
         }
-        if (elapsedTicks < FIRST_WITHDRAWAL_TICKS + 2 * WITHDRAWAL_STAGE_TICKS) {
+        if (elapsed < first + 2L * interval) {
             return 2;
         }
-        if (elapsedTicks < FIRST_WITHDRAWAL_TICKS + 3 * WITHDRAWAL_STAGE_TICKS) {
+        if (elapsed < first + 3L * interval) {
             return 3;
         }
         return 4;
+    }
+
+    private static int configuredTicks(JavaPlugin plugin, String path, int fallback) {
+        long value = plugin.getConfig().getLong(path, fallback);
+        if (value < 1 || value > Integer.MAX_VALUE) {
+            plugin.getLogger().warning("[Сигарета] " + path + " вне диапазона, используется " + fallback);
+            return fallback;
+        }
+        return (int) value;
     }
 
     private void startWithdrawalMessages(Player player, AddictionState state) {
