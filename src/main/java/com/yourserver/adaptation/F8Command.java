@@ -35,6 +35,7 @@ public class F8Command implements CommandExecutor, Listener {
     private final CaviarListener caviarListener;
     private final WinterFishing winterFishing;
     private final AncientJug ancientJug;
+    private final Apvsh apvsh;
 
     private final NamespacedKey menuKey;
 
@@ -48,6 +49,20 @@ public class F8Command implements CommandExecutor, Listener {
             WinterFishing winterFishing,
             AncientJug ancientJug
     ) {
+        this(plugin, diceRollListener, flaskListener, rollbackListener, copperBlockListener, caviarListener, winterFishing, ancientJug, null);
+    }
+
+    public F8Command(
+            AdaptationPlugin plugin,
+            DiceRollListener diceRollListener,
+            FlaskListener flaskListener,
+            RollbackListener rollbackListener,
+            CopperBlockListener copperBlockListener,
+            CaviarListener caviarListener,
+            WinterFishing winterFishing,
+            AncientJug ancientJug,
+            Apvsh apvsh
+    ) {
         this.plugin = plugin;
         this.diceRollListener = diceRollListener;
         this.flaskListener = flaskListener;
@@ -56,6 +71,7 @@ public class F8Command implements CommandExecutor, Listener {
         this.caviarListener = caviarListener;
         this.winterFishing = winterFishing;
         this.ancientJug = ancientJug;
+        this.apvsh = apvsh;
         this.menuKey = new NamespacedKey(plugin, "f8_menu");
     }
 
@@ -75,6 +91,18 @@ public class F8Command implements CommandExecutor, Listener {
             String summary = plugin.reloadPluginSettings();
             sender.sendMessage("§aНастройки f8-plugin перечитаны из config.yml.");
             if (summary != null && !summary.isBlank()) sender.sendMessage(summary);
+            return true;
+        }
+
+        if (args.length > 0 && args[0].equalsIgnoreCase("apvsh")) {
+            if (!sender.hasPermission("f8.admin")) {
+                sender.sendMessage("§cНедостаточно прав.");
+                return true;
+            }
+            if (sender instanceof Player player && apvsh != null) {
+                giveItem(player, apvsh.createApvshBlockItem());
+                player.sendMessage("§aВы получили блок АПВШ.");
+            }
             return true;
         }
 
@@ -205,12 +233,22 @@ public class F8Command implements CommandExecutor, Listener {
         fill(inventory);
 
         inventory.setItem(
-                13,
+                11,
                 createMenuItem(
                         Material.NOTE_BLOCK,
                         "§6Медный нотный блок",
                         List.of("§7Нажмите, чтобы получить блок"),
                         "copper_note_block"
+                )
+        );
+
+        inventory.setItem(
+                15,
+                createMenuItem(
+                        Material.NOTE_BLOCK,
+                        "§6АПВШ",
+                        List.of("§7Аппарат для создания и наполнения сигарет", "§7Нажмите, чтобы получить блок"),
+                        "apvsh"
                 )
         );
 
@@ -535,6 +573,16 @@ public class F8Command implements CommandExecutor, Listener {
                         player,
                         createCopperBlock()
                 );
+                player.closeInventory();
+            }
+
+            case "apvsh" -> {
+                if (apvsh != null) {
+                    giveItem(
+                            player,
+                            apvsh.createApvshBlockItem()
+                    );
+                }
                 player.closeInventory();
             }
         }

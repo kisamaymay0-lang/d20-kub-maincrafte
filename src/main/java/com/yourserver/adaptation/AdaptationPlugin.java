@@ -51,6 +51,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private CaviarListener caviarListener;
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
+    private Apvsh apvsh;
     /** Сигарета из /f8: тикает шкалу тяги и дым, поэтому нужен доступ на выключении. */
     private Cigarette cigarette;
     /** Политые кораллы: список живёт в файле, поэтому нужен доступ на выключении. */
@@ -137,6 +138,10 @@ public void onEnable() {
     ancientJug = new AncientJug(this, dataWriter);
     getServer().getPluginManager().registerEvents(ancientJug, this);
 
+    // АПВШ — аппарат для создания и наполнения сигарет и другого.
+    apvsh = new Apvsh(this, dataWriter);
+    getServer().getPluginManager().registerEvents(apvsh, this);
+
     // Сигарета: слушает клики сама, поэтому registerEvents внутри конструктора.
     cigarette = new Cigarette(this);
 
@@ -180,7 +185,8 @@ public void onEnable() {
                     copperBlockListener,
                     caviarListener,
                     winterFishing,
-                    ancientJug
+                    ancientJug,
+                    apvsh
             );
 
     getServer().getPluginManager().registerEvents(
@@ -241,6 +247,9 @@ public void onEnable() {
         }
         if (ancientJug != null) {
             ancientJug.disable();
+        }
+        if (apvsh != null) {
+            apvsh.disable();
         }
         if (cigarette != null) {
             cigarette.disable();
@@ -1421,5 +1430,9 @@ public void onEnable() {
         superDamageCounters.remove(uuid);
 
         damageHitLimiter.remove(uuid);
+    }
+
+    public Apvsh getApvsh() {
+        return apvsh;
     }
 }

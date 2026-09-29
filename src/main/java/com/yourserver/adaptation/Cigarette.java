@@ -95,16 +95,18 @@ final class Cigarette implements Listener {
     private static final NamespacedKey VARIANT = new NamespacedKey("f8-plugin", "cigarette_variant");
     /** Невидимый запас: сколько палочек тяги осталось. */
     private static final NamespacedKey BARS = new NamespacedKey("f8-plugin", "cigarette_bars");
+    /** Невидимое количество пороха в начинке сигареты. */
+    static final NamespacedKey FILLING_GUNPOWDER = new NamespacedKey("f8-plugin", "cigarette_filling_gunpowder");
 
-    private enum Variant {
+    enum Variant {
         BIG("big", "sigareta-big", "sigareta-big-fire", RESERVE),
         SMALL("small", "sigareta-small", "sigareta-small-fire", SMALL_RESERVE),
         REGULAR("regular", "sigareta", "sigareta-fire", REGULAR_RESERVE);
 
-        private final String id;
-        private final String coldModel;
-        private final String litModel;
-        private final int reserve;
+        final String id;
+        final String coldModel;
+        final String litModel;
+        final int reserve;
 
         Variant(String id, String coldModel, String litModel, int reserve) {
             this.id = id;
@@ -266,6 +268,49 @@ final class Cigarette implements Listener {
 
     static ItemStack litRegular() {
         return create(true, Variant.REGULAR);
+    }
+
+    /**
+     * Вариант сигареты по количеству начинки:
+     * 1..8 — маленькая (sigareta-small, запас 16),
+     * 9..20 — обычная (sigareta, запас 32),
+     * 21+ — большая (sigareta-big, запас 64).
+     */
+    static Variant variantForFilling(int count) {
+        if (count <= 8) {
+            return Variant.SMALL;
+        }
+        if (count <= 20) {
+            return Variant.REGULAR;
+        }
+        return Variant.BIG;
+    }
+
+    /** Создаёт сигарету с заданной начинкой пороха. Модель выбирается по количеству пороха. */
+    static ItemStack createWithGunpowder(int gunpowder) {
+        Variant variant = variantForFilling(gunpowder);
+        return create(false, variant, gunpowder);
+    }
+
+    static ItemStack create(boolean lit, Variant variant, int gunpowder) {
+        ItemStack item = create(lit, variant);
+        if (gunpowder > 0) {
+            ItemMeta meta = item.getItemMeta();
+            if (meta != null) {
+                meta.getPersistentDataContainer().set(FILLING_GUNPOWDER, PersistentDataType.INTEGER, gunpowder);
+                item.setItemMeta(meta);
+            }
+        }
+        return item;
+    }
+
+    /** Сколько пороха содержится в сигарете. */
+    static int gunpowderFilling(ItemStack item) {
+        if (!isCigarette(item)) {
+            return 0;
+        }
+        Integer value = item.getItemMeta().getPersistentDataContainer().get(FILLING_GUNPOWDER, PersistentDataType.INTEGER);
+        return value == null ? 0 : Math.max(0, value);
     }
 
     /**
@@ -488,13 +533,20 @@ final class Cigarette implements Listener {
                 inventory.clear(slot);
             }
             smoke(block, facing, spent);
+            int gunpowder = gunpowderFilling(stored);
+            if (gunpowder > 0) {
+                Location origin = block.getLocation().add(0.5, 0.5, 0.5).add(facing.clone().multiply(0.55));
+                block.getWorld().spawnParticle(Particle.EXPLOSION, origin, 1, 0.0D, 0.0D, 0.0D, 0.0D);
+            }
             return true;
         }
         return false;
     }
 
     private static boolean sameCigaretteType(ItemStack first, ItemStack second) {
-        return variant(first) == variant(second) && isLit(first) == isLit(second);
+        return variant(first) == variant(second)
+                && isLit(first) == isLit(second)
+                && gunpowderFilling(first) == gunpowderFilling(second);
     }
 
     static int dropperBarsToSmoke(int available) {
@@ -805,6 +857,13 @@ final class Cigarette implements Listener {
         int spent = Math.min(filled, bars(item));
         if (spent <= 0) {
             return;
+        }
+        int gunpowder = gunpowderFilling(item);
+        if (gunpowder > 0) {
+            Location where = mouth(player);
+            player.getWorld().spawnParticle(Particle.EXPLOSION, where, 1, 0.0D, 0.0D, 0.0D, 0.0D);
+            player.playSound(where, Sound.ENTITY_GENERIC_EXPLODE, SoundCategory.PLAYERS, 0.6F, 1.4F);
+            player.damage(gunpowder * 1.0D);
         }
         // Любая реальная затяжка начинает зависимость, если её ещё не было,
         // либо сбрасывает цикл после повторного курения.
@@ -1121,12 +1180,13 @@ final class Cigarette implements Listener {
             return;
         }
         int remaining = bars(item);
+        int gunpowder = gunpowderFilling(item);
         ItemStack unlitRemainder = null;
         if (item.getAmount() > 1) {
             unlitRemainder = item.clone();
             unlitRemainder.setAmount(item.getAmount() - 1);
         }
-        ItemStack fired = create(true, variant(item));
+        ItemStack fired = create(true, variant(item), gunpowder);
         fired.setAmount(1);
         setBars(fired, remaining);
         setHandItem(player, hand, fired);

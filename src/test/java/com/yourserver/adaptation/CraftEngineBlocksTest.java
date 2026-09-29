@@ -63,9 +63,9 @@ class CraftEngineBlocksTest {
     /** Ключи внутри settings.sounds (BlockSounds.fromConfig). */
     private static final Set<String> SOUND_KEYS = Set.of("break", "step", "place", "hit", "fall");
 
-    /** Три блока, которые плагин ждёт от CraftEngine. */
+    /** Четыре блока, которые плагин ждёт от CraftEngine. */
     private static final Set<String> WANTED_IDS =
-            Set.of(CraftEngineJug.EMPTY_ID, CraftEngineJug.FILLED_ID, CraftEngineCopper.ID);
+            Set.of(CraftEngineJug.EMPTY_ID, CraftEngineJug.FILLED_ID, CraftEngineCopper.ID, CraftEngineApvsh.ID);
 
     private static Path repoRoot() {
         Path current = Path.of("").toAbsolutePath();
@@ -113,6 +113,21 @@ class CraftEngineBlocksTest {
         assertEquals("f8resurs:ancient_jug_filled", CraftEngineJug.keyName(1));
         assertEquals("f8resurs:ancient_jug", CraftEngineJug.keyName(0));
         assertEquals("f8resurs:copper_note_block", CraftEngineCopper.ID);
+        assertEquals("f8resurs:apvsh", CraftEngineApvsh.ID);
+    }
+
+    @Test
+    void apvshBlockHasItsOwnFileToDropIntoThePack() throws Exception {
+        Path file = CONFIGS.resolve("apvsh.yml");
+        assertTrue(Files.isRegularFile(file),
+                "Нужен отдельный файл для АПВШ: " + ROOT.relativize(file));
+        YamlConfiguration loaded = new YamlConfiguration();
+        loaded.loadFromString(Files.readString(file));
+        assertEquals(Set.of(CraftEngineApvsh.ID),
+                loaded.getConfigurationSection("blocks").getKeys(false),
+                "в файле АПВШ должен быть только он: дубль id дал бы конфликт");
+        assertTrue(Files.readString(DOC).contains("apvsh.yml"),
+                "документ должен вести к файлу с конфигом");
     }
 
     @Test
@@ -364,7 +379,7 @@ class CraftEngineBlocksTest {
         try (var files = Files.list(CONFIGS)) {
             names = files.map(path -> path.getFileName().toString()).sorted().toList();
         }
-        assertEquals(List.of("ancient_jug.yml", "copper_note_block.yml"), names,
+        assertEquals(List.of("ancient_jug.yml", "apvsh.yml", "copper_note_block.yml"), names,
                 "в папке только конфиги блоков: pack.yml у вас свой, а копии моделей "
                         + "берутся из вашего ресурспака");
     }
@@ -407,5 +422,9 @@ class CraftEngineBlocksTest {
                 "чужой блок CraftEngine нашим не считается");
         assertFalse(CraftEngineCopper.isCopperId(null), "ванильный блок нашим не считается");
         assertFalse(CraftEngineJug.isJugId(null), "ванильный блок кувшином не считается");
+        assertTrue(CraftEngineApvsh.isApvshId(CraftEngineApvsh.ID));
+        assertFalse(CraftEngineApvsh.isApvshId(CraftEngineCopper.ID));
+        assertFalse(CraftEngineApvsh.isApvshId(null));
+        assertFalse(CraftEngineCopper.isCopperId(CraftEngineApvsh.ID));
     }
 }
