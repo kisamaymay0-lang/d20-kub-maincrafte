@@ -92,6 +92,7 @@ final class WinterItems {
             case RAW, DEPLETED -> "Рыба с неведомых земель.";
             case ROE -> "Добывается из Изморози (shift + ПКМ)";
             case SANDWICH -> "Сытный, как золотая морковка";
+            case RIME_POTION, RIME_POTION_SPLASH, RIME_POTION_LINGERING -> "Замораживает игрока на 15 секунд.";
             case CLAW -> "Особый предмет рыбалки в болотах.";
         };
     }
