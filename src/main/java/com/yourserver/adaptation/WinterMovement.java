@@ -209,7 +209,18 @@ final class WinterMovement implements Listener {
     }
 
     void freeze(Player player, boolean sandwich) {
+        freezeFor(player, sandwich ? WinterRules.SANDWICH_LOCK_TICKS : WinterRules.FISH_LOCK_TICKS,
+                WinterRules.COLD_TICKS);
+    }
+
+    void freezeFor(Player player, int durationTicks) {
+        freezeFor(player, durationTicks, durationTicks);
+    }
+
+    private void freezeFor(Player player, int lockDurationTicks, int coldDurationTicks) {
         if (!player.isOnline() || player.isDead()) return;
+        lockDurationTicks = Math.max(1, lockDurationTicks);
+        coldDurationTicks = Math.max(1, coldDurationTicks);
         State state = states.computeIfAbsent(player.getUniqueId(), ignored -> new State());
         if (state.coldUntil == 0) {
             state.previousColdLock = player.isFreezeTickingLocked();
@@ -218,8 +229,8 @@ final class WinterMovement implements Listener {
             player.getPersistentDataContainer().set(coldTicks, PersistentDataType.INTEGER, state.previousColdTicks);
         }
         if (state.frozenUntil <= tick) state.freezeAnchor = player.getLocation().clone();
-        state.frozenUntil = Math.max(state.frozenUntil, tick + (sandwich ? WinterRules.SANDWICH_LOCK_TICKS : WinterRules.FISH_LOCK_TICKS));
-        state.coldUntil = Math.max(state.coldUntil, tick + WinterRules.COLD_TICKS);
+        state.frozenUntil = Math.max(state.frozenUntil, tick + lockDurationTicks);
+        state.coldUntil = Math.max(state.coldUntil, tick + coldDurationTicks);
         state.grip = Grip.NONE;
         state.wall = null; state.face = null; state.hangUntil = 0;
         state.drifting = false; state.driftReady = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;

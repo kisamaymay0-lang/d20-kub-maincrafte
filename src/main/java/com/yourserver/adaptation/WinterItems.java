@@ -7,6 +7,7 @@ import io.papermc.paper.datacomponent.item.UseCooldown;
 import org.bukkit.inventory.RecipeChoice;
 import java.util.ArrayList;
 import java.util.Objects;
+import org.bukkit.Color;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -15,6 +16,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.PotionMeta;
+import org.bukkit.potion.PotionType;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -51,7 +54,11 @@ final class WinterItems {
         meta.displayName(ProfileItems.text(kind.title, WinterRules.titleColor(kind.name())));
         String description = description(kind);
         meta.lore(List.of(ProfileItems.text(description, NamedTextColor.GRAY)));
-        meta.setItemModel(new NamespacedKey("f8resurs", kind.id));
+        if (!isRimePotion(kind)) meta.setItemModel(new NamespacedKey("f8resurs", kind.id));
+        if (isRimePotion(kind) && meta instanceof PotionMeta potion) {
+            potion.setBasePotionType(PotionType.WATER);
+            potion.setColor(Color.fromRGB(128, 205, 255));
+        }
         meta.getPersistentDataContainer().set(kindKey, PersistentDataType.STRING, kind.name());
         if (kind == Kind.TOOL) {
             Damageable damage = (Damageable) meta;
@@ -69,6 +76,11 @@ final class WinterItems {
             item.setData(DataComponentTypes.USE_COOLDOWN, cooldown());
         }
         return item;
+    }
+
+    static boolean isRimePotion(Kind kind) {
+        return kind == Kind.RIME_POTION || kind == Kind.RIME_POTION_SPLASH
+                || kind == Kind.RIME_POTION_LINGERING;
     }
 
     private static String description(Kind kind) {

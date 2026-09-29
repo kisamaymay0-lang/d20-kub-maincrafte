@@ -231,7 +231,8 @@ public class F8Command implements CommandExecutor, Listener {
             "empty_cod", "empty_salmon", "caviar_sandwich_red", "caviar_sandwich_black",
             "icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich", "ancient_jug",
             "crab_claw", "cigarette", "cigarette_lit", "cigarette_small", "cigarette_small_lit",
-            "cigarette_regular", "cigarette_regular_lit");
+            "cigarette_regular", "cigarette_regular_lit",
+            "rime_potion", "rime_potion_splash", "rime_potion_lingering");
 
     private ItemStack catalogItem(String id) {
         return switch (id) {
@@ -248,6 +249,9 @@ public class F8Command implements CommandExecutor, Listener {
             case "depleted_rime" -> winterFishing.items.create(WinterItems.Kind.DEPLETED);
             case "ice_caviar" -> winterFishing.items.create(WinterItems.Kind.ROE);
             case "ice_caviar_sandwich" -> winterFishing.items.create(WinterItems.Kind.SANDWICH);
+            case "rime_potion" -> winterFishing.items.create(WinterItems.Kind.RIME_POTION);
+            case "rime_potion_splash" -> winterFishing.items.create(WinterItems.Kind.RIME_POTION_SPLASH);
+            case "rime_potion_lingering" -> winterFishing.items.create(WinterItems.Kind.RIME_POTION_LINGERING);
             case "ancient_jug" -> ancientJug.createEmpty();
             case "crab_claw" -> winterFishing.items.create(WinterItems.Kind.CLAW);
             case "cigarette" -> Cigarette.cold();
@@ -261,18 +265,19 @@ public class F8Command implements CommandExecutor, Listener {
     }
 
     private void openItemMenu(Player player) {
-        Inventory inventory = Bukkit.createInventory(null, 45, ITEM_TITLE);
+        Inventory inventory = Bukkit.createInventory(null, 54, ITEM_TITLE);
         fill(inventory);
         int[] slots = {
                 10, 11, 12, 13, 14, 15, 16,
                 19, 20, 21, 22, 23, 24, 25,
-                28, 29, 30, 31, 32, 33, 34
+                28, 29, 30, 31, 32, 33, 34,
+                37, 38, 39, 40, 41, 42, 43
         };
         for (int i = 0; i < ITEM_CATALOG.size(); i++) {
             String id = ITEM_CATALOG.get(i);
             inventory.setItem(slots[i], createTaggedItem(catalogItem(id), id));
         }
-        inventory.setItem(40, createMenuItem(Material.ARROW, "§7Назад", Collections.emptyList(), "back"));
+        inventory.setItem(49, createMenuItem(Material.ARROW, "§7Назад", Collections.emptyList(), "back"));
         player.openInventory(inventory);
     }
 

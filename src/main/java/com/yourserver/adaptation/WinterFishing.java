@@ -4,23 +4,34 @@ import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
+import org.bukkit.entity.AreaEffectCloud;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockCookEvent;
+import org.bukkit.event.entity.AreaEffectCloudApplyEvent;
+import org.bukkit.event.entity.LingeringPotionSplashEvent;
+import org.bukkit.event.entity.PotionSplashEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.FurnaceSmeltEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemBreakEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import io.papermc.paper.potion.PotionMix;
 import org.bukkit.inventory.CampfireRecipe;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.FurnaceRecipe;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.RecipeChoice;
+import org.bukkit.inventory.meta.PotionMeta;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
+import org.bukkit.potion.PotionType;
 import org.bukkit.inventory.ShapelessRecipe;
 import org.bukkit.inventory.SmokingRecipe;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -46,11 +57,14 @@ final class WinterFishing implements Listener {
     private final CrabClaw crabClaw;
     private final Map<UUID, List<Replacement>> replacements = new HashMap<>();
     private final List<NamespacedKey> recipes = new ArrayList<>();
+    private final List<NamespacedKey> potionMixes = new ArrayList<>();
+    private final NamespacedKey rimeCloudKey;
 
     WinterFishing(JavaPlugin plugin) {
         this.plugin = plugin;
         items = new WinterItems(plugin);
         movement = new WinterMovement(plugin, items);
+        rimeCloudKey = new NamespacedKey(plugin, "rime_potion_cloud");
         plugin.getServer().getPluginManager().registerEvents(movement, plugin);
         crabClaw = new CrabClaw(plugin, items);
         registerRecipes();
@@ -75,6 +89,22 @@ final class WinterFishing implements Listener {
             Bukkit.addRecipe(new SmokingRecipe(recipeKey(kind.id + "_smoker"), fish, items.recipeInput(kind), 0f, 100));
             Bukkit.addRecipe(new CampfireRecipe(recipeKey(kind.id + "_campfire"), fish, items.recipeInput(kind), 0f, 600));
         }
+        registerRimePotionMix("rime_potion", Material.POTION, WinterItems.Kind.RIME_POTION);
+        registerRimePotionMix("rime_potion_splash", Material.SPLASH_POTION, WinterItems.Kind.RIME_POTION_SPLASH);
+        registerRimePotionMix("rime_potion_lingering", Material.LINGERING_POTION, WinterItems.Kind.RIME_POTION_LINGERING);
+    }
+
+    private void registerRimePotionMix(String id, Material inputMaterial, WinterItems.Kind outputKind) {
+        NamespacedKey key = new NamespacedKey(plugin, id);
+        Bukkit.getPotionBrewer().removePotionMix(key);
+        potionMixes.add(key);
+        ItemStack input = new ItemStack(inputMaterial);
+        if (input.getItemMeta() instanceof PotionMeta meta) {
+            meta.setBasePotionType(PotionType.WATER);
+            input.setItemMeta(meta);
+        }
+        Bukkit.getPotionBrewer().addPotionMix(new PotionMix(key, items.create(outputKind),
+                new RecipeChoice.ExactChoice(input), items.recipeInput(WinterItems.Kind.ROE)));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -96,10 +126,50 @@ final class WinterFishing implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void consume(PlayerItemConsumeEvent event) {
         WinterItems.Kind kind = items.kind(event.getItem());
-        if (kind != WinterItems.Kind.RAW && kind != WinterItems.Kind.DEPLETED && kind != WinterItems.Kind.SANDWICH) return;
+        boolean potion = WinterItems.isRimePotion(kind);
+        if (!potion && kind != WinterItems.Kind.RAW && kind != WinterItems.Kind.DEPLETED
+                && kind != WinterItems.Kind.SANDWICH) return;
         Player player = event.getPlayer();
         Bukkit.getScheduler().runTask(plugin, () -> {
-            if (!event.isCancelled() && player.isOnline() && !player.isDead()) movement.freeze(player, kind == WinterItems.Kind.SANDWICH);
+            if (!event.isCancelled() && player.isOnline() && !player.isDead()) {
+                if (potion) movement.freezeFor(player, 15 * 20);
+                else movement.freeze(player, kind == WinterItems.Kind.SANDWICH);
+            }
+        });
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void splash(PotionSplashEvent event) {
+        if (items.kind(event.getPotion().getItem()) != WinterItems.Kind.RIME_POTION_SPLASH) return;
+        for (Entity entity : event.getAffectedEntities()) {
+            if (entity instanceof Player player) freezePotionTarget(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void lingering(LingeringPotionSplashEvent event) {
+        if (items.kind(event.getEntity().getItem()) != WinterItems.Kind.RIME_POTION_LINGERING) return;
+        AreaEffectCloud cloud = event.getAreaEffectCloud();
+        event.allowsEmptyCreation(true);
+        cloud.getPersistentDataContainer().set(rimeCloudKey, PersistentDataType.BYTE, (byte) 1);
+        cloud.setWaitTime(0);
+        cloud.setDuration(15 * 20);
+        cloud.setRadius(3.0f);
+        // A one-tick hidden vanilla effect makes the empty cloud produce its standard apply events.
+        cloud.addCustomEffect(new PotionEffect(PotionEffectType.SLOWNESS, 1, 0, true, false, false), true);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void lingeringApply(AreaEffectCloudApplyEvent event) {
+        if (!event.getEntity().getPersistentDataContainer().has(rimeCloudKey, PersistentDataType.BYTE)) return;
+        for (Entity entity : event.getAffectedEntities()) {
+            if (entity instanceof Player player) freezePotionTarget(player);
+        }
+    }
+
+    private void freezePotionTarget(Player player) {
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isOnline() && !player.isDead()) movement.freezeFor(player, 15 * 20);
         });
     }
 
@@ -182,5 +252,6 @@ final class WinterFishing implements Listener {
         }
         replacements.clear();
         recipes.forEach(Bukkit::removeRecipe);
+        potionMixes.forEach(Bukkit.getPotionBrewer()::removePotionMix);
     }
 }
