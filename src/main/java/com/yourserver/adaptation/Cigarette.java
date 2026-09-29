@@ -378,40 +378,60 @@ final class Cigarette implements Listener {
     /** Redstone machines smoke 16 bars from a cigarette instead of ejecting it. */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onMachineDispense(BlockDispenseEvent event) {
-        Material blockType = event.getBlock().getType();
-        if (blockType != Material.DROPPER && blockType != Material.DISPENSER) return;
-        if (!isCigarette(event.getItem())) return;
         Block block = event.getBlock();
+        Material blockType = block.getType();
+        if (blockType != Material.DROPPER && blockType != Material.DISPENSER) return;
+        Inventory inventory = machineInventory(block);
+        if (inventory == null || (!isCigarette(event.getItem()) && !containsCigarette(inventory))) return;
         if (!claimMachineActivation(block)) {
             event.setCancelled(true);
             return;
         }
-        Inventory inventory = machineInventory(block);
-        if (inventory != null && smokeFromInventory(block, inventory, event.getItem())) {
-            event.setCancelled(true);
+        // The dispensed slot is not guaranteed to be the cigarette's slot. If a
+        // dropper fires with a cigarette in it, consume it and suppress this activation.
+        event.setCancelled(true);
+        if (!smokeFromInventory(block, inventory, event.getItem())) {
+            // Some implementations remove the selected stack before firing the
+            // event. Once cancelled, its return to the source is completed by next tick.
+            scheduleMachineSmoke(block, event.getItem().clone());
         }
     }
 
     /** Dropper-to-container transfers do not consistently fire BlockDispenseEvent. */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onDropperTransfer(InventoryMoveItemEvent event) {
-        if (!(event.getSource().getHolder() instanceof Dropper source)
-                || !(event.getInitiator().getHolder() instanceof Dropper initiator)
-                || !source.getBlock().equals(initiator.getBlock())
-                || !isCigarette(event.getItem())) return;
+        if (!(event.getSource().getHolder() instanceof Dropper source)) return;
+        // A hopper can pull items out of a dropper. Only treat transfers initiated
+        // by the dropper itself as its activation; equality also covers wrappers
+        // whose inventory holder is not exposed as a Dropper instance.
+        if (event.getInitiator() != event.getSource()
+                && (!(event.getInitiator().getHolder() instanceof Dropper initiator)
+                || !source.getBlock().equals(initiator.getBlock()))) return;
         Block block = source.getBlock();
+        ItemStack requested = event.getItem().clone();
+        if (!isCigarette(requested) && !containsCigarette(event.getSource())) return;
         if (!claimMachineActivation(block)) {
             event.setCancelled(true);
             return;
         }
-        ItemStack requested = event.getItem().clone();
-        // A dropper may have removed the item before firing InventoryMoveItemEvent.
-        // Cancel first and consume from the restored source inventory on the next tick.
+        // The selected cigarette can already be removed from source by event time.
+        // Cancel first; its return completes before the scheduled inventory update.
         event.setCancelled(true);
+        scheduleMachineSmoke(block, requested);
+    }
+
+    private void scheduleMachineSmoke(Block block, ItemStack requested) {
         Bukkit.getScheduler().runTask(plugin, () -> {
             Inventory inventory = machineInventory(block);
             if (inventory != null) smokeFromInventory(block, inventory, requested);
         });
+    }
+
+    private static boolean containsCigarette(Inventory inventory) {
+        for (int slot = 0; slot < inventory.getSize(); slot++) {
+            if (isCigarette(inventory.getItem(slot))) return true;
+        }
+        return false;
     }
 
     private boolean claimMachineActivation(Block block) {
@@ -437,7 +457,8 @@ final class Cigarette implements Listener {
         Vector facing = directional.getFacing().getDirection().normalize();
         for (int slot = 0; slot < inventory.getSize(); slot++) {
             ItemStack stored = inventory.getItem(slot);
-            if (!isCigarette(stored) || !stored.isSimilar(dispensed)) continue;
+            if (!isCigarette(stored)) continue;
+            if (isCigarette(dispensed) && !sameCigaretteType(stored, dispensed)) continue;
             int spent = dispenserBarsToSmoke(bars(stored));
             if (spent <= 0) return false;
             int remaining = bars(stored) - spent;
@@ -457,8 +478,19 @@ final class Cigarette implements Listener {
         return false;
     }
 
+    private static boolean sameCigaretteType(ItemStack first, ItemStack second) {
+        return variant(first) == variant(second) && isLit(first) == isLit(second);
+    }
+
     static int dispenserBarsToSmoke(int available) {
         return Math.clamp(available, 0, BARS_PER_PUFF);
+    }
+
+    /** Keeps geyser-puff velocity directed by the supplied gaze/facing vector. */
+    private static Particle.GeyserBase cigaretteGeyser() {
+        // Paper adds 0.25 * waterBlocks to burstImpulseBase. Cancelling that
+        // component prevents the geyser's random burst from scattering the smoke.
+        return new Particle.GeyserBase(1, -0.25F);
     }
 
     private void smoke(Block block, Vector facing, int bars) {
@@ -509,7 +541,7 @@ final class Cigarette implements Listener {
                         facing.getX() * SMOKE_PUSH,
                         facing.getY() * SMOKE_PUSH + 0.01D,
                         facing.getZ() * SMOKE_PUSH,
-                        1.0D, new Particle.GeyserBase(1, 0.0F));
+                        1.0D, cigaretteGeyser());
             }
             tick++;
         }
@@ -1059,7 +1091,7 @@ final class Cigarette implements Listener {
         player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.7F, 1.0F);
         Location where = mouth(player);
         player.getWorld().spawnParticle(Particle.GEYSER_POOF, where, 4, 0.04D, 0.04D, 0.04D, 0.01D,
-                new Particle.GeyserBase(1, 0.0F));
+                cigaretteGeyser());
         ItemStack item = handItem(player, hand);
         if (item != null && item.getAmount() > 1) {
             item.setAmount(item.getAmount() - 1);
@@ -1104,7 +1136,7 @@ final class Cigarette implements Listener {
         Location where = mouth(player);
         player.getWorld().spawnParticle(Particle.FLAME, where, 5, 0.04D, 0.04D, 0.04D, 0.01D);
         player.getWorld().spawnParticle(Particle.GEYSER_POOF, where, 2, 0.02D, 0.02D, 0.02D, 0.01D,
-                new Particle.GeyserBase(1, 0.0F));
+                cigaretteGeyser());
     }
 
     /**
@@ -1273,7 +1305,7 @@ final class Cigarette implements Listener {
                         dir.getY() * SMOKE_PUSH + 0.01D,
                         dir.getZ() * SMOKE_PUSH,
                         1.0D,
-                        new Particle.GeyserBase(1, 0.0F)
+                        cigaretteGeyser()
                 );
             }
             tick++;
