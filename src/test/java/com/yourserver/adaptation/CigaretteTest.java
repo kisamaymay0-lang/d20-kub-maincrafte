@@ -54,6 +54,28 @@ final class CigaretteTest {
     }
 
     @Test
+    void тошнотаВыдаётсяПриШестидесятиЧетырёхПалочкахЗаСкользящуюМинуту() {
+        Cigarette.SmokingWindow window = new Cigarette.SmokingWindow();
+        assertEquals(false, window.add(0, 32));
+        assertEquals(false, window.add(Cigarette.SMOKING_WINDOW_TICKS - 1, 31));
+        assertEquals(true, window.add(Cigarette.SMOKING_WINDOW_TICKS - 1, 1));
+        assertEquals(0, window.barsWithinWindow(), "после порога окно сбрасывается");
+        assertEquals(Cigarette.NAUSEA_THRESHOLD_BARS, 64);
+        assertEquals(Cigarette.NAUSEA_DURATION_TICKS, 300, "эффект длится 15 секунд");
+    }
+
+    @Test
+    void стараяТягаНеУчитываетсяЗаПределамиОднойМинуты() {
+        Cigarette.SmokingWindow window = new Cigarette.SmokingWindow();
+        assertEquals(false, window.add(0, 32));
+        assertEquals(false, window.add(Cigarette.SMOKING_WINDOW_TICKS, 32),
+                "ровно через минуту первая тяга уже не учитывается");
+        assertEquals(32, window.barsWithinWindow());
+        assertEquals(true, window.add(Cigarette.SMOKING_WINDOW_TICKS + 1, 32),
+                "вторая тяга остаётся внутри скользящего окна");
+    }
+
+    @Test
     void уРазныхМоделейОтдельныйЗапас() {
         assertEquals(64, Cigarette.RESERVE, "большая сигарета");
         assertEquals(16, Cigarette.SMALL_RESERVE, "маленькая sigareta-small");

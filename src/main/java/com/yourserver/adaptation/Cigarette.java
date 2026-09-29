@@ -31,9 +31,13 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -101,6 +105,10 @@ final class Cigarette implements Listener {
     private static final int TICKS_PER_BAR = 4;
     /** Сигареты объединяются максимум по восемь штук в стаке. */
     static final int MAX_STACK_SIZE = 8;
+    /** Порог и скользящее окно для эффекта тошноты. */
+    static final int NAUSEA_THRESHOLD_BARS = 64;
+    static final int SMOKING_WINDOW_TICKS = 20 * 60;
+    static final int NAUSEA_DURATION_TICKS = 20 * 15;
     /** Долгое использование: выдох происходит по отпусканию ПКМ, не по таймеру. */
     private static final float USE_SECONDS = 3600.0F;
     /** Тихий ванильный треск горящего огня, повторяемый при затяжке. */
@@ -133,6 +141,9 @@ final class Cigarette implements Listener {
     /** Тик поджига: второе событие руки в том же нажатии не начинает тягу. */
     private final Map<UUID, Integer> litAtTick = new HashMap<>();
 
+    /** Скользящие окна тяг: записи добавляются только при фактическом списании палочек. */
+    private final Map<UUID, SmokingWindow> smokingWindows = new HashMap<>();
+
     private BukkitTask ticker;
 
     /** Тяга: рука, в которой сигарета, и тик, с которого игрок держит ПКМ. */
@@ -156,6 +167,7 @@ final class Cigarette implements Listener {
         smoke.clear();
         puffs.clear();
         litAtTick.clear();
+        smokingWindows.clear();
         for (BukkitTask task : inhaleSounds.values()) {
             task.cancel();
         }
@@ -401,6 +413,7 @@ final class Cigarette implements Listener {
         puffs.remove(event.getPlayer().getUniqueId());
         stopInhaleSound(event.getPlayer());
         litAtTick.remove(event.getPlayer().getUniqueId());
+        smokingWindows.remove(event.getPlayer().getUniqueId());
         Smoke flow = smoke.remove(event.getPlayer().getUniqueId());
         if (flow != null) {
             flow.stop();
@@ -505,17 +518,72 @@ final class Cigarette implements Listener {
         if (filled <= 0) {
             return;
         }
-        smoke(player, filled);
         ItemStack item = handItem(player, hand);
-        if (!isCigarette(item)) {
+        if (!isCigarette(item) || !isLit(item)) {
             return;
         }
-        int rest = bars(item) - filled;
+        int spent = Math.min(filled, bars(item));
+        if (spent <= 0) {
+            return;
+        }
+        smoke(player, spent);
+        countSmokingBars(player, spent);
+        int rest = bars(item) - spent;
         if (rest > 0) {
             setBars(item, rest);
             return;
         }
         breakUp(player, hand);
+    }
+
+    /** Считает только реально потраченные палочки; нет фонового опроса или задачи на игрока. */
+    private void countSmokingBars(Player player, int spent) {
+        UUID id = player.getUniqueId();
+        SmokingWindow window = smokingWindows.computeIfAbsent(id, ignored -> new SmokingWindow());
+        if (window.add(Bukkit.getCurrentTick(), spent)) {
+            smokingWindows.remove(id);
+            // amplifier 0 = тошнота I; флаги выключают частицы и значок эффекта.
+            player.addPotionEffect(new PotionEffect(
+                    PotionEffectType.NAUSEA,
+                    NAUSEA_DURATION_TICKS,
+                    0,
+                    false,
+                    false,
+                    false
+            ), true);
+        } else if (window.barsWithinWindow() == 0) {
+            smokingWindows.remove(id);
+        }
+    }
+
+    /** O(1) амортизированно: очищает старые затяжки только при новой затяжке. */
+    static final class SmokingWindow {
+        private record Consumption(int tick, int bars) { }
+
+        private final Deque<Consumption> consumptions = new ArrayDeque<>();
+        private int barsWithinWindow;
+
+        boolean add(int currentTick, int bars) {
+            if (bars <= 0) {
+                return false;
+            }
+            while (!consumptions.isEmpty()
+                    && currentTick - consumptions.peekFirst().tick() >= SMOKING_WINDOW_TICKS) {
+                barsWithinWindow -= consumptions.removeFirst().bars();
+            }
+            consumptions.addLast(new Consumption(currentTick, bars));
+            barsWithinWindow += bars;
+            if (barsWithinWindow < NAUSEA_THRESHOLD_BARS) {
+                return false;
+            }
+            consumptions.clear();
+            barsWithinWindow = 0;
+            return true;
+        }
+
+        int barsWithinWindow() {
+            return barsWithinWindow;
+        }
     }
 
     /** Сигарета догорела: звук поломки, дымок — и предмета нет. */
