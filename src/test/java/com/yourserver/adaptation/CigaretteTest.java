@@ -2,8 +2,12 @@ package com.yourserver.adaptation;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -54,14 +58,31 @@ final class CigaretteTest {
     @Test
     void набитыеПалочкиЖёлтыеПустыеТёмные() {
         Component gauge = Cigarette.gauge(5);
-        long yellow = gauge.children().stream()
-                .filter(child -> NamedTextColor.YELLOW.equals(child.color()))
-                .count();
-        long dark = gauge.children().stream()
-                .filter(child -> NamedTextColor.DARK_GRAY.equals(child.color()))
-                .count();
-        assertEquals(Cigarette.BARS_PER_PUFF, gauge.children().size());
-        assertEquals(5, yellow, "пять секунд тяги — пять жёлтых палочек");
-        assertEquals(Cigarette.BARS_PER_PUFF - 5, dark, "остальные палочки тёмные");
+        assertEquals("[ |||||||||||||||| ]",
+                PlainTextComponentSerializer.plainText().serialize(gauge));
+        List<TextColor> bars = new ArrayList<>();
+        collectBars(gauge, bars);
+        assertEquals(Cigarette.BARS_PER_PUFF, bars.size(), "в шкале ровно шестнадцать палочек");
+        for (int i = 0; i < bars.size(); i++) {
+            // Палочки наливаются слева направо: первые пять жёлтые, остальные тёмные.
+            assertEquals(i < 5 ? NamedTextColor.YELLOW : NamedTextColor.DARK_GRAY, bars.get(i),
+                    "палочка №" + (i + 1));
+        }
+    }
+
+    /**
+     * Цвета палочек по порядку. Считаем по символу «|» в каждом листе: так не
+     * важно, склеились ли соседние палочки одного цвета в один лист или нет.
+     */
+    private static void collectBars(Component component, List<TextColor> found) {
+        String text = PlainTextComponentSerializer.plainText().serialize(component);
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) == '|') {
+                found.add(component.color());
+            }
+        }
+        for (Component child : component.children()) {
+            collectBars(child, found);
+        }
     }
 }
