@@ -49,9 +49,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>Поджиг: огниво во второй руке, сигарета в главной, шифт + ПКМ — модель
  * меняется на горящую. Любой ПКМ горящей сигаретой начинает тягу, и в воздух,
  * и по блоку. Тягу держат, отпускают — идёт выдох. Анимация трубения в козий
- * рог видна и самому игроку от первого лица; само «съедение» запрещено в
- * {@link #onEat}. Сигарета перехватывает ПКМ у блока, чтобы действие работало
- * в обоих случаях.
+ * рог видна и самому игроку от первого лица; для этого компонент использования
+ * имеет конечную длительность и не заменяется при начале тяги. Само «съедение»
+ * запрещено в {@link #onEat}. Сигарета перехватывает ПКМ у блока, чтобы действие
+ * работало в обоих случаях.
  *
  * <p>Шкала пополняется на палочку каждые 0,2 секунды. После отпускания изо рта
  * непрерывно вылетают частицы уютного дыма костра в текущем направлении
@@ -82,8 +83,8 @@ final class Cigarette implements Listener {
     private static final int TICKS_PER_BAR = 4;
     /** Сигареты объединяются максимум по восемь штук в стаке. */
     static final int MAX_STACK_SIZE = 8;
-    /** Время «использования»: тянуть можно сколько угодно, обрыва нет. */
-    private static final float USE_SECONDS = 3600.0F;
+    /** 120 тиков дают клиентской анимации TOOT_HORN нормальную длительность. */
+    private static final float USE_SECONDS = 6.0F;
     /** Звука во время тяги быть не должно: специально «пустой» ванильный звук. */
     private static final Key SILENT_SOUND = Key.key("intentionally_empty");
     /** Как часто перерисовываем шкалу и проверяем, не кончился ли запас. */
@@ -166,8 +167,9 @@ final class Cigarette implements Listener {
         apply(item, DataComponentTypes.TOOLTIP_DISPLAY, TooltipDisplay.tooltipDisplay()
                 .addHiddenComponents(DataComponentTypes.FOOD)
                 .build(), "tooltip_display");
-        // Огромное время «съедения»: тянуть можно сколько угодно, обрыва нет.
-        // Компонент задаёт клиентскую анимацию TOOT_HORN, в том числе от первого лица.
+        // Шесть секунд хватает на полную тягу (3,2 с) и дают клиенту длительность
+        // для заметной TOOT_HORN-анимации от первого лица. Более долгий hold
+        // аккуратно закрывает onEat, не съедая сигарету.
         apply(item, DataComponentTypes.CONSUMABLE, Consumable.consumable()
                 .consumeSeconds(USE_SECONDS)
                 .animation(ItemUseAnimation.TOOT_HORN)
