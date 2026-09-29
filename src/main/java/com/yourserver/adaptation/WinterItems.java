@@ -32,6 +32,9 @@ final class WinterItems {
         DEPLETED("depleted_rime", "Опустошённая изморозь", Material.COD),
         ROE("ice_caviar", "Ледяная икра", Material.LIGHT_BLUE_DYE),
         SANDWICH("ice_caviar_sandwich", "Бутерброд с ледяной икрой", Material.BREAD),
+        RIME_POTION("rime_potion", "Зелье Изморози", Material.POTION),
+        RIME_POTION_SPLASH("rime_potion_splash", "Взрывное зелье Изморози", Material.SPLASH_POTION),
+        RIME_POTION_LINGERING("rime_potion_lingering", "Туманное зелье Изморози", Material.LINGERING_POTION),
         CLAW("crab_claw", "Клешня краба", Material.PRISMARINE_SHARD);
         final String id, title;
         final Material material;
