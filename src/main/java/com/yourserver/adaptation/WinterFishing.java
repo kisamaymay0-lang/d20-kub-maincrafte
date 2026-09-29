@@ -7,6 +7,7 @@ import org.bukkit.Sound;
 import org.bukkit.entity.AreaEffectCloud;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.ThrownPotion;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -15,6 +16,8 @@ import org.bukkit.event.block.BlockCookEvent;
 import org.bukkit.event.entity.AreaEffectCloudApplyEvent;
 import org.bukkit.event.entity.LingeringPotionSplashEvent;
 import org.bukkit.event.entity.PotionSplashEvent;
+import org.bukkit.event.entity.ProjectileHitEvent;
+import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.FurnaceSmeltEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -23,6 +26,7 @@ import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import io.papermc.paper.potion.PotionMix;
 import org.bukkit.inventory.CampfireRecipe;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.FurnaceRecipe;
 import org.bukkit.inventory.ItemStack;
@@ -59,12 +63,14 @@ final class WinterFishing implements Listener {
     private final List<NamespacedKey> recipes = new ArrayList<>();
     private final List<NamespacedKey> potionMixes = new ArrayList<>();
     private final NamespacedKey rimeCloudKey;
+    private final NamespacedKey rimeProjectileKey;
 
     WinterFishing(JavaPlugin plugin) {
         this.plugin = plugin;
         items = new WinterItems(plugin);
         movement = new WinterMovement(plugin, items);
         rimeCloudKey = new NamespacedKey(plugin, "rime_potion_cloud");
+        rimeProjectileKey = new NamespacedKey(plugin, "rime_potion_projectile");
         plugin.getServer().getPluginManager().registerEvents(movement, plugin);
         crabClaw = new CrabClaw(plugin, items);
         registerRecipes();
@@ -138,17 +144,64 @@ final class WinterFishing implements Listener {
         });
     }
 
+    private WinterItems.Kind potionItemKind(ItemStack item) {
+        WinterItems.Kind kind = items.kind(item);
+        if (kind == WinterItems.Kind.RIME_POTION_SPLASH || kind == WinterItems.Kind.RIME_POTION_LINGERING) return kind;
+        // PDC is the primary marker. The visible custom name is a deliberate fallback for
+        // server implementations that rebuild projectile ItemStacks and discard unknown PDC.
+        ItemMeta meta = item == null ? null : item.getItemMeta();
+        if (meta == null || meta.displayName() == null) return null;
+        String name = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText()
+                .serialize(meta.displayName());
+        if (name.equals(WinterItems.Kind.RIME_POTION_SPLASH.title)) return WinterItems.Kind.RIME_POTION_SPLASH;
+        if (name.equals(WinterItems.Kind.RIME_POTION_LINGERING.title)) return WinterItems.Kind.RIME_POTION_LINGERING;
+        return null;
+    }
+
+    private WinterItems.Kind thrownRimeKind(ThrownPotion potion) {
+        String tagged = potion.getPersistentDataContainer().get(rimeProjectileKey, PersistentDataType.STRING);
+        if (tagged != null) {
+            try { return WinterItems.Kind.valueOf(tagged); }
+            catch (IllegalArgumentException ignored) { /* fallback to the thrown item marker */ }
+        }
+        return potionItemKind(potion.getItem());
+    }
+
+    /** Store the potion kind on the entity as well as the item: vanilla may rewrite potion
+     *  metadata while creating a thrown projectile, so later events must not depend on item PDC. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void tagPotionProjectile(ProjectileLaunchEvent event) {
+        if (!(event.getEntity() instanceof ThrownPotion potion)) return;
+        WinterItems.Kind kind = potionItemKind(potion.getItem());
+        if (kind == WinterItems.Kind.RIME_POTION_SPLASH || kind == WinterItems.Kind.RIME_POTION_LINGERING) {
+            potion.getPersistentDataContainer().set(rimeProjectileKey, PersistentDataType.STRING, kind.name());
+        }
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void splash(PotionSplashEvent event) {
-        if (items.kind(event.getPotion().getItem()) != WinterItems.Kind.RIME_POTION_SPLASH) return;
+        if (thrownRimeKind(event.getPotion()) != WinterItems.Kind.RIME_POTION_SPLASH) return;
         for (Entity entity : event.getAffectedEntities()) {
             if (entity instanceof Player player) freezePotionTarget(player);
         }
     }
 
+    /** Fallback independent of vanilla potion-effect application: even if a server build
+     *  omits PotionSplashEvent for a no-effect water potion, impact still freezes nearby players. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void splashImpact(ProjectileHitEvent event) {
+        if (!(event.getEntity() instanceof ThrownPotion potion)
+                || thrownRimeKind(potion) != WinterItems.Kind.RIME_POTION_SPLASH) return;
+        for (Entity entity : potion.getWorld().getNearbyEntities(potion.getLocation(), 4.0, 2.0, 4.0)) {
+            if (entity instanceof Player player && entity.getLocation().distanceSquared(potion.getLocation()) <= 16.0) {
+                freezePotionTarget(player);
+            }
+        }
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void lingering(LingeringPotionSplashEvent event) {
-        if (items.kind(event.getEntity().getItem()) != WinterItems.Kind.RIME_POTION_LINGERING) return;
+        if (thrownRimeKind(event.getEntity()) != WinterItems.Kind.RIME_POTION_LINGERING) return;
         AreaEffectCloud cloud = event.getAreaEffectCloud();
         event.allowsEmptyCreation(true);
         cloud.getPersistentDataContainer().set(rimeCloudKey, PersistentDataType.BYTE, (byte) 1);
