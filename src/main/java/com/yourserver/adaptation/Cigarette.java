@@ -25,6 +25,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -39,8 +40,10 @@ import org.bukkit.util.Vector;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -109,6 +112,13 @@ final class Cigarette implements Listener {
     static final int NAUSEA_THRESHOLD_BARS = 64;
     static final int SMOKING_WINDOW_TICKS = 20 * 60;
     static final int NAUSEA_DURATION_TICKS = 20 * 15;
+    static final int FIRST_WITHDRAWAL_TICKS = 24_000;
+    static final int WITHDRAWAL_STAGE_TICKS = 20 * 60 * 4;
+    private static final long WITHDRAWAL_MESSAGE_REPEAT_TICKS = 40L;
+    private static final Component EARLY_CRAVING_MESSAGE = Component.text(
+            "Эх... сигаретку бы закурить...", NamedTextColor.DARK_GRAY);
+    private static final Component SEVERE_CRAVING_MESSAGE = Component.text(
+            "Ну же! Закури чего нибудь!...", NamedTextColor.RED);
     /** Долгое использование: выдох происходит по отпусканию ПКМ, не по таймеру. */
     private static final float USE_SECONDS = 3600.0F;
     /** Тихий ванильный треск горящего огня, повторяемый при затяжке. */
@@ -144,10 +154,26 @@ final class Cigarette implements Listener {
     /** Скользящие окна тяг: записи добавляются только при фактическом списании палочек. */
     private final Map<UUID, SmokingWindow> smokingWindows = new HashMap<>();
 
+    /** Зависимость: один отложенный переход на игрока, активные сообщения — общая задача. */
+    private final Map<UUID, AddictionState> addictions = new HashMap<>();
+    private final Set<UUID> warningPlayers = new HashSet<>();
+    private BukkitTask withdrawalMessagesTicker;
+
     private BukkitTask ticker;
 
     /** Тяга: рука, в которой сигарета, и тик, с которого игрок держит ПКМ. */
     private record Puff(EquipmentSlot hand, int since, int capacity) { }
+
+    private record SavedPotionEffect(PotionEffect effect, int capturedTick) { }
+
+    private static final class AddictionState {
+        /** 0 — отсчёт суток; 1..3 — стадии ломки. */
+        private int stage;
+        private int lastSmokeTick;
+        private BukkitTask transitionTask;
+        private final Map<PotionEffectType, SavedPotionEffect> previousEffects = new HashMap<>();
+        private final Map<PotionEffectType, PotionEffect> managedEffects = new HashMap<>();
+    }
 
     Cigarette(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -168,6 +194,22 @@ final class Cigarette implements Listener {
         puffs.clear();
         litAtTick.clear();
         smokingWindows.clear();
+        if (withdrawalMessagesTicker != null) {
+            withdrawalMessagesTicker.cancel();
+            withdrawalMessagesTicker = null;
+        }
+        for (Map.Entry<UUID, AddictionState> entry : addictions.entrySet()) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player != null) {
+                clearWithdrawalEffects(player, entry.getValue());
+                if (entry.getValue().stage > 0) {
+                    player.sendActionBar(Component.empty());
+                }
+            }
+            cancelTransition(entry.getValue());
+        }
+        addictions.clear();
+        warningPlayers.clear();
         for (BukkitTask task : inhaleSounds.values()) {
             task.cancel();
         }
@@ -410,13 +452,35 @@ final class Cigarette implements Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        puffs.remove(event.getPlayer().getUniqueId());
-        stopInhaleSound(event.getPlayer());
-        litAtTick.remove(event.getPlayer().getUniqueId());
-        smokingWindows.remove(event.getPlayer().getUniqueId());
-        Smoke flow = smoke.remove(event.getPlayer().getUniqueId());
+        Player player = event.getPlayer();
+        UUID id = player.getUniqueId();
+        puffs.remove(id);
+        stopInhaleSound(player);
+        litAtTick.remove(id);
+        smokingWindows.remove(id);
+        AddictionState addiction = addictions.get(id);
+        if (addiction != null && addiction.stage > 0) {
+            clearWithdrawalEffects(player, addiction);
+            player.sendActionBar(Component.empty());
+            warningPlayers.remove(id);
+            stopWithdrawalMessagesIfIdle();
+        }
+        Smoke flow = smoke.remove(id);
         if (flow != null) {
             flow.stop();
+        }
+    }
+
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        AddictionState addiction = addictions.get(id);
+        if (addiction == null) {
+            return;
+        }
+        if (addiction.stage >= 1 && addiction.stage <= 3) {
+            applyWithdrawalStage(event.getPlayer(), addiction);
+            startWithdrawalMessages(event.getPlayer(), addiction);
         }
     }
 
@@ -526,6 +590,9 @@ final class Cigarette implements Listener {
         if (spent <= 0) {
             return;
         }
+        if (addictions.containsKey(player.getUniqueId())) {
+            startOrResetAddiction(player);
+        }
         smoke(player, spent);
         countSmokingBars(player, spent);
         int rest = bars(item) - spent;
@@ -586,6 +653,216 @@ final class Cigarette implements Listener {
         }
     }
 
+    /** Первая полная сигарета запускает таймер; любая следующая затяжка его сбрасывает. */
+    private void startOrResetAddiction(Player player) {
+        UUID id = player.getUniqueId();
+        AddictionState state = addictions.computeIfAbsent(id, ignored -> new AddictionState());
+        cancelTransition(state);
+        if (state.stage > 0) {
+            clearWithdrawalEffects(player, state);
+            player.sendActionBar(Component.empty());
+            warningPlayers.remove(id);
+            stopWithdrawalMessagesIfIdle();
+        }
+        state.stage = 0;
+        state.lastSmokeTick = Bukkit.getCurrentTick();
+        scheduleAddictionTransition(id, state, FIRST_WITHDRAWAL_TICKS);
+    }
+
+    private void scheduleAddictionTransition(UUID id, AddictionState state, long delay) {
+        state.transitionTask = Bukkit.getScheduler().runTaskLater(
+                plugin,
+                () -> advanceAddiction(id),
+                Math.max(1L, delay)
+        );
+    }
+
+    private void advanceAddiction(UUID id) {
+        AddictionState state = addictions.get(id);
+        if (state == null) {
+            return;
+        }
+        state.transitionTask = null;
+        int elapsed = Bukkit.getCurrentTick() - state.lastSmokeTick;
+        int nextStage = withdrawalStageForTicks(elapsed);
+        Player player = Bukkit.getPlayer(id);
+        if (nextStage >= 4) {
+            if (player != null) {
+                clearWithdrawalEffects(player, state);
+                player.sendActionBar(Component.empty());
+            }
+            warningPlayers.remove(id);
+            addictions.remove(id);
+            stopWithdrawalMessagesIfIdle();
+            return;
+        }
+        if (nextStage == 0) {
+            scheduleAddictionTransition(id, state, FIRST_WITHDRAWAL_TICKS - elapsed);
+            return;
+        }
+        state.stage = nextStage;
+        if (player != null) {
+            applyWithdrawalStage(player, state);
+            startWithdrawalMessages(player, state);
+        }
+        long nextBoundary = (long) FIRST_WITHDRAWAL_TICKS
+                + (long) nextStage * WITHDRAWAL_STAGE_TICKS;
+        scheduleAddictionTransition(id, state, nextBoundary - elapsed);
+    }
+
+    /** 0=нет ломки, 1=слабая, 2=сильная с тошнотой, 3=сильная без тошноты, 4=зависимость прошла. */
+    static int withdrawalStageForTicks(int elapsedTicks) {
+        if (elapsedTicks < FIRST_WITHDRAWAL_TICKS) {
+            return 0;
+        }
+        if (elapsedTicks < FIRST_WITHDRAWAL_TICKS + WITHDRAWAL_STAGE_TICKS) {
+            return 1;
+        }
+        if (elapsedTicks < FIRST_WITHDRAWAL_TICKS + 2 * WITHDRAWAL_STAGE_TICKS) {
+            return 2;
+        }
+        if (elapsedTicks < FIRST_WITHDRAWAL_TICKS + 3 * WITHDRAWAL_STAGE_TICKS) {
+            return 3;
+        }
+        return 4;
+    }
+
+    private void startWithdrawalMessages(Player player, AddictionState state) {
+        UUID id = player.getUniqueId();
+        warningPlayers.add(id);
+        player.sendActionBar(withdrawalMessage(state.stage));
+        if (withdrawalMessagesTicker == null) {
+            withdrawalMessagesTicker = Bukkit.getScheduler().runTaskTimer(
+                    plugin,
+                    this::refreshWithdrawalMessages,
+                    WITHDRAWAL_MESSAGE_REPEAT_TICKS,
+                    WITHDRAWAL_MESSAGE_REPEAT_TICKS
+            );
+        }
+    }
+
+    private void refreshWithdrawalMessages() {
+        for (Iterator<UUID> it = warningPlayers.iterator(); it.hasNext(); ) {
+            UUID id = it.next();
+            AddictionState state = addictions.get(id);
+            Player player = Bukkit.getPlayer(id);
+            if (state == null || state.stage < 1 || state.stage > 3 || player == null) {
+                it.remove();
+                continue;
+            }
+            applyWithdrawalStage(player, state);
+            player.sendActionBar(withdrawalMessage(state.stage));
+        }
+        stopWithdrawalMessagesIfIdle();
+    }
+
+    private static Component withdrawalMessage(int stage) {
+        return stage == 1 ? EARLY_CRAVING_MESSAGE : SEVERE_CRAVING_MESSAGE;
+    }
+
+    private void applyWithdrawalStage(Player player, AddictionState state) {
+        if (state.stage < 1 || state.stage > 3) {
+            return;
+        }
+        int amplifier = state.stage == 1 ? 0 : 1;
+        setManagedEffect(player, state, PotionEffectType.WEAKNESS, amplifier);
+        setManagedEffect(player, state, PotionEffectType.MINING_FATIGUE, amplifier);
+        if (state.stage == 2) {
+            setManagedEffect(player, state, PotionEffectType.NAUSEA, 0);
+        } else {
+            restoreManagedEffect(player, state, PotionEffectType.NAUSEA);
+        }
+    }
+
+    private static void setManagedEffect(
+            Player player,
+            AddictionState state,
+            PotionEffectType type,
+            int amplifier
+    ) {
+        PotionEffect current = player.getPotionEffect(type);
+        PotionEffect managed = state.managedEffects.get(type);
+        PotionEffect expected = infiniteWithdrawalEffect(type, amplifier);
+        if (samePotionEffect(current, expected)) {
+            state.managedEffects.put(type, expected);
+            if (!state.previousEffects.containsKey(type)) {
+                state.previousEffects.put(type, saveCurrentEffect(current));
+            }
+            return;
+        }
+        if (!state.previousEffects.containsKey(type)) {
+            state.previousEffects.put(type, saveCurrentEffect(current));
+        } else if (managed != null && current != null && !samePotionEffect(current, managed)) {
+            // Если другой плагин заменил эффект, сохраним его как новый исходный, чтобы вернуть при отмене.
+            state.previousEffects.put(type, saveCurrentEffect(current));
+        }
+        player.addPotionEffect(expected, true);
+        state.managedEffects.put(type, expected);
+    }
+
+    private static PotionEffect infiniteWithdrawalEffect(PotionEffectType type, int amplifier) {
+        return new PotionEffect(type, PotionEffect.INFINITE_DURATION, amplifier, false, false, false);
+    }
+
+    private static SavedPotionEffect saveCurrentEffect(PotionEffect effect) {
+        return new SavedPotionEffect(effect, Bukkit.getCurrentTick());
+    }
+
+    private static boolean samePotionEffect(PotionEffect actual, PotionEffect expected) {
+        return actual != null
+                && expected != null
+                && actual.getType().equals(expected.getType())
+                && actual.getAmplifier() == expected.getAmplifier()
+                && actual.isInfinite() == expected.isInfinite()
+                && actual.isAmbient() == expected.isAmbient()
+                && actual.hasParticles() == expected.hasParticles()
+                && actual.hasIcon() == expected.hasIcon();
+    }
+
+    private static void restoreManagedEffect(Player player, AddictionState state, PotionEffectType type) {
+        PotionEffect managed = state.managedEffects.remove(type);
+        SavedPotionEffect saved = state.previousEffects.remove(type);
+        if (!samePotionEffect(player.getPotionEffect(type), managed)) {
+            return;
+        }
+        player.removePotionEffect(type);
+        if (saved == null || saved.effect() == null) {
+            return;
+        }
+        PotionEffect original = saved.effect();
+        if (!original.isInfinite()) {
+            int remaining = original.getDuration() - Math.max(0, Bukkit.getCurrentTick() - saved.capturedTick());
+            if (remaining <= 0) {
+                return;
+            }
+            original = new PotionEffect(original.getType(), remaining, original.getAmplifier(),
+                    original.isAmbient(), original.hasParticles(), original.hasIcon());
+        }
+        player.addPotionEffect(original, true);
+    }
+
+    private static void clearWithdrawalEffects(Player player, AddictionState state) {
+        restoreManagedEffect(player, state, PotionEffectType.WEAKNESS);
+        restoreManagedEffect(player, state, PotionEffectType.MINING_FATIGUE);
+        restoreManagedEffect(player, state, PotionEffectType.NAUSEA);
+        state.managedEffects.clear();
+        state.previousEffects.clear();
+    }
+
+    private void cancelTransition(AddictionState state) {
+        if (state.transitionTask != null) {
+            state.transitionTask.cancel();
+            state.transitionTask = null;
+        }
+    }
+
+    private void stopWithdrawalMessagesIfIdle() {
+        if (warningPlayers.isEmpty() && withdrawalMessagesTicker != null) {
+            withdrawalMessagesTicker.cancel();
+            withdrawalMessagesTicker = null;
+        }
+    }
+
     /** Сигарета догорела: звук поломки, дымок — и предмета нет. */
     private void breakUp(Player player, EquipmentSlot hand) {
         player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.7F, 1.0F);
@@ -599,6 +876,9 @@ final class Cigarette implements Listener {
             setHandItem(player, hand, new ItemStack(Material.AIR));
         }
         player.updateInventory();
+        if (!addictions.containsKey(player.getUniqueId())) {
+            startOrResetAddiction(player);
+        }
     }
 
     /** Поджиг: огниво щёлкнуло, модель сменилась на горящую, имя то же. */

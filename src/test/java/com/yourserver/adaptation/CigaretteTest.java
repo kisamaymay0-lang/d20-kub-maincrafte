@@ -76,6 +76,20 @@ final class CigaretteTest {
     }
 
     @Test
+    void ломкаПроходитЧетыреПоследовательныхЭтапаПоИгровымТикам() {
+        assertEquals(0, Cigarette.withdrawalStageForTicks(Cigarette.FIRST_WITHDRAWAL_TICKS - 1));
+        assertEquals(1, Cigarette.withdrawalStageForTicks(Cigarette.FIRST_WITHDRAWAL_TICKS));
+        assertEquals(2, Cigarette.withdrawalStageForTicks(
+                Cigarette.FIRST_WITHDRAWAL_TICKS + Cigarette.WITHDRAWAL_STAGE_TICKS));
+        assertEquals(3, Cigarette.withdrawalStageForTicks(
+                Cigarette.FIRST_WITHDRAWAL_TICKS + 2 * Cigarette.WITHDRAWAL_STAGE_TICKS));
+        assertEquals(4, Cigarette.withdrawalStageForTicks(
+                Cigarette.FIRST_WITHDRAWAL_TICKS + 3 * Cigarette.WITHDRAWAL_STAGE_TICKS));
+        assertEquals(38_400, Cigarette.FIRST_WITHDRAWAL_TICKS + 3 * Cigarette.WITHDRAWAL_STAGE_TICKS,
+                "полное восстановление — через 1 игровой день и 12 минут");
+    }
+
+    @Test
     void уРазныхМоделейОтдельныйЗапас() {
         assertEquals(64, Cigarette.RESERVE, "большая сигарета");
         assertEquals(16, Cigarette.SMALL_RESERVE, "маленькая sigareta-small");
