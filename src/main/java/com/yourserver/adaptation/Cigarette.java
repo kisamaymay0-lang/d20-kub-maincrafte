@@ -1,5 +1,6 @@
 package com.yourserver.adaptation;
 
+import io.papermc.paper.datacomponent.DataComponentType;
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.FoodProperties;
 import io.papermc.paper.datacomponent.item.TooltipDisplay;
@@ -46,12 +47,22 @@ import java.util.concurrent.ThreadLocalRandom;
  * «Сигарета»: имя не меняется от поджига, описания у предмета нет.
  *
  * <p>Поджиг: огниво во второй руке, сигарета в главной, шифт + ПКМ — модель
- * меняется на горящую. Дальше сигарета «курится»: держание ПКМ играет анимацию
- * трубения в козий рог (предмет помечен съедобным компонентом с огромным
- * временем использования, само «съедение» запрещено в {@link #onEat}), над
- * инвентарём висит шкала тяги, а на отпускании ПКМ изо рта летит дым по
- * направлению взгляда. Запас — 64 палочки, четыре полных тяги; когда запас
- * кончается, сигарета ломается и исчезает.
+ * меняется на горящую. Поджиг и тяга работают и по блоку, и в воздухе: пока на
+ * сигарете нет съедобного компонента, клиент не присылает «ПКМ в воздух»
+ * вовсе, и потому без компонентов жест ловился только по блоку.
+ *
+ * <p>Тяга: ПКМ держать, отпустить — выдох. Анимация трубения в козий рог видна
+ * и самому игроку от первого лица: предмет помечен съедобным компонентом с
+ * огромным временем использования, само «съедение» запрещено в {@link #onEat}.
+ * Над инвентарём висит шкала тяги, на отпускании ПКМ изо рта летит дым по
+ * направлению взгляда. Без шифта ваниль первой отдаёт ПКМ блоку, с которым
+ * умеет взаимодействовать (сундук, дверь, рычаг): там взаимодействие и
+ * случается. С шифтом игрок игнорирует все блоки и курит в любом случае.
+ *
+ * <p>Дым белый везде, кроме полной тяги: тогда облако густое и тёмное. Чем
+ * длиннее затяжка, тем дольше выдох — от секунды до восьми секунд. Запас — 64
+ * палочки, четыре полные тяги; когда запас кончается, сигарета ломается и
+ * исчезает.
  */
 final class Cigarette implements Listener {
 
@@ -80,8 +91,9 @@ final class Cigarette implements Listener {
     private static final Key SILENT_SOUND = Key.key("intentionally_empty");
     /** Как часто перерисовываем шкалу и проверяем, не кончился ли запас. */
     private static final long PERIOD = 2L;
-    /** Начиная с этой затяжки дым идёт и клубами. */
-    private static final int BIG_PUFF_BARS = 8;
+    /** Выдох после тяги: от секунды до восьми, полсекунды на палочку. */
+    private static final double EXHALE_MIN_SECONDS = 1.0D;
+    private static final double EXHALE_MAX_SECONDS = 8.0D;
     /** Начало струи дыма: чуть впереди и ниже глаз, чтобы шёл изо рта. */
     private static final double MOUTH_AHEAD = 0.28D;
     private static final double MOUTH_DOWN = 0.12D;
@@ -149,29 +161,39 @@ final class Cigarette implements Listener {
         meta.getPersistentDataContainer().set(LIT, PersistentDataType.INTEGER, lit ? 1 : 0);
         meta.getPersistentDataContainer().set(BARS, PersistentDataType.INTEGER, RESERVE);
         item.setItemMeta(meta);
-        try {
-            // Метка еды с canAlwaysEat: без неё ваниль не начинает «использование»
-            // предмета, когда игрок сыт, и тяга не запускалась бы. Сама еда нулевая,
-            // а её строка в подсказке спрятана, чтобы у сигареты не было лишнего текста.
-            item.setData(DataComponentTypes.FOOD, FoodProperties.food()
-                    .nutrition(0)
-                    .saturation(0f)
-                    .canAlwaysEat(true)
-                    .build());
-            item.setData(DataComponentTypes.TOOLTIP_DISPLAY, TooltipDisplay.tooltipDisplay()
-                    .addHiddenComponents(DataComponentTypes.FOOD)
-                    .build());
-            // Огромное время «съедения»: тянуть можно сколько угодно, обрыва нет.
-            item.setData(DataComponentTypes.CONSUMABLE, Consumable.consumable()
-                    .consumeSeconds(USE_SECONDS)
-                    .animation(ItemUseAnimation.TOOT_HORN)
-                    .sound(SILENT_SOUND)
-                    .hasConsumeParticles(false)
-                    .build());
-        } catch (Throwable ignored) {
-            // Ядро без компонентов: тяги не будет, но предмет останется на месте.
-        }
+        // Метка еды с canAlwaysEat: без неё ваниль не начинает «использование»
+        // предмета, когда игрок сыт, и тяга не запускалась бы. Сама еда нулевая,
+        // а её строка в подсказке спрятана, чтобы у сигареты не было лишнего текста.
+        apply(item, DataComponentTypes.FOOD, FoodProperties.food()
+                .nutrition(0)
+                .saturation(0f)
+                .canAlwaysEat(true)
+                .build(), "food");
+        apply(item, DataComponentTypes.TOOLTIP_DISPLAY, TooltipDisplay.tooltipDisplay()
+                .addHiddenComponents(DataComponentTypes.FOOD)
+                .build(), "tooltip_display");
+        // Огромное время «съедения»: тянуть можно сколько угодно, обрыва нет.
+        // Компонент и даёт анимацию трубения в козий рог с держанием ПКМ.
+        apply(item, DataComponentTypes.CONSUMABLE, Consumable.consumable()
+                .consumeSeconds(USE_SECONDS)
+                .animation(ItemUseAnimation.TOOT_HORN)
+                .sound(SILENT_SOUND)
+                .hasConsumeParticles(false)
+                .build(), "consumable");
         return item;
+    }
+
+    /**
+     * Ставит компонент, не давая одному сломанному утащить остальные: без
+     * {@code consumable} ваниль не начинает «использование» предмета, и тяга не
+     * запускалась бы совсем. Причина видна в консоли, а не тонет в тишине.
+     */
+    private static <T> void apply(ItemStack item, DataComponentType.Valued<T> type, T value, String name) {
+        try {
+            item.setData(type, value);
+        } catch (Throwable failure) {
+            Bukkit.getLogger().warning("[Сигарета] компонент " + name + " не встал: " + failure);
+        }
     }
 
     /** Сигарета ли это: у предмета есть метка вида. */
@@ -200,10 +222,18 @@ final class Cigarette implements Listener {
     }
 
     /**
-     * Шифт + ПКМ с сигаретой — поджиг, если в другой руке огниво. Клик всегда
-     * отдаём ванили как «предмет используется»: так держание ПКМ начинает
-     * тягу, а блочное взаимодействие не срабатывает — иначе сигарета открывала
-     * бы сундук, а огниво в главной руке развело бы огонь на блоке.
+     * ПКМ сигаретой — и по блоку, и в воздухе. Поджиг: шифт + ПКМ с огнивом в
+     * другой руке. Тяга: ПКМ держать, отпустить — выдох.
+     *
+     * <p>Клик отдаём ванили гранулами, а не отменой целиком: {@code
+     * setUseInteractedBlock} решает, трогать ли блок, {@code setUseItemInHand} —
+     * начинать ли использование предмета (анимацию трубения в козий рог и
+     * держание ПКМ). Отмена события целиком гасила и то и другое, поэтому жест
+     * жил только когда клиент присылал клик по блоку.
+     *
+     * <p>С шифтом игрок игнорирует все блоки и курит всегда. Без шифта ваниль
+     * первой отдаёт ПКМ блоку, с которым умеет взаимодействовать: сундук
+     * откроется, дверь — и сигарета не тронется.
      */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onUse(PlayerInteractEvent event) {
@@ -227,12 +257,12 @@ final class Cigarette implements Listener {
                     && isFlintAndSteel(handItem(player, other(hand)))) {
                 light(player, hand);
             }
-            event.setCancelled(true);
-            if (isLit(handItem(player, hand))) {
+            if (isLit(handItem(player, hand)) && (player.isSneaking() || !blocksInteraction(event))) {
                 // Горящая тянется: тяга начинается сразу, ваниль поднимает предмет ко рту.
-                hold(player, hand);
+                event.setUseInteractedBlock(Event.Result.DENY);
                 event.setUseItemInHand(Event.Result.ALLOW);
-            } else {
+                hold(player, hand);
+            } else if (!isLit(handItem(player, hand))) {
                 // Холодной сигарете трубеть нечем: ни анимации, ни шкалы.
                 event.setUseItemInHand(Event.Result.DENY);
             }
@@ -248,12 +278,27 @@ final class Cigarette implements Listener {
             ItemStack cigarette = handItem(player, cigaretteHand);
             if (isCigarette(cigarette) && !isLit(cigarette)) {
                 light(player, cigaretteHand);
-                event.setCancelled(true);
                 // Огниво в воздухе ничего не зажжёт, а вторая рука должна начать тягу.
+                event.setUseInteractedBlock(Event.Result.DENY);
                 event.setUseItemInHand(Event.Result.ALLOW);
                 hold(player, cigaretteHand);
             }
         }
+    }
+
+    /**
+     * Впереди блок, с которым ваниль умеет взаимодействовать: сундук, дверь,
+     * рычаг, наковальня. Такой блок забирает ПКМ себе, и только шифт его
+     * отменяет — тогда сигарета тянется не глядя на блок.
+     */
+    private static boolean blocksInteraction(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+            return false;
+        }
+        if (event.getClickedBlock() == null) {
+            return false;
+        }
+        return event.useInteractedBlock() != Event.Result.DENY;
     }
 
     /** Отпустили ПКМ: сколько набилось затяжек — столько дыма. */
@@ -293,7 +338,8 @@ final class Cigarette implements Listener {
 
     /**
      * Каждые два тика: шкала тяги и проверка, не кончился ли запас прямо в
-     * руке. Сигарета, унесённая из руки или опущенная, тягу закрывает сама.
+     * руке. Отпускание ПКМ ловит {@link #onStopUsing}; сигарета, унесённая из
+     * руки или погасшая, закрывает тягу сама, а набранная шкала — выдох.
      */
     private void tick() {
         int tick = Bukkit.getCurrentTick();
@@ -306,8 +352,8 @@ final class Cigarette implements Listener {
                 continue;
             }
             ItemStack item = handItem(player, puff.hand());
-            if (!isCigarette(item) || !isLit(item) || !player.hasActiveItem()) {
-                // Тяга кончилась сама: сигарета ушла из руки или игрок опустил ПКМ.
+            if (!isCigarette(item) || !isLit(item)) {
+                // Сигарета ушла из руки или погасла: тяга закрывается сама.
                 it.remove();
                 finish(player, puff);
                 continue;
@@ -325,7 +371,11 @@ final class Cigarette implements Listener {
 
     /** Тяга началась: сигарета поднята ко рту, шкала сразу на месте. */
     private void hold(Player player, EquipmentSlot hand) {
-        puffs.remove(player.getUniqueId());
+        // Новый клик закрывает прошлую тягу: иначе две тяги слились бы в одну.
+        Puff old = puffs.remove(player.getUniqueId());
+        if (old != null) {
+            finish(player, old);
+        }
         ItemStack item = handItem(player, hand);
         if (!isCigarette(item) || !isLit(item)) {
             return;
@@ -370,8 +420,7 @@ final class Cigarette implements Listener {
     private void breakUp(Player player, EquipmentSlot hand) {
         player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.7F, 1.0F);
         Location where = mouth(player);
-        player.getWorld().spawnParticle(Particle.SMOKE, where, 10, 0.08D, 0.08D, 0.08D, 0.02D);
-        player.getWorld().spawnParticle(Particle.LARGE_SMOKE, where, 3, 0.05D, 0.05D, 0.05D, 0.01D);
+        player.getWorld().spawnParticle(Particle.SMOKE, where, 12, 0.08D, 0.08D, 0.08D, 0.02D);
         ItemStack item = handItem(player, hand);
         if (item != null && item.getAmount() > 1) {
             item.setAmount(item.getAmount() - 1);
@@ -437,6 +486,16 @@ final class Cigarette implements Listener {
         return Math.clamp(Math.min(BARS_PER_PUFF, ticks / TICKS_PER_BAR), 0, left);
     }
 
+    /**
+     * Сколько тиков игрок выдыхает дым после тяги: полсекунды выдоха на
+     * палочку, но не короче секунды и не длиннее восьми. Полная тяга (шестнадцать
+     * палочек) — ровно восемь секунд, самая короткая — секунда.
+     */
+    static int exhaleTicks(int bars) {
+        double seconds = Math.max(EXHALE_MIN_SECONDS, Math.min(EXHALE_MAX_SECONDS, bars * 0.5D));
+        return (int) Math.round(seconds * 20.0D);
+    }
+
     /** Рот: чуть впереди и ниже глаз, чтобы дым шёл из лица, а не из центра головы. */
     private static Location mouth(Player player) {
         Location eye = player.getEyeLocation();
@@ -476,25 +535,35 @@ final class Cigarette implements Listener {
         item.setItemMeta(meta);
     }
 
-    /** Один поток дыма: шагает вперёд по направлению взгляда и рассыпается. */
+    /**
+     * Один выдох: струя летит изо рта по направлению взгляда, а потом облако
+     * держится на месте и ползёт вверх. Длительность выдоха зависит от тяги —
+     * от секунды до восьми секунд, дым белый, и только полная тяга даёт густое
+     * тёмное облако.
+     */
     private final class Smoke implements Runnable {
 
         private final Player player;
         private final Vector dir;
         private final Location at;
-        private final int steps;
-        private final int perStep;
-        private final boolean big;
-        private int step;
+        /** Струя изо рта: короткий рывок вперёд, дальше облако просто висит. */
+        private final int jetSteps;
+        /** Сколько всего тиков длится выдох. */
+        private final int total;
+        private final int perTick;
+        private final Particle particle;
+        private int tick;
         private BukkitTask task;
 
         Smoke(Player player, int bars) {
             this.player = player;
             this.dir = player.getEyeLocation().getDirection().normalize();
             this.at = mouth(player);
-            this.steps = 4 + bars;
-            this.perStep = 1 + bars / 6;
-            this.big = bars >= BIG_PUFF_BARS;
+            this.total = exhaleTicks(bars);
+            this.jetSteps = Math.min(total, 4 + bars / 2);
+            this.perTick = 1 + bars / 6;
+            // Только полная тяга идёт густым тёмным дымом, весь остальной — белый.
+            this.particle = bars >= BARS_PER_PUFF ? Particle.LARGE_SMOKE : Particle.SMOKE;
         }
 
         void start() {
@@ -510,29 +579,35 @@ final class Cigarette implements Listener {
 
         @Override
         public void run() {
-            if (step >= steps || !player.isOnline()) {
-                // Струя кончилась: снимаем себя, чтобы не копить отработавшие задачи.
+            if (tick >= total || !player.isOnline()) {
+                // Выдох кончился: снимаем себя, чтобы не копить отработавшие задачи.
                 stop();
                 if (smoke.get(player.getUniqueId()) == this) {
                     smoke.remove(player.getUniqueId());
                 }
                 return;
             }
-            for (int i = 0; i < perStep; i++) {
+            boolean jet = tick < jetSteps;
+            for (int i = 0; i < perTick; i++) {
                 Location spot = at.clone().add(jitter());
                 // Ноль частиц со скоростью вместо разброса: дым летит, а не висит.
                 player.getWorld().spawnParticle(
-                        big && i == 0 ? Particle.LARGE_SMOKE : Particle.SMOKE,
+                        particle,
                         spot,
                         0,
                         dir.getX() * SMOKE_PUSH,
-                        dir.getY() * SMOKE_PUSH + SMOKE_LIFT,
+                        dir.getY() * SMOKE_PUSH + (jet ? SMOKE_LIFT : SMOKE_LIFT * 3.0D),
                         dir.getZ() * SMOKE_PUSH,
                         1.0D
                 );
             }
-            at.add(dir.getX() * SMOKE_STEP, dir.getY() * SMOKE_STEP + SMOKE_RISE, dir.getZ() * SMOKE_STEP);
-            step++;
+            if (jet) {
+                at.add(dir.getX() * SMOKE_STEP, dir.getY() * SMOKE_STEP + SMOKE_RISE, dir.getZ() * SMOKE_STEP);
+            } else {
+                // Рывок кончился: облако осталось на месте и медленно ползёт вверх.
+                at.add(0, SMOKE_RISE * 2.0D, 0);
+            }
+            tick++;
         }
 
         private static Vector jitter() {

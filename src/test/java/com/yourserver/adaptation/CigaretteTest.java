@@ -49,6 +49,15 @@ final class CigaretteTest {
     }
 
     @Test
+    void выдохОтСекундыДоВосьмиСекунд() {
+        assertEquals(20, Cigarette.exhaleTicks(1), "самая короткая тяга — секунда выдоха");
+        assertEquals(20, Cigarette.exhaleTicks(0), "пустая тяга тоже выдыхает секунду");
+        assertEquals(100, Cigarette.exhaleTicks(10), "пять секунд выдоха на десять палочек");
+        assertEquals(160, Cigarette.exhaleTicks(Cigarette.BARS_PER_PUFF), "полная тяга — восемь секунд");
+        assertEquals(160, Cigarette.exhaleTicks(Cigarette.RESERVE), "дольше восьми секунд не бывает");
+    }
+
+    @Test
     void шкалаРовноШестнадцатьПалочекВСкобках() {
         assertEquals("[ |||||||||||||||| ]",
                 PlainTextComponentSerializer.plainText().serialize(Cigarette.gauge(0)));
