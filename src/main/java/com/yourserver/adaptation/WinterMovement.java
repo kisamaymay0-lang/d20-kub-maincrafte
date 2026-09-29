@@ -14,8 +14,6 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Interaction;
-import org.bukkit.entity.ItemDisplay;
-import org.bukkit.entity.Slime;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -123,9 +121,6 @@ final class WinterMovement implements Listener {
         int previousColdTicks;
         BlockDisplay iceLower, iceUpper;
         Interaction iceLowerHitbox, iceUpperHitbox;
-        Slime carrier;
-        ItemDisplay carrierCore;
-        boolean carrierUnavailable;
         boolean iceLowerIntact = true, iceUpperIntact = true;
     }
 
@@ -234,8 +229,6 @@ final class WinterMovement implements Listener {
         lockDurationTicks = Math.max(1, lockDurationTicks);
         coldDurationTicks = Math.max(1, coldDurationTicks);
         State state = states.computeIfAbsent(player.getUniqueId(), ignored -> new State());
-        Vector initialVelocity = player.getVelocity().clone();
-        boolean startingFreeze = state.frozenUntil <= tick;
         if (state.coldUntil == 0) {
             state.previousColdLock = player.isFreezeTickingLocked();
             state.previousColdTicks = player.getFreezeTicks();
@@ -256,8 +249,7 @@ final class WinterMovement implements Listener {
         player.lockFreezeTicks(true);
         player.setFreezeTicks(player.getMaxFreezeTicks()); // Ванильный FREEZE урон и иммунитеты остаются у Minecraft.
         player.setFallDistance(0);
-        if (startingFreeze) createCarrier(player, state, initialVelocity);
-        if (state.carrier == null) player.setVelocity(new Vector());
+        player.setVelocity(new Vector());
     }
 
     /** Запомнить исходные скорости и гравитацию один раз за сессию удержания: их вернёт
@@ -334,7 +326,6 @@ final class WinterMovement implements Listener {
         state.driftAnchor = null; state.hangUntil = 0;
         state.drifting = false; state.driftReady = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
         clearIce(state);
-        removeCarrier(player, state);
         restoreControl(player, state);
     }
 
@@ -751,7 +742,7 @@ final class WinterMovement implements Listener {
         tick++;
         for (var entry : new ArrayList<>(states.entrySet())) {
             Player player = Bukkit.getPlayer(entry.getKey()); State state = entry.getValue();
-            if (player == null) { clearIce(state); removeCarrier(null, state); states.remove(entry.getKey()); continue; }
+            if (player == null) { clearIce(state); states.remove(entry.getKey()); continue; }
             if (player.isDead()) { cleanup(player); continue; }
             if (state.coldUntil > tick) {
                 if (!player.isFreezeTickingLocked()) player.lockFreezeTicks(true);
@@ -759,18 +750,14 @@ final class WinterMovement implements Listener {
             } else if (state.coldUntil != 0) restoreCold(player, state);
             if (state.grip != Grip.NONE) grip(player, state);
             if (state.frozenUntil > tick) {
-                tickCarrier(player, state);
                 player.setFallDistance(0);
                 Location actual = player.getLocation();
                 if (state.freezeAnchor == null || !state.freezeAnchor.getWorld().equals(actual.getWorld())) {
                     state.freezeAnchor = actual.clone();
-                } else {
-                    state.freezeAnchor = actual;
                 }
                 updateIce(player, state);
             } else {
                 clearIce(state);
-                removeCarrier(player, state);
                 if (state.grip == Grip.NONE) restoreControl(player, state);
             }
             if (state.grip == Grip.NONE && state.frozenUntil <= tick && state.coldUntil == 0
@@ -804,109 +791,6 @@ final class WinterMovement implements Listener {
             velocity.setX(velocity.getX() * scale);
             velocity.setZ(velocity.getZ() * scale);
             player.setVelocity(velocity);
-        }
-    }
-
-    /** Create an invisible, gravity-driven slime carrier and a blue-ice core inside it.
-     *  The player rides the carrier; movement is driven from the rider's normal WASD input. */
-    private void createCarrier(Player player, State state, Vector initialVelocity) {
-        removeCarrier(player, state);
-        Location at = player.getLocation().clone();
-        state.carrier = player.getWorld().spawn(at, Slime.class, slime -> {
-            slime.setSize(1);
-            slime.setAI(false);
-            slime.setInvisible(true);
-            slime.setSilent(true);
-            slime.setInvulnerable(true);
-            slime.setGravity(true);
-            slime.setPersistent(false);
-            slime.setVelocity(initialVelocity);
-        });
-        state.carrierCore = player.getWorld().spawn(at, ItemDisplay.class, display -> {
-            display.setItemStack(new ItemStack(Material.BLUE_ICE));
-            display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.GROUND);
-            display.setPersistent(false);
-            display.setGravity(false);
-            display.setInvulnerable(true);
-            display.setSilent(true);
-            display.setTeleportDuration(0);
-        });
-        if (!state.carrier.addPassenger(player)) {
-            removeCarrier(player, state);
-            state.carrierUnavailable = true;
-            return;
-        }
-        state.carrierUnavailable = false;
-        player.setVelocity(new Vector());
-    }
-
-    private void tickCarrier(Player player, State state) {
-        Slime carrier = state.carrier;
-        if (carrier == null && state.carrierUnavailable) {
-            if (!state.iceLowerIntact) player.setWalkSpeed(state.walkSpeed);
-            return;
-        }
-        if (carrier == null || !carrier.isValid()) {
-            createCarrier(player, state, player.getVelocity());
-            carrier = state.carrier;
-            if (carrier == null) {
-                if (!state.iceLowerIntact) player.setWalkSpeed(state.walkSpeed);
-                return;
-            }
-        }
-        if (!carrier.getPassengers().contains(player)) carrier.addPassenger(player);
-        Vector velocity = carrier.getVelocity();
-        if (state.iceLowerIntact) {
-            velocity.setX(0).setZ(0);
-        } else {
-            var input = player.getCurrentInput();
-            double forward = (input.isForward() ? 1.0 : 0.0) - (input.isBackward() ? 1.0 : 0.0);
-            double strafe = (input.isRight() ? 1.0 : 0.0) - (input.isLeft() ? 1.0 : 0.0);
-            double yaw = Math.toRadians(state.iceUpperIntact && state.freezeAnchor != null
-                    ? state.freezeAnchor.getYaw() : player.getLocation().getYaw());
-            double dx = -Math.sin(yaw) * forward + Math.cos(yaw) * strafe;
-            double dz = Math.cos(yaw) * forward + Math.sin(yaw) * strafe;
-            double inputLength = Math.hypot(dx, dz);
-            if (inputLength > 1e-9) {
-                // Acceleration is deliberate: releasing the key preserves momentum, while
-                // steering against the slide can brake or reverse the carrier.
-                double acceleration = 0.018 / inputLength;
-                velocity.setX(velocity.getX() + dx * acceleration);
-                velocity.setZ(velocity.getZ() + dz * acceleration);
-                double horizontalSpeed = Math.hypot(velocity.getX(), velocity.getZ());
-                if (horizontalSpeed > 0.12) {
-                    velocity.setX(velocity.getX() * 0.12 / horizontalSpeed);
-                    velocity.setZ(velocity.getZ() * 0.12 / horizontalSpeed);
-                }
-            } else {
-                double speed = Math.hypot(velocity.getX(), velocity.getZ());
-                if (speed > 1e-4) {
-                    double drag = carrier.isOnGround() ? 0.546 : 0.91;
-                    double scale = Math.min(speed / drag, 1.25) / speed;
-                    velocity.setX(velocity.getX() * scale);
-                    velocity.setZ(velocity.getZ() * scale);
-                }
-            }
-        }
-        carrier.setVelocity(velocity);
-        if (state.carrierCore != null && state.carrierCore.isValid()) {
-            Location core = carrier.getLocation().clone().add(0, 0.45, 0);
-            if (!state.carrierCore.getLocation().getWorld().equals(core.getWorld())
-                    || state.carrierCore.getLocation().distanceSquared(core) > 1e-6) state.carrierCore.teleport(core);
-        }
-    }
-
-    private void removeCarrier(Player player, State state) {
-        Slime carrier = state.carrier;
-        if (carrier != null) {
-            if (player != null && player.getVehicle() == carrier) player.leaveVehicle();
-            carrier.eject();
-            carrier.remove();
-            state.carrier = null;
-        }
-        if (state.carrierCore != null) {
-            state.carrierCore.remove();
-            state.carrierCore = null;
         }
     }
 
@@ -1003,10 +887,7 @@ final class WinterMovement implements Listener {
         if (state == null || state.frozenUntil <= tick) return;
         if (hit.lower()) {
             if (!state.iceLowerIntact) return;
-            // The carrier now accepts WASD movement. The upper shell independently keeps
-            // yaw/pitch locked until that segment is also broken.
             state.iceLowerIntact = false;
-            frozen.setWalkSpeed(state.walkSpeed);
             removeLowerIce(state);
         } else {
             if (!state.iceUpperIntact) return;
@@ -1019,7 +900,6 @@ final class WinterMovement implements Listener {
         if (!state.iceLowerIntact && !state.iceUpperIntact) {
             state.frozenUntil = 0;
             clearIce(state);
-            removeCarrier(frozen, state);
             if (state.grip == Grip.NONE) restoreControl(frozen, state);
         }
     }
@@ -1053,7 +933,6 @@ final class WinterMovement implements Listener {
         State state = states.remove(player.getUniqueId());
         if (state != null) {
             clearIce(state);
-            removeCarrier(player, state);
             state.grip = Grip.NONE; state.wall = null; state.face = null;
             state.driftAnchor = null; state.hangUntil = 0;
             state.drifting = false; state.driftReady = false; state.entered = false; state.used = false; state.slideSpeed = 0; state.slideCharge = 0; state.slideWorn = 0;
@@ -1137,14 +1016,9 @@ final class WinterMovement implements Listener {
         if (direction.lengthSquared() < 1e-6) direction = attacker.getLocation().getDirection().setY(0);
         if (direction.lengthSquared() < 1e-6) direction = new Vector(0, 0, 1);
         direction.normalize();
-        State state = states.get(victim.getUniqueId());
-        Vector current = state != null && state.carrier != null ? state.carrier.getVelocity() : victim.getVelocity();
-        Vector knockback = new Vector(direction.getX() * 0.38, Math.max(current.getY(), 0.12), direction.getZ() * 0.38);
-        if (state != null && state.carrier != null) state.carrier.setVelocity(knockback);
-        else {
-            victim.setVelocity(knockback);
-            slidingUntil.put(victim.getUniqueId(), Long.MAX_VALUE);
-        }
+        Vector current = victim.getVelocity();
+        victim.setVelocity(new Vector(direction.getX() * 0.38, Math.max(current.getY(), 0.12), direction.getZ() * 0.38));
+        slidingUntil.put(victim.getUniqueId(), Long.MAX_VALUE);
     }
 
     private void rimePush(Player attacker, Player victim) {
@@ -1162,14 +1036,7 @@ final class WinterMovement implements Listener {
 
     void disable() {
         task.cancel();
-        for (UUID id : new ArrayList<>(states.keySet())) {
-            Player player = Bukkit.getPlayer(id);
-            if (player != null) cleanup(player);
-            else {
-                State state = states.get(id);
-                if (state != null) { clearIce(state); removeCarrier(null, state); }
-            }
-        }
+        for (UUID id : new ArrayList<>(states.keySet())) { Player player = Bukkit.getPlayer(id); if (player != null) cleanup(player); }
         states.clear();
         slidingUntil.clear();
     }
