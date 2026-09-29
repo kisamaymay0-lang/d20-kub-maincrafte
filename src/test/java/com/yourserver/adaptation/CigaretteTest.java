@@ -28,6 +28,8 @@ final class CigaretteTest {
     void выдохПриЛюбомНенулевомКликеНеКорочеПоловиныСекунды() {
         assertEquals(0, Cigarette.barsForRelease(0, Cigarette.RESERVE));
         assertEquals(1, Cigarette.barsForRelease(1, Cigarette.RESERVE));
+        assertEquals(4, Cigarette.exhaleTicks(Cigarette.barsForRelease(1, Cigarette.RESERVE)),
+                "даже короткий щелчок даёт одну палочку, то есть 0,2 секунды дыма");
         assertEquals(0, Cigarette.barsForRelease(1, 0));
     }
 
@@ -56,12 +58,14 @@ final class CigaretteTest {
     }
 
     @Test
-    void выдохОтПоловиныДоВосьмиСекунд() {
-        assertEquals(10, Cigarette.exhaleTicks(1), "самая короткая тяга — полсекунды выдоха");
-        assertEquals(10, Cigarette.exhaleTicks(0), "минимальный выдох — полсекунды");
-        assertEquals(100, Cigarette.exhaleTicks(10), "пять секунд выдоха на десять палочек");
-        assertEquals(160, Cigarette.exhaleTicks(Cigarette.BARS_PER_PUFF), "полная тяга — восемь секунд");
-        assertEquals(160, Cigarette.exhaleTicks(Cigarette.RESERVE), "дольше восьми секунд не бывает");
+    void каждаяПалочкаДаетРовноДвеДесятыхСекундыДыма() {
+        assertEquals(0, Cigarette.exhaleTicks(0), "без палочек выдоха нет");
+        assertEquals(4, Cigarette.exhaleTicks(1), "одна палочка — 0,2 секунды");
+        assertEquals(40, Cigarette.exhaleTicks(10), "десять палочек — 2 секунды");
+        assertEquals(64, Cigarette.exhaleTicks(Cigarette.BARS_PER_PUFF), "полная тяга — 3,2 секунды");
+        assertEquals(64, Cigarette.exhaleTicks(Cigarette.BARS_PER_PUFF + 50), "лишние палочки ограничены 16");
+        assertEquals(64, Cigarette.exhaleTicks(Cigarette.RESERVE), "не более 16 палочек в одной тяге");
+        assertEquals(0, Cigarette.exhaleTicks(-5), "отрицательных палочек не бывает");
         assertEquals(8, Cigarette.MAX_STACK_SIZE, "в стаке не больше восьми сигарет");
     }
 

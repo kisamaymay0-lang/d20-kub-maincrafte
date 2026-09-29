@@ -55,9 +55,9 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>Шкала пополняется на палочку каждые 0,2 секунды. После отпускания изо рта
  * непрерывно вылетают частицы уютного дыма костра в текущем направлении
- * взгляда, выдох длится от 0,5 до 8 секунд. Запас — 64 палочки, четыре полных
- * тяги; когда запас кончается, сигарета ломается и исчезает. Стак — до восьми
- * сигарет.
+ * взгляда; каждая набранная палочка даёт ровно 0,2 секунды выдоха. Запас — 64
+ * палочки, четыре полных тяги; когда запас кончается, сигарета ломается и
+ * исчезает. Стак — до восьми сигарет.
  */
 final class Cigarette implements Listener {
 
@@ -88,9 +88,6 @@ final class Cigarette implements Listener {
     private static final Key SILENT_SOUND = Key.key("intentionally_empty");
     /** Как часто перерисовываем шкалу и проверяем, не кончился ли запас. */
     private static final long PERIOD = 2L;
-    /** Выдох после тяги: от половины секунды до восьми, полсекунды на палочку. */
-    private static final double EXHALE_MIN_SECONDS = 0.5D;
-    private static final double EXHALE_MAX_SECONDS = 8.0D;
     /** Начало струи дыма: чуть впереди и ниже глаз, чтобы шёл изо рта. */
     private static final double MOUTH_AHEAD = 0.28D;
     private static final double MOUTH_DOWN = 0.12D;
@@ -104,6 +101,9 @@ final class Cigarette implements Listener {
 
     /** Летящий дым: по одному потоку на игрока, новый обрывает старый. */
     private final Map<UUID, Smoke> smoke = new HashMap<>();
+
+    /** Тик поджига: второе событие руки в том же нажатии не начинает тягу. */
+    private final Map<UUID, Integer> litAtTick = new HashMap<>();
 
     private BukkitTask ticker;
 
@@ -127,6 +127,7 @@ final class Cigarette implements Listener {
         }
         smoke.clear();
         puffs.clear();
+        litAtTick.clear();
     }
 
     /** Холодная сигарета: модель sigareta-big, полный запас. */
@@ -166,7 +167,7 @@ final class Cigarette implements Listener {
                 .addHiddenComponents(DataComponentTypes.FOOD)
                 .build(), "tooltip_display");
         // Огромное время «съедения»: тянуть можно сколько угодно, обрыва нет.
-        // Компонент и даёт анимацию трубения в козий рог с держанием ПКМ.
+        // Компонент задаёт клиентскую анимацию TOOT_HORN, в том числе от первого лица.
         apply(item, DataComponentTypes.CONSUMABLE, Consumable.consumable()
                 .consumeSeconds(USE_SECONDS)
                 .animation(ItemUseAnimation.TOOT_HORN)
@@ -218,8 +219,8 @@ final class Cigarette implements Listener {
     /**
      * Любой обычный ПКМ горящей сигаретой запускает тягу — и в воздух, и по
      * блоку. Сигарета забирает клик у блока, чтобы ваниль не погасила начало
-     * использования предмета; огниво в другой руке по-прежнему зажигает её
-     * при шифт + ПКМ.
+     * использования предмета; огниво в другой руке зажигает её с шифт + ПКМ.
+     * Поджиг сам по себе не начинает тягу: её запускает отдельное нажатие.
      */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
     public void onUse(PlayerInteractEvent event) {
@@ -232,6 +233,18 @@ final class Cigarette implements Listener {
             return;
         }
         Player player = event.getPlayer();
+        UUID playerId = player.getUniqueId();
+        int now = Bukkit.getCurrentTick();
+        Integer litTick = litAtTick.get(playerId);
+        if (litTick != null) {
+            if (now <= litTick) {
+                // Поджиг и второе событие другой руки — всё ещё один жест ПКМ.
+                event.setUseInteractedBlock(Event.Result.DENY);
+                event.setUseItemInHand(Event.Result.DENY);
+                return;
+            }
+            litAtTick.remove(playerId);
+        }
 
         if (isCigarette(handItem(player, hand))) {
             // Сигареты в обеих руках: клик считаем один раз, по главной руке.
@@ -239,9 +252,16 @@ final class Cigarette implements Listener {
                 return;
             }
             ItemStack cigarette = handItem(player, hand);
-            if (player.isSneaking() && !isLit(cigarette)
+            boolean litBeforeClick = isLit(cigarette);
+            if (player.isSneaking() && !litBeforeClick
                     && isFlintAndSteel(handItem(player, other(hand)))) {
                 light(player, hand);
+            }
+            if (!litBeforeClick && isLit(handItem(player, hand))) {
+                // Поджиг только меняет модель. Для начала тяги нужно новое нажатие ПКМ.
+                event.setUseInteractedBlock(Event.Result.DENY);
+                event.setUseItemInHand(Event.Result.DENY);
+                return;
             }
             if (isLit(handItem(player, hand))) {
                 // Не даём блоку перехватить клик; предмет используется и в воздухе, и по блоку.
@@ -264,8 +284,7 @@ final class Cigarette implements Listener {
             if (isCigarette(cigarette) && !isLit(cigarette)) {
                 light(player, cigaretteHand);
                 event.setUseInteractedBlock(Event.Result.DENY);
-                event.setUseItemInHand(Event.Result.ALLOW);
-                hold(player, cigaretteHand);
+                event.setUseItemInHand(Event.Result.DENY);
             }
         }
     }
@@ -299,6 +318,7 @@ final class Cigarette implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         puffs.remove(event.getPlayer().getUniqueId());
+        litAtTick.remove(event.getPlayer().getUniqueId());
         Smoke flow = smoke.remove(event.getPlayer().getUniqueId());
         if (flow != null) {
             flow.stop();
@@ -312,6 +332,7 @@ final class Cigarette implements Listener {
      */
     private void tick() {
         int tick = Bukkit.getCurrentTick();
+        litAtTick.entrySet().removeIf(entry -> entry.getValue() < tick);
         for (Iterator<Map.Entry<UUID, Puff>> it = puffs.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<UUID, Puff> entry = it.next();
             Player player = Bukkit.getPlayer(entry.getKey());
@@ -411,6 +432,7 @@ final class Cigarette implements Listener {
         fired.setAmount(item.getAmount());
         setHandItem(player, hand, fired);
         player.updateInventory();
+        litAtTick.put(player.getUniqueId(), Bukkit.getCurrentTick() + 1);
         player.playSound(player.getLocation(), Sound.ITEM_FLINTANDSTEEL_USE, 0.5F, 1.2F);
         Location where = mouth(player);
         player.getWorld().spawnParticle(Particle.FLAME, where, 5, 0.04D, 0.04D, 0.04D, 0.01D);
@@ -418,8 +440,8 @@ final class Cigarette implements Listener {
     }
 
     /**
-     * Дым изо рта летит туда, куда игрок смотрит. Чем больше затяжка, тем
-     * длиннее струя и тем гуще дым; предыдущий поток тотчас обрывается.
+     * Дым непрерывно выходит изо рта в течение 0,2 секунды на каждую
+     * набранную палочку; во время выдоха направление следует за взглядом.
      */
     private void smoke(Player player, int filled) {
         Smoke old = smoke.remove(player.getUniqueId());
@@ -463,12 +485,11 @@ final class Cigarette implements Listener {
     }
 
     /**
-     * Сколько тиков игрок непрерывно выдыхает дым после тяги: полсекунды на
-     * палочку, минимум полсекунды, максимум восемь секунд.
+     * Сколько тиков выдыхается дым: ровно 0,2 секунды на каждую набранную
+     * палочку. Одна палочка — 4 тика; 16 палочек — 3,2 секунды.
      */
     static int exhaleTicks(int bars) {
-        double seconds = Math.max(EXHALE_MIN_SECONDS, Math.min(EXHALE_MAX_SECONDS, bars * 0.5D));
-        return (int) Math.round(seconds * 20.0D);
+        return Math.clamp(bars, 0, BARS_PER_PUFF) * TICKS_PER_BAR;
     }
 
     /** Рот: чуть впереди и ниже глаз, чтобы дым шёл из лица, а не из центра головы. */
