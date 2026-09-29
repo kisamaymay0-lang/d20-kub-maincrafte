@@ -1,6 +1,7 @@
 package com.yourserver.adaptation;
 
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
@@ -71,13 +72,14 @@ final class CigaretteTest {
     }
 
     /**
-     * Цвета палочек по порядку. Считаем по символу «|» в каждом листе: так не
-     * важно, склеились ли соседние палочки одного цвета в один лист или нет.
+     * Цвета палочек по порядку. Считаем по символу «|» в собственном тексте
+     * каждого листа: так не важно, склеились ли соседние палочки одного цвета
+     * в один лист или остались порознь.
      */
     private static void collectBars(Component component, List<TextColor> found) {
-        String text = PlainTextComponentSerializer.plainText().serialize(component);
-        for (int i = 0; i < text.length(); i++) {
-            if (text.charAt(i) == '|') {
+        String own = component instanceof TextComponent text ? text.content() : "";
+        for (int i = 0; i < own.length(); i++) {
+            if (own.charAt(i) == '|') {
                 found.add(component.color());
             }
         }
