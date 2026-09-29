@@ -98,20 +98,20 @@ final class CigaretteTest {
 
     @Test
     void шкалаОтображаетТридцатьДвеПалочкиБольшойСигареты() {
-        assertEquals("[ |||||||||||||||||||||||||||||| ]",
+        assertEquals(gaugeText(Cigarette.BIG_BARS_PER_PUFF),
                 PlainTextComponentSerializer.plainText().serialize(Cigarette.gauge(0)));
-        assertEquals("[ |||||||||||||||| ]",
+        assertEquals(gaugeText(Cigarette.BARS_PER_PUFF),
                 PlainTextComponentSerializer.plainText().serialize(Cigarette.gauge(0, Cigarette.BARS_PER_PUFF)));
-        assertEquals("[ |||||||||||||||||||||||||||||| ]",
+        assertEquals(gaugeText(Cigarette.BIG_BARS_PER_PUFF),
                 PlainTextComponentSerializer.plainText().serialize(Cigarette.gauge(16)));
-        assertEquals("[ |||||||||||||||||||||||||||||| ]",
+        assertEquals(gaugeText(Cigarette.BIG_BARS_PER_PUFF),
                 PlainTextComponentSerializer.plainText().serialize(Cigarette.gauge(0, Cigarette.BIG_BARS_PER_PUFF)));
     }
 
     @Test
     void набитыеПалочкиЖёлтыеПустыеТёмные() {
         Component gauge = Cigarette.gauge(5);
-        assertEquals("[ |||||||||||||||||||||||||||||| ]",
+        assertEquals(gaugeText(Cigarette.BIG_BARS_PER_PUFF),
                 PlainTextComponentSerializer.plainText().serialize(gauge));
         List<TextColor> bars = new ArrayList<>();
         collectBars(gauge, bars);
@@ -121,6 +121,10 @@ final class CigaretteTest {
             assertEquals(i < 5 ? NamedTextColor.YELLOW : NamedTextColor.DARK_GRAY, bars.get(i),
                     "палочка №" + (i + 1));
         }
+    }
+
+    private static String gaugeText(int bars) {
+        return "[ " + "|".repeat(bars) + " ]";
     }
 
     /**
