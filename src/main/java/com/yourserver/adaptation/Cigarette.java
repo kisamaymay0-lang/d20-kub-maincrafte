@@ -42,49 +42,66 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Сигарета — тестовый админский предмет из меню {@code /f8}.
  *
- * <p>Модели из ресурспака игрока: {@code sigareta-big} — холодная сигарета,
- * {@code sigareta-big-fire} — горящая. Обе называются одинаково, просто
+ * <p>Модели из ресурспака игрока: большая ({@code sigareta-big} /
+ * {@code sigareta-big-fire}, запас 64), маленькая ({@code sigareta-small} /
+ * {@code sigareta-small-fire}, запас 16) и обычная ({@code sigareta} /
+ * {@code sigareta-fire}, запас 32). Все называются одинаково, просто
  * «Сигарета»: имя не меняется от поджига, описания у предмета нет.
  *
  * <p>Поджиг: огниво во второй руке, сигарета в главной, шифт + ПКМ — модель
  * меняется на горящую. Любой ПКМ горящей сигаретой начинает тягу, и в воздух,
- * и по блоку. Тягу держат, отпускают — идёт выдох. Анимация трубения в козий
- * рог видна и самому игроку от первого лица; для этого компонент использования
- * имеет конечную длительность и не заменяется при начале тяги. Само «съедение»
- * запрещено в {@link #onEat}. Сигарета перехватывает ПКМ у блока, чтобы действие
- * работало в обоих случаях.
+ * и по блоку. Тягу держат, отпускают — идёт выдох; для использования задан
+ * {@code TOOT_HORN}. Само «съедение» запрещено в {@link #onEat}. Сигарета
+ * перехватывает ПКМ у блока, чтобы действие работало в обоих случаях.
  *
  * <p>Шкала пополняется на палочку каждые 0,2 секунды. После отпускания изо рта
  * непрерывно вылетают частицы уютного дыма костра в текущем направлении
- * взгляда; каждая набранная палочка даёт ровно 0,2 секунды выдоха. Запас — 64
- * палочки, четыре полных тяги; когда запас кончается, сигарета ломается и
- * исчезает. Стак — до восьми сигарет.
+ * взгляда; каждая набранная палочка даёт ровно 0,2 секунды выдоха. Запас
+ * зависит от модели: 64, 16 или 32 палочки; когда запас кончается, сигарета
+ * ломается и исчезает. Стак — до восьми сигарет.
  */
 final class Cigarette implements Listener {
 
     /** Название обоих видов: обычное, белое, без описаний. */
     private static final String TITLE = "Сигарета";
 
-    /** Модели из ресурспака: холодная сигарета и горящая. */
-    private static final NamespacedKey MODEL_COLD = new NamespacedKey("f8resurs", "sigareta-big");
-    private static final NamespacedKey MODEL_LIT = new NamespacedKey("f8resurs", "sigareta-big-fire");
-
-    /** Метка вида в самом предмете: 0 — холодная, 1 — горящая. */
-    private static final NamespacedKey LIT = new NamespacedKey("f8-plugin", "cigarette_lit");
-    /** Невидимый запас: сколько палочек тяги осталось. */
-    private static final NamespacedKey BARS = new NamespacedKey("f8-plugin", "cigarette_bars");
-
-    /** Палочек в одной тяге и полных тяг в запасе: 16 × 4 = 64. */
+    /** Палочек в одной тяге и скрытый запас вариантов сигареты. */
     static final int BARS_PER_PUFF = 16;
     static final int FULL_PUFFS = 4;
     static final int RESERVE = BARS_PER_PUFF * FULL_PUFFS;
+    static final int SMALL_RESERVE = 16;
+    static final int REGULAR_RESERVE = 32;
+
+    /** Метки состояния и варианта модели в самом предмете. */
+    private static final NamespacedKey LIT = new NamespacedKey("f8-plugin", "cigarette_lit");
+    private static final NamespacedKey VARIANT = new NamespacedKey("f8-plugin", "cigarette_variant");
+    /** Невидимый запас: сколько палочек тяги осталось. */
+    private static final NamespacedKey BARS = new NamespacedKey("f8-plugin", "cigarette_bars");
+
+    private enum Variant {
+        BIG("big", "sigareta-big", "sigareta-big-fire", RESERVE),
+        SMALL("small", "sigareta-small", "sigareta-small-fire", SMALL_RESERVE),
+        REGULAR("regular", "sigareta", "sigareta-fire", REGULAR_RESERVE);
+
+        private final String id;
+        private final String coldModel;
+        private final String litModel;
+        private final int reserve;
+
+        Variant(String id, String coldModel, String litModel, int reserve) {
+            this.id = id;
+            this.coldModel = coldModel;
+            this.litModel = litModel;
+            this.reserve = reserve;
+        }
+    }
 
     /** Одна палочка — 0,2 секунды тяги. */
     private static final int TICKS_PER_BAR = 4;
     /** Сигареты объединяются максимум по восемь штук в стаке. */
     static final int MAX_STACK_SIZE = 8;
-    /** 120 тиков дают клиентской анимации TOOT_HORN нормальную длительность. */
-    private static final float USE_SECONDS = 6.0F;
+    /** Долгое использование: выдох происходит по отпусканию ПКМ, не по таймеру. */
+    private static final float USE_SECONDS = 3600.0F;
     /** Звука во время тяги быть не должно: специально «пустой» ванильный звук. */
     private static final Key SILENT_SOUND = Key.key("intentionally_empty");
     /** Как часто перерисовываем шкалу и проверяем, не кончился ли запас. */
@@ -131,14 +148,30 @@ final class Cigarette implements Listener {
         litAtTick.clear();
     }
 
-    /** Холодная сигарета: модель sigareta-big, полный запас. */
+    /** Холодная большая сигарета: модель sigareta-big, запас 64. */
     static ItemStack cold() {
-        return create(false);
+        return create(false, Variant.BIG);
     }
 
-    /** Горящая сигарета: модель sigareta-big-fire, полный запас. */
+    /** Горящая большая сигарета: модель sigareta-big-fire, запас 64. */
     static ItemStack lit() {
-        return create(true);
+        return create(true, Variant.BIG);
+    }
+
+    static ItemStack coldSmall() {
+        return create(false, Variant.SMALL);
+    }
+
+    static ItemStack litSmall() {
+        return create(true, Variant.SMALL);
+    }
+
+    static ItemStack coldRegular() {
+        return create(false, Variant.REGULAR);
+    }
+
+    static ItemStack litRegular() {
+        return create(true, Variant.REGULAR);
     }
 
     /**
@@ -149,12 +182,17 @@ final class Cigarette implements Listener {
      * останется бумажкой, как и кувшин без своего компонента.
      */
     static ItemStack create(boolean lit) {
+        return create(lit, Variant.BIG);
+    }
+
+    private static ItemStack create(boolean lit, Variant variant) {
         ItemStack item = new ItemStack(Material.PAPER);
         ItemMeta meta = item.getItemMeta();
         meta.displayName(ProfileItems.text(TITLE, NamedTextColor.WHITE));
-        meta.setItemModel(lit ? MODEL_LIT : MODEL_COLD);
+        meta.setItemModel(new NamespacedKey("f8resurs", lit ? variant.litModel : variant.coldModel));
         meta.getPersistentDataContainer().set(LIT, PersistentDataType.INTEGER, lit ? 1 : 0);
-        meta.getPersistentDataContainer().set(BARS, PersistentDataType.INTEGER, RESERVE);
+        meta.getPersistentDataContainer().set(VARIANT, PersistentDataType.STRING, variant.id);
+        meta.getPersistentDataContainer().set(BARS, PersistentDataType.INTEGER, variant.reserve);
         item.setItemMeta(meta);
         // Метка еды с canAlwaysEat: без неё ваниль не начинает «использование»
         // предмета, когда игрок сыт, и тяга не запускалась бы. Сама еда нулевая,
@@ -167,9 +205,8 @@ final class Cigarette implements Listener {
         apply(item, DataComponentTypes.TOOLTIP_DISPLAY, TooltipDisplay.tooltipDisplay()
                 .addHiddenComponents(DataComponentTypes.FOOD)
                 .build(), "tooltip_display");
-        // Шесть секунд хватает на полную тягу (3,2 с) и дают клиенту длительность
-        // для заметной TOOT_HORN-анимации от первого лица. Более долгий hold
-        // аккуратно закрывает onEat, не съедая сигарету.
+        // Длительное использование: тяга продолжается до отпускания ПКМ.
+        // TOOT_HORN задаёт стандартную клиентскую анимацию использования предмета.
         apply(item, DataComponentTypes.CONSUMABLE, Consumable.consumable()
                 .consumeSeconds(USE_SECONDS)
                 .animation(ItemUseAnimation.TOOT_HORN)
@@ -215,7 +252,28 @@ final class Cigarette implements Listener {
             return 0;
         }
         Integer value = item.getItemMeta().getPersistentDataContainer().get(BARS, PersistentDataType.INTEGER);
-        return value == null ? RESERVE : Math.clamp(value, 0, RESERVE);
+        int reserve = reserve(item);
+        return value == null ? reserve : Math.clamp(value, 0, reserve);
+    }
+
+    private static Variant variant(ItemStack item) {
+        if (!isCigarette(item)) {
+            return Variant.BIG;
+        }
+        String id = item.getItemMeta().getPersistentDataContainer().get(VARIANT, PersistentDataType.STRING);
+        if (id != null) {
+            for (Variant variant : Variant.values()) {
+                if (variant.id.equals(id)) {
+                    return variant;
+                }
+            }
+        }
+        // Предметы из предыдущей версии не имели метки варианта: они большие.
+        return Variant.BIG;
+    }
+
+    private static int reserve(ItemStack item) {
+        return variant(item).reserve;
     }
 
     /**
@@ -328,9 +386,8 @@ final class Cigarette implements Listener {
     }
 
     /**
-     * Каждые два тика: шкала тяги и проверка, не кончился ли запас прямо в
-     * руке. Отпускание ПКМ ловит {@link #onStopUsing}; сигарета, унесённая из
-     * руки или погасшая, закрывает тягу сама, а набранная шкала — выдох.
+     * Каждые два тика обновляем шкалу. Запас списывается только при отпускании
+     * ПКМ, чтобы полная тяга малой сигареты тоже выдыхалась именно после отпускания.
      */
     private void tick() {
         int tick = Bukkit.getCurrentTick();
@@ -353,11 +410,6 @@ final class Cigarette implements Listener {
             int left = bars(item);
             int filled = barsFor(tick - puff.since(), left);
             showGauge(player, filled);
-            if (filled >= left) {
-                // Запас кончился прямо в тяге: сигарета догорела.
-                it.remove();
-                spend(player, puff.hand(), filled);
-            }
         }
     }
 
@@ -417,7 +469,7 @@ final class Cigarette implements Listener {
         ItemStack item = handItem(player, hand);
         if (item != null && item.getAmount() > 1) {
             item.setAmount(item.getAmount() - 1);
-            setBars(item, RESERVE);
+            setBars(item, reserve(item));
         } else {
             setHandItem(player, hand, new ItemStack(Material.AIR));
         }
@@ -430,8 +482,10 @@ final class Cigarette implements Listener {
         if (!isCigarette(item) || isLit(item)) {
             return;
         }
-        ItemStack fired = create(true);
+        int remaining = bars(item);
+        ItemStack fired = create(true, variant(item));
         fired.setAmount(item.getAmount());
+        setBars(fired, remaining);
         setHandItem(player, hand, fired);
         player.updateInventory();
         litAtTick.put(player.getUniqueId(), Bukkit.getCurrentTick() + 1);
@@ -529,7 +583,8 @@ final class Cigarette implements Listener {
             return;
         }
         ItemMeta meta = item.getItemMeta();
-        meta.getPersistentDataContainer().set(BARS, PersistentDataType.INTEGER, Math.clamp(bars, 0, RESERVE));
+        meta.getPersistentDataContainer().set(BARS, PersistentDataType.INTEGER,
+                Math.clamp(bars, 0, reserve(item)));
         item.setItemMeta(meta);
     }
 

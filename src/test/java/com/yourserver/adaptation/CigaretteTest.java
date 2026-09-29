@@ -43,6 +43,13 @@ final class CigaretteTest {
     }
 
     @Test
+    void уРазныхМоделейОтдельныйЗапас() {
+        assertEquals(64, Cigarette.RESERVE, "большая сигарета");
+        assertEquals(16, Cigarette.SMALL_RESERVE, "маленькая sigareta-small");
+        assertEquals(32, Cigarette.REGULAR_RESERVE, "обычная sigareta");
+    }
+
+    @Test
     void запасаХватаетРовноНаЧетыреПолныеТяги() {
         assertEquals(64, Cigarette.RESERVE);
         assertEquals(16, Cigarette.BARS_PER_PUFF);

@@ -230,7 +230,8 @@ public class F8Command implements CommandExecutor, Listener {
     static final List<String> ITEM_CATALOG = List.of("water_flask", "poison_flask", "red_caviar", "black_caviar",
             "empty_cod", "empty_salmon", "caviar_sandwich_red", "caviar_sandwich_black",
             "icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich", "ancient_jug",
-            "crab_claw", "cigarette", "cigarette_lit");
+            "crab_claw", "cigarette", "cigarette_lit", "cigarette_small", "cigarette_small_lit",
+            "cigarette_regular", "cigarette_regular_lit");
 
     private ItemStack catalogItem(String id) {
         return switch (id) {
@@ -251,19 +252,27 @@ public class F8Command implements CommandExecutor, Listener {
             case "crab_claw" -> winterFishing.items.create(WinterItems.Kind.CLAW);
             case "cigarette" -> Cigarette.cold();
             case "cigarette_lit" -> Cigarette.lit();
+            case "cigarette_small" -> Cigarette.coldSmall();
+            case "cigarette_small_lit" -> Cigarette.litSmall();
+            case "cigarette_regular" -> Cigarette.coldRegular();
+            case "cigarette_regular_lit" -> Cigarette.litRegular();
             default -> throw new IllegalArgumentException("Неизвестный предмет каталога");
         };
     }
 
     private void openItemMenu(Player player) {
-        Inventory inventory = Bukkit.createInventory(null, 36, ITEM_TITLE);
+        Inventory inventory = Bukkit.createInventory(null, 45, ITEM_TITLE);
         fill(inventory);
-        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30};
+        int[] slots = {
+                10, 11, 12, 13, 14, 15, 16,
+                19, 20, 21, 22, 23, 24, 25,
+                28, 29, 30, 31, 32, 33, 34
+        };
         for (int i = 0; i < ITEM_CATALOG.size(); i++) {
             String id = ITEM_CATALOG.get(i);
             inventory.setItem(slots[i], createTaggedItem(catalogItem(id), id));
         }
-        inventory.setItem(31, createMenuItem(Material.ARROW, "§7Назад", Collections.emptyList(), "back"));
+        inventory.setItem(40, createMenuItem(Material.ARROW, "§7Назад", Collections.emptyList(), "back"));
         player.openInventory(inventory);
     }
 
