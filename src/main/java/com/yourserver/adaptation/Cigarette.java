@@ -486,13 +486,6 @@ final class Cigarette implements Listener {
         return Math.clamp(available, 0, BARS_PER_PUFF);
     }
 
-    /** Keeps geyser-puff velocity directed by the supplied gaze/facing vector. */
-    private static Particle.GeyserBase cigaretteGeyser() {
-        // Paper adds 0.25 * waterBlocks to burstImpulseBase. Cancelling that
-        // component prevents the geyser's random burst from scattering the smoke.
-        return new Particle.GeyserBase(1, -0.25F);
-    }
-
     private void smoke(Block block, Vector facing, int bars) {
         DeviceSmoke flow = new DeviceSmoke(block, facing, bars);
         deviceSmokes.add(flow);
@@ -537,11 +530,11 @@ final class Cigarette implements Listener {
             for (int i = 0; i < perTick; i++) {
                 double distance = 0.12D + (i % 4) * 0.16D;
                 Location spot = origin.clone().add(facing.clone().multiply(distance)).add(jitter());
-                world.spawnParticle(Particle.GEYSER_POOF, spot, 0,
+                world.spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, spot, 0,
                         facing.getX() * SMOKE_PUSH,
                         facing.getY() * SMOKE_PUSH + 0.01D,
                         facing.getZ() * SMOKE_PUSH,
-                        1.0D, cigaretteGeyser());
+                        1.0D);
             }
             tick++;
         }
@@ -1090,8 +1083,7 @@ final class Cigarette implements Listener {
     private void breakUp(Player player, EquipmentSlot hand) {
         player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.7F, 1.0F);
         Location where = mouth(player);
-        player.getWorld().spawnParticle(Particle.GEYSER_POOF, where, 4, 0.04D, 0.04D, 0.04D, 0.01D,
-                cigaretteGeyser());
+        player.getWorld().spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, where, 4, 0.04D, 0.04D, 0.04D, 0.01D);
         ItemStack item = handItem(player, hand);
         if (item != null && item.getAmount() > 1) {
             item.setAmount(item.getAmount() - 1);
@@ -1135,8 +1127,7 @@ final class Cigarette implements Listener {
         player.playSound(mouth(player), LIGHT_HISS_SOUND, SoundCategory.BLOCKS, 0.18F, 1.35F);
         Location where = mouth(player);
         player.getWorld().spawnParticle(Particle.FLAME, where, 5, 0.04D, 0.04D, 0.04D, 0.01D);
-        player.getWorld().spawnParticle(Particle.GEYSER_POOF, where, 2, 0.02D, 0.02D, 0.02D, 0.01D,
-                cigaretteGeyser());
+        player.getWorld().spawnParticle(Particle.CAMPFIRE_COSY_SMOKE, where, 2, 0.02D, 0.02D, 0.02D, 0.01D);
     }
 
     /**
@@ -1207,9 +1198,10 @@ final class Cigarette implements Listener {
         return Math.clamp(bars, 0, BIG_BARS_PER_PUFF) * TICKS_PER_BAR;
     }
 
-    /** Больше набранных палочек — гуще дым; большая полная тяга даёт 10 частиц за тик. */
+    /** Количество частиц уменьшено на 20%; большие тяги остаются гуще. */
     static int smokeParticlesPerTick(int bars) {
-        return 2 + Math.clamp(bars, 0, BIG_BARS_PER_PUFF) / 4;
+        int original = 2 + Math.clamp(bars, 0, BIG_BARS_PER_PUFF) / 4;
+        return Math.max(1, (original * 4 + 2) / 5);
     }
 
     /** Рот: чуть впереди и ниже глаз, чтобы дым шёл из лица, а не из центра головы. */
@@ -1298,14 +1290,13 @@ final class Cigarette implements Listener {
                 double distance = 0.18D + (i % 4) * 0.16D;
                 Location spot = origin.clone().add(dir.clone().multiply(distance)).add(jitter());
                 player.getWorld().spawnParticle(
-                        Particle.GEYSER_POOF,
+                        Particle.CAMPFIRE_COSY_SMOKE,
                         spot,
                         0,
                         dir.getX() * SMOKE_PUSH,
                         dir.getY() * SMOKE_PUSH + 0.01D,
                         dir.getZ() * SMOKE_PUSH,
-                        1.0D,
-                        cigaretteGeyser()
+                        1.0D
                 );
             }
             tick++;
