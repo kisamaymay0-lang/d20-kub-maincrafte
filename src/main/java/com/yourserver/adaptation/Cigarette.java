@@ -24,13 +24,11 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
-import org.bukkit.DyeColor;
 import org.bukkit.entity.Dolphin;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
-import org.bukkit.entity.TropicalFish;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -52,6 +50,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.Team;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
@@ -304,40 +304,85 @@ final class Cigarette implements Listener {
         }
     }
 
+    static final NamedTextColor[] DOLPHIN_COLORS = {
+            NamedTextColor.LIGHT_PURPLE,
+            NamedTextColor.AQUA,
+            NamedTextColor.YELLOW,
+            NamedTextColor.GREEN,
+            NamedTextColor.GOLD,
+            NamedTextColor.DARK_PURPLE,
+            NamedTextColor.BLUE,
+            NamedTextColor.RED
+    };
+
+    private static String dolphinTeamName(NamedTextColor color) {
+        String name = "apvsh_d_" + color.toString().toLowerCase();
+        return name.length() > 16 ? name.substring(0, 16) : name;
+    }
+
     private static final class PrismarineSession {
         private int remainingTicks;
         private final int crystalCount;
-        private int bubbleCooldown;
         private int creatureCooldown;
 
         PrismarineSession(int remainingTicks, int crystalCount) {
             this.remainingTicks = remainingTicks;
             this.crystalCount = crystalCount;
-            this.bubbleCooldown = ThreadLocalRandom.current().nextInt(10, 25);
-            this.creatureCooldown = ThreadLocalRandom.current().nextInt(30, 80);
+            this.creatureCooldown = ThreadLocalRandom.current().nextInt(15, 45);
         }
     }
 
     private static final class HallucinationEntity {
         final Entity entity;
         final Player player;
-        final boolean isDolphin;
-        double angle;
-        final double radius;
-        final double heightOffset;
-        final double speed;
+        final String teamName;
+        double posX;
+        double posY;
+        double posZ;
+        final double velocityX;
+        final double velocityZ;
+        double pitchPhase;
+        final double pitchSpeed;
+        final float yaw;
         int lifeTicks;
 
-        HallucinationEntity(Entity entity, Player player, boolean isDolphin,
-                            double angle, double radius, double heightOffset, double speed, int lifeTicks) {
+        HallucinationEntity(Entity entity, Player player, String teamName,
+                            double posX, double posY, double posZ,
+                            double velocityX, double velocityZ,
+                            float yaw, int lifeTicks) {
             this.entity = entity;
             this.player = player;
-            this.isDolphin = isDolphin;
-            this.angle = angle;
-            this.radius = radius;
-            this.heightOffset = heightOffset;
-            this.speed = speed;
+            this.teamName = teamName;
+            this.posX = posX;
+            this.posY = posY;
+            this.posZ = posZ;
+            this.velocityX = velocityX;
+            this.velocityZ = velocityZ;
+            this.pitchPhase = ThreadLocalRandom.current().nextDouble(0, 2 * Math.PI);
+            this.pitchSpeed = ThreadLocalRandom.current().nextDouble(0.025, 0.055);
+            this.yaw = yaw;
             this.lifeTicks = lifeTicks;
+        }
+    }
+
+    private static void removeHallucination(HallucinationEntity h) {
+        if (h.entity != null) {
+            if (h.teamName != null) {
+                try {
+                    Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+                    Team team = scoreboard.getTeam(h.teamName);
+                    if (team != null) {
+                        team.removeEntry(h.entity.getUniqueId().toString());
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+            try {
+                if (h.entity.isValid()) {
+                    h.entity.remove();
+                }
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -373,15 +418,20 @@ final class Cigarette implements Listener {
         }
         sugarSessions.clear();
         for (HallucinationEntity h : hallucinations) {
-            if (h.entity != null && h.entity.isValid()) {
-                try {
-                    h.entity.remove();
-                } catch (Throwable ignored) {
-                }
-            }
+            removeHallucination(h);
         }
         hallucinations.clear();
         prismarineSessions.clear();
+        try {
+            Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+            for (NamedTextColor color : DOLPHIN_COLORS) {
+                Team team = scoreboard.getTeam(dolphinTeamName(color));
+                if (team != null) {
+                    team.unregister();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
         cardiacArrestVictims.clear();
         for (Smoke flow : smoke.values()) {
             flow.stop();
@@ -771,12 +821,6 @@ final class Cigarette implements Listener {
                     block.getWorld().spawnParticle(Particle.EXPLOSION, origin, 1, 0.0D, 0.0D, 0.0D, 0.0D);
                 }
             }
-            int prismarine = prismarineFilling(stored);
-            if (prismarine > 0) {
-                Location origin = block.getLocation().add(0.5, 0.5, 0.5).add(facing.clone().multiply(0.55));
-                block.getWorld().spawnParticle(Particle.BUBBLE_COLUMN_UP, origin, 8, 0.15, 0.15, 0.15, 0.04);
-                block.getWorld().spawnParticle(Particle.NAUTILUS, origin, 4, 0.1, 0.1, 0.1, 0.02);
-            }
             return true;
         }
         return false;
@@ -967,12 +1011,7 @@ final class Cigarette implements Listener {
         prismarineSessions.remove(id);
         hallucinations.removeIf(h -> {
             if (h.player.getUniqueId().equals(id)) {
-                if (h.entity != null && h.entity.isValid()) {
-                    try {
-                        h.entity.remove();
-                    } catch (Throwable ignored) {
-                    }
-                }
+                removeHallucination(h);
                 return true;
             }
             return false;
@@ -1199,9 +1238,9 @@ final class Cigarette implements Listener {
             return;
         }
         int durationTicks = spent * PRISMARINE_SECONDS_PER_BAR * 20; // 4 секунды за каждую палочку тяги
-        player.addPotionEffect(new PotionEffect(PotionEffectType.WATER_BREATHING, durationTicks, 0), true);
+        player.addPotionEffect(new PotionEffect(PotionEffectType.WATER_BREATHING, durationTicks, 0, false, false, false), true);
         if (prismarine >= PRISMARINE_NAUSEA_THRESHOLD) {
-            player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, durationTicks, 0), true);
+            player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, durationTicks, 0, false, false, false), true);
         }
         player.playSound(player.getLocation(), Sound.BLOCK_CONDUIT_AMBIENT, SoundCategory.PLAYERS, 0.45F, 1.25F);
 
@@ -1251,84 +1290,83 @@ final class Cigarette implements Listener {
 
             int crystals = session.crystalCount;
 
-            // Периодические пузырьки воздуха, поднимающиеся из-под земли на клиенте игрока
-            session.bubbleCooldown--;
-            if (session.bubbleCooldown <= 0) {
-                int minCool = Math.max(6, 25 - Math.min(18, crystals));
-                int maxCool = Math.max(minCool + 4, 40 - Math.min(24, crystals));
-                session.bubbleCooldown = ThreadLocalRandom.current().nextInt(minCool, maxCool + 1);
-
-                spawnClientGroundBubbles(player, crystals);
-            }
-
-            // Шанс появления плывущей в воздухе галлюцинации (дельфин или тропическая рыбка)
+            // Шанс появления группы плывущих дельфинов (от 1 до 4)
             session.creatureCooldown--;
             if (session.creatureCooldown <= 0) {
-                int minCool = Math.max(35, 120 - Math.min(75, crystals * 3));
-                int maxCool = Math.max(minCool + 20, 220 - Math.min(120, crystals * 4));
+                int minCool = Math.max(40, 180 - Math.min(130, crystals * 5));
+                int maxCool = Math.max(minCool + 20, 260 - Math.min(180, crystals * 6));
                 session.creatureCooldown = ThreadLocalRandom.current().nextInt(minCool, maxCool + 1);
 
-                double spawnChance = Math.min(0.85, 0.22 + crystals * 0.03);
+                double spawnChance = Math.min(0.90, 0.30 + crystals * 0.03);
                 if (ThreadLocalRandom.current().nextDouble() < spawnChance) {
-                    spawnHallucinationCreature(player, crystals);
+                    spawnHallucinationPod(player, crystals);
                 }
             }
-
-            // Мягкие частицы наутилуса вокруг игрока (красивые, не перегружающие)
-            if (ThreadLocalRandom.current().nextInt(100) < Math.min(45, 12 + crystals * 2)) {
-                Location eye = player.getEyeLocation();
-                ThreadLocalRandom rnd = ThreadLocalRandom.current();
-                Location partLoc = eye.clone().add(
-                        (rnd.nextDouble() - 0.5) * 3.0,
-                        (rnd.nextDouble() - 0.5) * 1.5,
-                        (rnd.nextDouble() - 0.5) * 3.0
-                );
-                player.spawnParticle(Particle.NAUTILUS, partLoc, 1, 0.05, 0.05, 0.05, 0.02);
-            }
         }
     }
 
-    private void spawnClientGroundBubbles(Player player, int crystals) {
-        ThreadLocalRandom rnd = ThreadLocalRandom.current();
-        Location playerLoc = player.getLocation();
-        int burstCount = Math.min(16, 3 + crystals / 3);
-        int spots = Math.min(4, 1 + crystals / 6);
-        for (int s = 0; s < spots; s++) {
-            double offsetX = (rnd.nextDouble() - 0.5) * 5.0;
-            double offsetZ = (rnd.nextDouble() - 0.5) * 5.0;
-            Location ground = playerLoc.clone().add(offsetX, 0.05, offsetZ);
-            player.spawnParticle(Particle.BUBBLE_COLUMN_UP, ground, burstCount, 0.25, 0.6, 0.25, 0.06);
-            if (rnd.nextBoolean()) {
-                player.spawnParticle(Particle.BUBBLE_POP, ground.clone().add(0, 0.8, 0), 2, 0.15, 0.2, 0.15, 0.02);
+    private String assignDolphinColor(Entity entity, NamedTextColor color) {
+        try {
+            Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+            String teamName = dolphinTeamName(color);
+            Team team = scoreboard.getTeam(teamName);
+            if (team == null) {
+                team = scoreboard.registerNewTeam(teamName);
+                team.color(color);
             }
+            team.addEntry(entity.getUniqueId().toString());
+            entity.setGlowing(true);
+            return teamName;
+        } catch (Throwable ignored) {
+            return null;
         }
-        float pitch = 1.0F + (rnd.nextFloat() - 0.5F) * 0.3F;
-        player.playSound(playerLoc, Sound.BLOCK_BUBBLE_COLUMN_UPWARDS_AMBIENT, SoundCategory.AMBIENT, 0.25F, pitch);
     }
 
-    private void spawnHallucinationCreature(Player player, int crystals) {
+    private void spawnHallucinationPod(Player player, int crystals) {
         long countForPlayer = hallucinations.stream()
                 .filter(h -> h.player.getUniqueId().equals(player.getUniqueId()))
                 .count();
-        if (countForPlayer >= 3) {
+        if (countForPlayer >= 10) {
             return;
         }
 
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
-        boolean isDolphin = rnd.nextBoolean();
+        int maxGroup = Math.min(4, 1 + crystals / 2);
+        int groupSize = rnd.nextInt(1, maxGroup + 1);
+        groupSize = Math.min(groupSize, (int) (10 - countForPlayer));
+        if (groupSize <= 0) {
+            return;
+        }
 
+        // Общее направление течения для всей стаи
+        double currentAngle = rnd.nextDouble(0, 2 * Math.PI);
+        double baseSpeed = rnd.nextDouble(0.008, 0.015); // очень медленно: ~0.2 блока в секунду
+
+        // Центр спавна стаи в мировых координатах перед/вокруг игрока
         Location eye = player.getEyeLocation();
-        double initialAngle = rnd.nextDouble(0, 2 * Math.PI);
-        double radius = isDolphin ? rnd.nextDouble(3.5, 6.0) : rnd.nextDouble(2.0, 4.0);
-        double heightOffset = (rnd.nextDouble() - 0.4) * 1.6;
-        double startX = eye.getX() + Math.cos(initialAngle) * radius;
-        double startY = eye.getY() + heightOffset;
-        double startZ = eye.getZ() + Math.sin(initialAngle) * radius;
-        Location spawnLoc = new Location(player.getWorld(), startX, startY, startZ);
+        double spawnDist = rnd.nextDouble(4.5, 7.5);
+        double spawnAngle = rnd.nextDouble(0, 2 * Math.PI);
+        double centerX = eye.getX() + Math.cos(spawnAngle) * spawnDist;
+        double centerY = eye.getY() + rnd.nextDouble(-0.3, 1.4);
+        double centerZ = eye.getZ() + Math.sin(spawnAngle) * spawnDist;
 
-        Entity entity;
-        try {
-            if (isDolphin) {
+        for (int i = 0; i < groupSize; i++) {
+            double offX = (rnd.nextDouble() - 0.5) * 3.0;
+            double offY = (rnd.nextDouble() - 0.5) * 1.0;
+            double offZ = (rnd.nextDouble() - 0.5) * 3.0;
+            double posX = centerX + offX;
+            double posY = centerY + offY;
+            double posZ = centerZ + offZ;
+
+            double dolphinAngle = currentAngle + (rnd.nextDouble() - 0.5) * 0.25;
+            double speed = baseSpeed + (rnd.nextDouble() - 0.5) * 0.003;
+            double vx = Math.cos(dolphinAngle) * speed;
+            double vz = Math.sin(dolphinAngle) * speed;
+            float yaw = (float) Math.toDegrees(Math.atan2(-vx, vz));
+
+            Location spawnLoc = new Location(player.getWorld(), posX, posY, posZ, yaw, 0.0F);
+            Entity entity;
+            try {
                 entity = player.getWorld().spawn(spawnLoc, Dolphin.class, d -> {
                     d.setAI(false);
                     d.setGravity(false);
@@ -1338,50 +1376,34 @@ final class Cigarette implements Listener {
                     d.setPersistent(false);
                     d.setRemoveWhenFarAway(true);
                 });
-            } else {
-                entity = player.getWorld().spawn(spawnLoc, TropicalFish.class, fish -> {
-                    fish.setAI(false);
-                    fish.setGravity(false);
-                    fish.setInvulnerable(true);
-                    fish.setSilent(true);
-                    fish.setCollidable(false);
-                    fish.setPersistent(false);
-                    fish.setRemoveWhenFarAway(true);
+            } catch (Throwable t) {
+                return;
+            }
+
+            if (entity == null) {
+                continue;
+            }
+
+            for (Player other : Bukkit.getOnlinePlayers()) {
+                if (!other.getUniqueId().equals(player.getUniqueId())) {
                     try {
-                        TropicalFish.Pattern[] patterns = TropicalFish.Pattern.values();
-                        DyeColor[] dyes = DyeColor.values();
-                        fish.setPattern(patterns[rnd.nextInt(patterns.length)]);
-                        fish.setBodyColor(dyes[rnd.nextInt(dyes.length)]);
-                        fish.setPatternColor(dyes[rnd.nextInt(dyes.length)]);
+                        other.hideEntity(plugin, entity);
                     } catch (Throwable ignored) {
                     }
-                });
-            }
-        } catch (Throwable t) {
-            return;
-        }
-
-        if (entity == null) {
-            return;
-        }
-
-        for (Player other : Bukkit.getOnlinePlayers()) {
-            if (!other.getUniqueId().equals(player.getUniqueId())) {
-                try {
-                    other.hideEntity(plugin, entity);
-                } catch (Throwable ignored) {
                 }
             }
+
+            NamedTextColor color = DOLPHIN_COLORS[rnd.nextInt(DOLPHIN_COLORS.length)];
+            String teamName = assignDolphinColor(entity, color);
+            int lifeTicks = rnd.nextInt(500, 901); // 25 - 45 секунд
+            HallucinationEntity hallucination = new HallucinationEntity(
+                    entity, player, teamName, posX, posY, posZ, vx, vz, yaw, lifeTicks
+            );
+            hallucinations.add(hallucination);
         }
 
-        int lifeTicks = rnd.nextInt(70, 130);
-        double speed = (rnd.nextBoolean() ? 1 : -1) * rnd.nextDouble(0.035, 0.065);
-        HallucinationEntity hallucination = new HallucinationEntity(
-                entity, player, isDolphin, initialAngle, radius, heightOffset, speed, lifeTicks
-        );
-        hallucinations.add(hallucination);
-
-        player.playSound(spawnLoc, Sound.ENTITY_DOLPHIN_AMBIENT_WATER, SoundCategory.AMBIENT, 0.25F, 1.4F);
+        Location soundLoc = new Location(player.getWorld(), centerX, centerY, centerZ);
+        player.playSound(soundLoc, Sound.ENTITY_DOLPHIN_AMBIENT_WATER, SoundCategory.AMBIENT, 0.25F, 1.4F);
     }
 
     private void tickHallucinations() {
@@ -1391,51 +1413,29 @@ final class Cigarette implements Listener {
         for (Iterator<HallucinationEntity> it = hallucinations.iterator(); it.hasNext(); ) {
             HallucinationEntity h = it.next();
             if (!h.player.isOnline() || h.player.isDead() || h.entity == null || !h.entity.isValid()) {
-                if (h.entity != null && h.entity.isValid()) {
-                    try {
-                        h.entity.remove();
-                    } catch (Throwable ignored) {
-                    }
-                }
+                removeHallucination(h);
                 it.remove();
                 continue;
             }
 
             h.lifeTicks--;
             if (h.lifeTicks <= 0) {
-                Location loc = h.entity.getLocation();
-                h.player.spawnParticle(Particle.NAUTILUS, loc, 6, 0.2, 0.2, 0.2, 0.04);
-                h.player.spawnParticle(Particle.BUBBLE_POP, loc, 4, 0.2, 0.2, 0.2, 0.03);
-                try {
-                    h.entity.remove();
-                } catch (Throwable ignored) {
-                }
+                removeHallucination(h);
                 it.remove();
                 continue;
             }
 
-            h.angle += h.speed;
-            Location eye = h.player.getEyeLocation();
-            double x = eye.getX() + Math.cos(h.angle) * h.radius;
-            double z = eye.getZ() + Math.sin(h.angle) * h.radius;
-            double y = eye.getY() + h.heightOffset + Math.sin(h.angle * 2.5) * 0.25;
+            // Очень медленный дрейф "по течению" в мировых координатах (не зависит от перемещения игрока)
+            h.posX += h.velocityX;
+            h.posZ += h.velocityZ;
+            h.pitchPhase += h.pitchSpeed;
+            double currentY = h.posY + Math.sin(h.pitchPhase) * 0.18;
+            float currentPitch = (float) (-Math.cos(h.pitchPhase) * 5.0);
 
-            double dx = -Math.sin(h.angle) * Math.signum(h.speed);
-            double dz = Math.cos(h.angle) * Math.signum(h.speed);
-            float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-            float pitch = (float) (-Math.cos(h.angle * 2.5) * 12.0);
-
-            Location nextLoc = new Location(h.player.getWorld(), x, y, z, yaw, pitch);
+            Location nextLoc = new Location(h.player.getWorld(), h.posX, currentY, h.posZ, h.yaw, currentPitch);
             try {
                 h.entity.teleport(nextLoc);
             } catch (Throwable ignored) {
-            }
-
-            if (h.lifeTicks % 2 == 0) {
-                h.player.spawnParticle(Particle.BUBBLE_COLUMN_UP, nextLoc, 1, 0.08, 0.08, 0.08, 0.02);
-            }
-            if (h.lifeTicks % 8 == 0) {
-                h.player.spawnParticle(Particle.NAUTILUS, nextLoc, 1, 0.05, 0.05, 0.05, 0.01);
             }
         }
     }
@@ -1582,12 +1582,7 @@ final class Cigarette implements Listener {
         prismarineSessions.remove(player.getUniqueId());
         hallucinations.removeIf(h -> {
             if (h.player.getUniqueId().equals(player.getUniqueId())) {
-                if (h.entity != null && h.entity.isValid()) {
-                    try {
-                        h.entity.remove();
-                    } catch (Throwable ignored) {
-                    }
-                }
+                removeHallucination(h);
                 return true;
             }
             return false;
