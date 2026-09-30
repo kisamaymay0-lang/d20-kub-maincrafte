@@ -17,6 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * - Вместимость 5 слотов
  * - Идентификатор модели f8resurs:sheiker
  * - Определение любого типа льда
+ * - Определение бутилированных жидкостей (бутылочка остаётся у игрока)
+ * - Требования взбалтывания: 16 взмахов, таймаут 7 тиков
  * - Сопоставление рецептов: Медовуха, Дайкири, Муть
  * - Пустая сериализация и десериализация
  */
@@ -31,6 +33,26 @@ final class ShakerTest {
     void модельШейкераБеретсяИзРесурспака() {
         assertEquals("sheiker", Shaker.MODEL_NAME);
         assertEquals("f8resurs:sheiker", Shaker.MODEL_KEY.asString());
+    }
+
+    @Test
+    void параметрыВзбалтыванияШейкера() {
+        assertEquals(16, Shaker.REQUIRED_STROKES, "Требуется 16 непрерывных взмахов");
+        assertEquals(7, Shaker.STROKE_TIMEOUT_TICKS, "Таймаут взмаха не более 7 тиков для исключения случайного взбивания");
+        assertEquals(20.0f, Shaker.MIN_STROKE_PITCH, 0.001f);
+    }
+
+    @Test
+    void определениеБутилированныхЖидкостей() {
+        assertTrue(Shaker.isBottledLiquid(Material.HONEY_BOTTLE));
+        assertTrue(Shaker.isBottledLiquid(Material.POTION));
+        assertTrue(Shaker.isBottledLiquid(Material.DRAGON_BREATH));
+
+        assertFalse(Shaker.isBottledLiquid(Material.SUGAR));
+        assertFalse(Shaker.isBottledLiquid(Material.SWEET_BERRIES));
+        assertFalse(Shaker.isBottledLiquid(Material.ICE));
+        assertFalse(Shaker.isBottledLiquid(Material.STONE));
+        assertFalse(Shaker.isBottledLiquid((Material) null));
     }
 
     @Test

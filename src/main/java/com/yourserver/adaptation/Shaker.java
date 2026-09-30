@@ -54,12 +54,16 @@ import java.util.UUID;
  *
  * <h2>Механика взаимодействия</h2>
  * <ul>
- *   <li><b>Добавление ингредиентов:</b> Шейкер в главной руке, любой предмет во второй
- *       руке + Shift + ПКМ — добавляет 1 штуку предмета в шейкер (максимум 5 слотов, по 1 шт).</li>
+ *   <li><b>Добавление ингредиентов:</b> Шейкер в главной руке, предмет во второй
+ *       руке + Shift + ПКМ — добавляет 1 штуку предмета в шейкер (максимум 5 слотов, по 1 шт).
+ *       При добавлении жидкостей (бутылочки мёда, воды или зелий) пустая стеклянная бутылочка
+ *       не расходуется, а остаётся у игрока во второй руке.</li>
  *   <li><b>Извлечение ингредиентов:</b> Шейкер в главной руке, пустая вторая рука + Shift + ПКМ —
- *       извлекает последний добавленный предмет в пустую вторую руку.</li>
- *   <li><b>Смешивание:</b> Быстрые и сильные движения камерой вверх-вниз с шейкером в руке.
- *       По окончании смешивания на клиенте вылетают зелёные частицы и звучит победный сигнал.</li>
+ *       извлекает последний добавленный предмет напрямую в инвентарь игрока.</li>
+ *   <li><b>Смешивание:</b> Быстрые и непрерывные движения камерой вверх-вниз с шейкером в руке.
+ *       Требует 16 взмахов практически без пауз (таймаут между взмахами ~0.35с), что исключает
+ *       случайное взбивание при строительстве или ходьбе.
+ *       По окончании на клиенте вылетают зелёные частицы и звучит победный сигнал.</li>
  *   <li><b>Забор напитка:</b> Пустая стеклянная бутылочка во второй руке + ПКМ забирает
  *       готовый напиток.</li>
  * </ul>
@@ -70,13 +74,17 @@ import java.util.UUID;
  *       Эффекты: Регенерация I (30с), Насыщение I (10с).</li>
  *   <li><b>Дайкири:</b> 1 сахар, 2 сладких ягоды, 1 бутылочка воды, 1 блок любого льда.
  *       Эффекты: Скорость I (30с), Регенерация I (10с).</li>
- *   <li><b>Муть:</b> Любой неудавшийся рецепт / неизвестная смесь. Текстура зелья отравления.
- *       Эффекты: Тошнота I (10с), Отравление I (5с).</li>
+ *   <li><b>Муть:</b> Любой неудавшийся рецепт / неизвестная смесь. Текстура и цвет зелья отравления.
+ *       Эффекты: только Тошнота I (10с) и Отравление I (5с).</li>
  * </ul>
  */
 public class Shaker implements Listener {
 
     public static final int MAX_SLOTS = 5;
+    public static final int REQUIRED_STROKES = 16;
+    public static final int STROKE_TIMEOUT_TICKS = 7;
+    public static final float MIN_STROKE_PITCH = 20.0f;
+
     public static final String MODEL_NAME = "sheiker";
     public static final NamespacedKey MODEL_KEY = new NamespacedKey("f8resurs", MODEL_NAME);
 
@@ -197,7 +205,7 @@ public class Shaker implements Listener {
                 }
                 lore.add(Component.empty());
                 lore.add(Component.text("Трясите камеру вверх-вниз для смешивания.", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
-                lore.add(Component.text("Shift + ПКМ с пустой второй рукой — забрать.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
+                lore.add(Component.text("Shift + ПКМ с пустой рукой — забрать в инвентарь.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
             }
         }
 
@@ -266,6 +274,18 @@ public class Shaker implements Listener {
         return item != null && isIce(item.getType());
     }
 
+    /**
+     * Проверка, является ли предмет бутилированной жидкостью, оставляющей стеклянную бутылочку.
+     */
+    public static boolean isBottledLiquid(Material m) {
+        if (m == null) return false;
+        return m == Material.HONEY_BOTTLE || m == Material.POTION || m == Material.DRAGON_BREATH;
+    }
+
+    public static boolean isBottledLiquid(ItemStack item) {
+        return item != null && isBottledLiquid(item.getType());
+    }
+
     public enum IngredientKind {
         HONEY_BOTTLE,
         WATER_BOTTLE,
@@ -331,6 +351,8 @@ public class Shaker implements Listener {
 
     /**
      * Создать готовый напиток по рецепту.
+     * Не добавляет ручных строк описания эффектов — ванильный интерфейс зелий
+     * отображает эффекты автоматически и без лишнего дублирования.
      */
     public static ItemStack createDrinkItem(String drinkType) {
         ItemStack potion = new ItemStack(Material.POTION);
@@ -338,34 +360,26 @@ public class Shaker implements Listener {
         if (meta == null) return potion;
 
         meta.getPersistentDataContainer().set(DRINK_PDC_KEY, PersistentDataType.STRING, drinkType);
+        meta.setBasePotionType(PotionType.WATER);
 
-        List<Component> lore = new ArrayList<>();
         if (RECIPE_MEAD.equals(drinkType)) {
             meta.displayName(Component.text("Медовуха", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
             meta.setColor(Color.fromRGB(235, 175, 40));
             meta.addCustomEffect(new PotionEffect(PotionEffectType.REGENERATION, 30 * 20, 0), true);
             meta.addCustomEffect(new PotionEffect(PotionEffectType.SATURATION, 10 * 20, 0), true);
-            lore.add(Component.text("Регенерация I (0:30)", NamedTextColor.BLUE).decoration(TextDecoration.ITALIC, false));
-            lore.add(Component.text("Насыщение I (0:10)", NamedTextColor.BLUE).decoration(TextDecoration.ITALIC, false));
         } else if (RECIPE_DAIQUIRI.equals(drinkType)) {
             meta.displayName(Component.text("Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
             meta.setColor(Color.fromRGB(240, 70, 110));
             meta.addCustomEffect(new PotionEffect(PotionEffectType.SPEED, 30 * 20, 0), true);
             meta.addCustomEffect(new PotionEffect(PotionEffectType.REGENERATION, 10 * 20, 0), true);
-            lore.add(Component.text("Скорость I (0:30)", NamedTextColor.BLUE).decoration(TextDecoration.ITALIC, false));
-            lore.add(Component.text("Регенерация I (0:10)", NamedTextColor.BLUE).decoration(TextDecoration.ITALIC, false));
         } else {
-            // Муть: текстура зелья отравления, 10 сек тошноты, 5 сек отравления
+            // Муть: текстура/цвет зелья отравления, ровно 10 сек тошноты и 5 сек отравления
             meta.displayName(Component.text("Муть", NamedTextColor.DARK_GREEN).decoration(TextDecoration.ITALIC, false));
-            meta.setBasePotionType(PotionType.POISON);
             meta.setColor(Color.fromRGB(78, 147, 49));
             meta.addCustomEffect(new PotionEffect(PotionEffectType.NAUSEA, 10 * 20, 0), true);
             meta.addCustomEffect(new PotionEffect(PotionEffectType.POISON, 5 * 20, 0), true);
-            lore.add(Component.text("Тошнота I (0:10)", NamedTextColor.RED).decoration(TextDecoration.ITALIC, false));
-            lore.add(Component.text("Отравление I (0:05)", NamedTextColor.RED).decoration(TextDecoration.ITALIC, false));
         }
 
-        meta.lore(lore);
         potion.setItemMeta(meta);
         return potion;
     }
@@ -394,7 +408,7 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Взаимодействие с шейкером: добавление ингредиентов, извлечение, забор готового напитка.
+     * Взаимодействие с шейкером: добавление ингредиентов, извлечение в инвентарь, забор готового напитка.
      */
     @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerInteract(PlayerInteractEvent event) {
@@ -484,20 +498,34 @@ public class Shaker implements Listener {
                 inserted.setAmount(1);
                 contents.add(inserted);
 
-                if (offHand.getAmount() > 1) {
-                    offHand.setAmount(offHand.getAmount() - 1);
-                    player.getInventory().setItemInOffHand(offHand);
+                boolean liquid = isBottledLiquid(offHand);
+                if (liquid) {
+                    // При наливании жидкости бутылочка остаётся у игрока во второй руке
+                    ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
+                    if (offHand.getAmount() > 1) {
+                        offHand.setAmount(offHand.getAmount() - 1);
+                        player.getInventory().setItemInOffHand(offHand);
+                        giveOrDrop(player, emptyBottle);
+                    } else {
+                        player.getInventory().setItemInOffHand(emptyBottle);
+                    }
+                    player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_EMPTY, SoundCategory.PLAYERS, 0.7F, 1.0F);
                 } else {
-                    player.getInventory().setItemInOffHand(new ItemStack(Material.AIR));
+                    if (offHand.getAmount() > 1) {
+                        offHand.setAmount(offHand.getAmount() - 1);
+                        player.getInventory().setItemInOffHand(offHand);
+                    } else {
+                        player.getInventory().setItemInOffHand(new ItemStack(Material.AIR));
+                    }
+                    player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.6F, 1.1F);
                 }
 
                 updateMeta(shaker, contents, false, null);
                 player.getInventory().setItemInMainHand(shaker);
 
-                player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.6F, 1.1F);
                 player.sendActionBar(Component.text("Добавлено: " + getItemDisplayName(inserted) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
             } else {
-                // Извлечение последнего предмета в пустую вторую руку
+                // Извлечение последнего предмета напрямую в инвентарь игрока
                 if (contents.isEmpty()) {
                     player.sendActionBar(Component.text("Шейкер пуст!", NamedTextColor.GRAY));
                     player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
@@ -505,25 +533,28 @@ public class Shaker implements Listener {
                 }
 
                 ItemStack removed = contents.remove(contents.size() - 1);
-                player.getInventory().setItemInOffHand(removed);
+                giveOrDrop(player, removed);
 
                 updateMeta(shaker, contents, false, null);
                 player.getInventory().setItemInMainHand(shaker);
 
                 player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_REMOVE_ONE, SoundCategory.PLAYERS, 0.6F, 1.1F);
-                player.sendActionBar(Component.text("Извлечено: " + getItemDisplayName(removed) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
+                player.sendActionBar(Component.text("Извлечено в инвентарь: " + getItemDisplayName(removed) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
             }
         }
     }
 
     /**
      * Отслеживание взмахов камеры игрока вверх-вниз для смешивания.
+     * Требует непрерывных и быстрых взмахов практически без пауз (таймаут 7 тиков ~0.35с),
+     * что исключает случайное накопление при строительстве или осмотре блоков.
      */
     private static final class ShakeTracker {
         float strokeDelta = 0.0f;
         int currentDir = 0;
         int strokeCount = 0;
-        int lastTick = 0;
+        int lastStrokeTick = 0;
+        int strokeStartTick = 0;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -533,7 +564,7 @@ public class Shaker implements Listener {
         if (to == null) return;
 
         float pitchDelta = to.getPitch() - from.getPitch();
-        if (Math.abs(pitchDelta) < 0.6f) {
+        if (Math.abs(pitchDelta) < 1.0f) {
             return;
         }
 
@@ -552,37 +583,55 @@ public class Shaker implements Listener {
         int now = Bukkit.getCurrentTick();
         ShakeTracker tracker = shakeTrackers.computeIfAbsent(player.getUniqueId(), k -> new ShakeTracker());
 
-        // Сброс, если игрок остановился более чем на 25 тиков (1.25 сек)
-        if (now - tracker.lastTick > 25) {
+        // Строгий таймаут без пауз: если пауза между взмахами превысила 7 тиков (~0.35с), сброс в ноль
+        if (tracker.strokeCount > 0 && now - tracker.lastStrokeTick > STROKE_TIMEOUT_TICKS) {
             tracker.strokeCount = 0;
             tracker.strokeDelta = 0;
             tracker.currentDir = 0;
         }
-        tracker.lastTick = now;
 
         if (tracker.currentDir == 0) {
             tracker.currentDir = dir;
             tracker.strokeDelta = pitchDelta;
+            tracker.strokeStartTick = now;
         } else if (tracker.currentDir == dir) {
             tracker.strokeDelta += pitchDelta;
+            // Если единичный взмах длится слишком медленно, это плавный поворот, а не энергичный взмах
+            if (now - tracker.strokeStartTick > STROKE_TIMEOUT_TICKS) {
+                tracker.strokeCount = 0;
+                tracker.strokeDelta = 0;
+                tracker.currentDir = 0;
+            }
         } else {
-            // Смена направления взмаха
-            if (Math.abs(tracker.strokeDelta) >= 14.0f) {
+            // Смена направления взмаха камеры
+            int strokeDuration = now - tracker.strokeStartTick;
+            if (Math.abs(tracker.strokeDelta) >= MIN_STROKE_PITCH && strokeDuration <= STROKE_TIMEOUT_TICKS) {
                 tracker.strokeCount++;
-                // Звук плеска / перебалтывания при каждом взмахе
-                player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.45F, 1.1F + tracker.strokeCount * 0.07F);
+                tracker.lastStrokeTick = now;
 
-                // Порог: 6 взмахов (3 полных цикла вверх-вниз)
-                if (tracker.strokeCount >= 6) {
+                // Звук взбалтывания с повышением тона
+                float pitch = 0.9F + (tracker.strokeCount / (float) REQUIRED_STROKES) * 0.7F;
+                player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.5F, pitch);
+
+                // Визуальный индикатор в action bar
+                int percent = (tracker.strokeCount * 100) / REQUIRED_STROKES;
+                player.sendActionBar(Component.text("Взбивание: " + percent + "%", NamedTextColor.YELLOW));
+
+                // Порог: 16 непрерывных взмахов (8 полных циклов вверх-вниз)
+                if (tracker.strokeCount >= REQUIRED_STROKES) {
                     tracker.strokeCount = 0;
                     tracker.strokeDelta = 0;
                     tracker.currentDir = 0;
                     finishMixing(player, mainHand);
                     return;
                 }
+            } else {
+                // Недостаточная амплитуда или слишком медленный взмах — сброс серии
+                tracker.strokeCount = 0;
             }
             tracker.currentDir = dir;
             tracker.strokeDelta = pitchDelta;
+            tracker.strokeStartTick = now;
         }
     }
 
@@ -617,7 +666,7 @@ public class Shaker implements Listener {
         shakeTrackers.remove(event.getPlayer().getUniqueId());
     }
 
-    private void giveOrDrop(Player player, ItemStack item) {
+    private static void giveOrDrop(Player player, ItemStack item) {
         var leftover = player.getInventory().addItem(item);
         for (ItemStack drop : leftover.values()) {
             player.getWorld().dropItemNaturally(player.getLocation(), drop);
