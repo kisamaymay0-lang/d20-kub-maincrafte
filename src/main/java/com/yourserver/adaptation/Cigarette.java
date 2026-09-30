@@ -112,7 +112,10 @@ final class Cigarette implements Listener {
             int secondsPerBar,
             boolean involuntaryLmb,
             boolean involuntaryWalk,
-            double deathChance
+            double deathChance,
+            boolean nausea,
+            boolean waxParticles,
+            int cameraJerkTier
     ) {}
 
     /**
@@ -120,30 +123,30 @@ final class Cigarette implements Listener {
      * 1..4: Скорость I на 1с за палочку затяжки;
      * 5..8: Скорость I + Спешка I на 1с за палочку;
      * 9..12: Скорость II + Спешка I на 1с за палочку + непроизвольные клики ЛКМ;
-     * 13..16: Скорость II + Спешка I на 2с за палочку + ЛКМ + спотыкания/ходьба;
-     * 17..23: Скорость II + Спешка I на 4с за палочку + ЛКМ + ходьба + 1% шанс мгновенной смерти от остановки сердца в тик;
-     * 24+: Скорость II + Спешка I на 4с за палочку + ЛКМ + ходьба + 5% шанс мгновенной смерти от остановки сердца в тик.
+     * 13..16: Скорость II + Спешка I на 2с за палочку + ЛКМ + непрерывная ходьба ~1с + частицы воска + рывки камеры (тир 1);
+     * 17..23: Скорость II + Спешка I + Тошнота I на 4с за палочку + ЛКМ + ходьба + частицы воска + резкие рывки камеры (тир 2) + 1% шанс мгновенной смерти от остановки сердца в тик;
+     * 24+: Скорость II + Спешка I + Тошнота I на 4с за палочку + ЛКМ + ходьба + частицы воска + частые и сильные рывки камеры (тир 3) + 5% шанс мгновенной смерти от остановки сердца в тик.
      */
     static SugarTier sugarTier(int sugar) {
         if (sugar <= 0) {
             return null;
         }
         if (sugar <= 4) {
-            return new SugarTier(0, false, 1, false, false, 0.0);
+            return new SugarTier(0, false, 1, false, false, 0.0, false, false, 0);
         }
         if (sugar <= 8) {
-            return new SugarTier(0, true, 1, false, false, 0.0);
+            return new SugarTier(0, true, 1, false, false, 0.0, false, false, 0);
         }
         if (sugar <= 12) {
-            return new SugarTier(1, true, 1, true, false, 0.0);
+            return new SugarTier(1, true, 1, true, false, 0.0, false, false, 0);
         }
         if (sugar <= 16) {
-            return new SugarTier(1, true, 2, true, true, 0.0);
+            return new SugarTier(1, true, 2, true, true, 0.0, false, true, 1);
         }
         if (sugar <= 23) {
-            return new SugarTier(1, true, 4, true, true, 0.01);
+            return new SugarTier(1, true, 4, true, true, 0.01, true, true, 2);
         }
-        return new SugarTier(1, true, 4, true, true, 0.05);
+        return new SugarTier(1, true, 4, true, true, 0.05, true, true, 3);
     }
 
     enum Variant {
@@ -242,16 +245,43 @@ final class Cigarette implements Listener {
         private final boolean hasLmb;
         private final boolean hasWalk;
         private final double deathChance;
+        private final boolean hasNausea;
+        private final boolean hasWaxParticles;
+        private final int cameraJerkTier;
+
         private int lmbCooldown;
         private int walkCooldown;
+        private int walkTicksRemaining;
+        private Vector walkDirection;
+        private int cameraJerkCooldown;
 
-        SugarSession(int remainingTicks, boolean hasLmb, boolean hasWalk, double deathChance) {
+        SugarSession(int remainingTicks, boolean hasLmb, boolean hasWalk, double deathChance,
+                     boolean hasNausea, boolean hasWaxParticles, int cameraJerkTier) {
             this.remainingTicks = remainingTicks;
             this.hasLmb = hasLmb;
             this.hasWalk = hasWalk;
             this.deathChance = deathChance;
+            this.hasNausea = hasNausea;
+            this.hasWaxParticles = hasWaxParticles;
+            this.cameraJerkTier = cameraJerkTier;
+
             this.lmbCooldown = ThreadLocalRandom.current().nextInt(15, 35);
-            this.walkCooldown = ThreadLocalRandom.current().nextInt(15, 30);
+            this.walkCooldown = ThreadLocalRandom.current().nextInt(20, 45);
+            this.walkTicksRemaining = 0;
+            this.walkDirection = new Vector(0, 0, 0);
+            this.cameraJerkCooldown = nextCameraJerkCooldown(cameraJerkTier);
+        }
+
+        static int nextCameraJerkCooldown(int jerkTier) {
+            ThreadLocalRandom random = ThreadLocalRandom.current();
+            if (jerkTier == 1) {
+                return random.nextInt(25, 45);
+            } else if (jerkTier == 2) {
+                return random.nextInt(14, 28);
+            } else if (jerkTier >= 3) {
+                return random.nextInt(7, 15);
+            }
+            return 100;
         }
     }
 
@@ -1023,14 +1053,20 @@ final class Cigarette implements Listener {
         if (tier.haste()) {
             player.addPotionEffect(new PotionEffect(PotionEffectType.HASTE, durationTicks, 0), true);
         }
+        if (tier.nausea()) {
+            player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, durationTicks, 0), true);
+        }
         UUID id = player.getUniqueId();
         SugarSession existing = sugarSessions.get(id);
         int totalRemaining = (existing != null) ? Math.max(existing.remainingTicks, durationTicks) : durationTicks;
         boolean lmb = tier.involuntaryLmb() || (existing != null && existing.hasLmb);
         boolean walk = tier.involuntaryWalk() || (existing != null && existing.hasWalk);
         double deathChance = Math.max(tier.deathChance(), (existing != null) ? existing.deathChance : 0.0);
+        boolean nausea = tier.nausea() || (existing != null && existing.hasNausea);
+        boolean wax = tier.waxParticles() || (existing != null && existing.hasWaxParticles);
+        int jerkTier = Math.max(tier.cameraJerkTier(), (existing != null) ? existing.cameraJerkTier : 0);
 
-        sugarSessions.put(id, new SugarSession(totalRemaining, lmb, walk, deathChance));
+        sugarSessions.put(id, new SugarSession(totalRemaining, lmb, walk, deathChance, nausea, wax, jerkTier));
     }
 
     private void tickSugar() {
@@ -1063,6 +1099,21 @@ final class Cigarette implements Listener {
                 continue;
             }
 
+            // Частицы снятия воска с медного блока вокруг игрока на его клиенте (для последних 3 стадий)
+            if (session.hasWaxParticles) {
+                Location center = player.getLocation().add(0, 1.0, 0);
+                player.spawnParticle(Particle.WAX_OFF, center, 3, 0.45, 0.45, 0.45, 0.0);
+            }
+
+            // Резкие рывки камеры (для последних 3 стадий: чем выше стадия, тем резче и чаще)
+            if (session.cameraJerkTier > 0) {
+                session.cameraJerkCooldown--;
+                if (session.cameraJerkCooldown <= 0) {
+                    session.cameraJerkCooldown = SugarSession.nextCameraJerkCooldown(session.cameraJerkTier);
+                    performCameraJerk(player, session.cameraJerkTier);
+                }
+            }
+
             // Непроизвольные клики ЛКМ / удары
             if (session.hasLmb) {
                 session.lmbCooldown--;
@@ -1072,12 +1123,21 @@ final class Cigarette implements Listener {
                 }
             }
 
-            // Непроизвольная ходьба / спотыкания
+            // Непроизвольная ходьба (не рывками, а непрерывно ~1 секунду)
             if (session.hasWalk) {
-                session.walkCooldown--;
-                if (session.walkCooldown <= 0) {
-                    session.walkCooldown = ThreadLocalRandom.current().nextInt(15, 35);
-                    performInvoluntaryWalk(player);
+                if (session.walkTicksRemaining > 0) {
+                    session.walkTicksRemaining--;
+                    performContinuousWalk(player, session.walkDirection);
+                } else {
+                    session.walkCooldown--;
+                    if (session.walkCooldown <= 0) {
+                        session.walkCooldown = ThreadLocalRandom.current().nextInt(30, 60);
+                        session.walkTicksRemaining = ThreadLocalRandom.current().nextInt(18, 24); // ~1 секунда
+                        double angle = ThreadLocalRandom.current().nextDouble(0, 2 * Math.PI);
+                        double speed = 0.24;
+                        session.walkDirection = new Vector(Math.cos(angle) * speed, 0, Math.sin(angle) * speed);
+                        performContinuousWalk(player, session.walkDirection);
+                    }
                 }
             }
         }
@@ -1098,12 +1158,38 @@ final class Cigarette implements Listener {
         }
     }
 
-    private void performInvoluntaryWalk(Player player) {
+    private void performContinuousWalk(Player player, Vector walkDirection) {
+        if (player.getGameMode() == GameMode.SPECTATOR) {
+            return;
+        }
+        Vector currentVel = player.getVelocity();
+        player.setVelocity(new Vector(walkDirection.getX(), currentVel.getY(), walkDirection.getZ()));
+    }
+
+    private void performCameraJerk(Player player, int jerkTier) {
+        if (player.getGameMode() == GameMode.SPECTATOR) {
+            return;
+        }
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        double angle = random.nextDouble(0, 2 * Math.PI);
-        double speed = random.nextDouble(0.2, 0.35);
-        Vector stumble = new Vector(Math.cos(angle) * speed, 0.05, Math.sin(angle) * speed);
-        player.setVelocity(player.getVelocity().add(stumble));
+        float yawDelta;
+        float pitchDelta;
+        if (jerkTier == 1) {
+            yawDelta = (random.nextBoolean() ? 1 : -1) * random.nextFloat(15.0F, 30.0F);
+            pitchDelta = (random.nextBoolean() ? 1 : -1) * random.nextFloat(10.0F, 18.0F);
+        } else if (jerkTier == 2) {
+            yawDelta = (random.nextBoolean() ? 1 : -1) * random.nextFloat(30.0F, 60.0F);
+            pitchDelta = (random.nextBoolean() ? 1 : -1) * random.nextFloat(15.0F, 30.0F);
+        } else {
+            yawDelta = (random.nextBoolean() ? 1 : -1) * random.nextFloat(55.0F, 95.0F);
+            pitchDelta = (random.nextBoolean() ? 1 : -1) * random.nextFloat(25.0F, 45.0F);
+        }
+
+        Vector vel = player.getVelocity();
+        Location loc = player.getLocation();
+        loc.setYaw(loc.getYaw() + yawDelta);
+        loc.setPitch(Math.clamp(loc.getPitch() + pitchDelta, -90.0F, 90.0F));
+        player.teleport(loc);
+        player.setVelocity(vel);
     }
 
     private void triggerCardiacArrest(Player player) {

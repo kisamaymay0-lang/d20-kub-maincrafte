@@ -125,6 +125,9 @@ final class ApvshTest {
         assertFalse(tier1.involuntaryLmb(), "без ЛКМ");
         assertFalse(tier1.involuntaryWalk(), "без ходьбы");
         assertEquals(0.0, tier1.deathChance(), "без шанса смерти");
+        assertFalse(tier1.nausea(), "без тошноты");
+        assertFalse(tier1.waxParticles(), "без частиц воска");
+        assertEquals(0, tier1.cameraJerkTier(), "без рывков камеры");
 
         Cigarette.SugarTier tier4 = Cigarette.sugarTier(4);
         assertNotNull(tier4);
@@ -141,6 +144,9 @@ final class ApvshTest {
         assertFalse(tier5.involuntaryLmb());
         assertFalse(tier5.involuntaryWalk());
         assertEquals(0.0, tier5.deathChance());
+        assertFalse(tier5.nausea());
+        assertFalse(tier5.waxParticles());
+        assertEquals(0, tier5.cameraJerkTier());
 
         Cigarette.SugarTier tier8 = Cigarette.sugarTier(8);
         assertNotNull(tier8);
@@ -156,6 +162,9 @@ final class ApvshTest {
         assertTrue(tier9.involuntaryLmb(), "непроизвольные клики ЛКМ");
         assertFalse(tier9.involuntaryWalk());
         assertEquals(0.0, tier9.deathChance());
+        assertFalse(tier9.nausea());
+        assertFalse(tier9.waxParticles());
+        assertEquals(0, tier9.cameraJerkTier());
 
         Cigarette.SugarTier tier12 = Cigarette.sugarTier(12);
         assertNotNull(tier12);
@@ -163,7 +172,7 @@ final class ApvshTest {
         assertTrue(tier12.involuntaryLmb());
         assertFalse(tier12.involuntaryWalk());
 
-        // 13-16 сахар: Скорость II + Спешка I на 2с за палочку, побочные: клики ЛКМ + непроизвольная ходьба
+        // 13-16 сахар: Скорость II + Спешка I на 2с за палочку, побочные: клики ЛКМ + непроизвольная ходьба ~1с + частицы воска + рывки камеры
         Cigarette.SugarTier tier13 = Cigarette.sugarTier(13);
         assertNotNull(tier13);
         assertEquals(1, tier13.speedAmplifier());
@@ -172,14 +181,19 @@ final class ApvshTest {
         assertTrue(tier13.involuntaryLmb());
         assertTrue(tier13.involuntaryWalk(), "непроизвольная ходьба");
         assertEquals(0.0, tier13.deathChance());
+        assertFalse(tier13.nausea(), "на 13-16 ещё нет тошноты");
+        assertTrue(tier13.waxParticles(), "частицы снятия воска на клиенте");
+        assertEquals(1, tier13.cameraJerkTier(), "рывки камеры тир 1");
 
         Cigarette.SugarTier tier16 = Cigarette.sugarTier(16);
         assertNotNull(tier16);
         assertEquals(2, tier16.secondsPerBar());
         assertTrue(tier16.involuntaryLmb());
         assertTrue(tier16.involuntaryWalk());
+        assertTrue(tier16.waxParticles());
+        assertEquals(1, tier16.cameraJerkTier());
 
-        // 17-23 сахар: Скорость II + Спешка I на 4с за палочку, клики ЛКМ + ходьба + 1% шанс мгновенной смерти в тик
+        // 17-23 сахар: Скорость II + Спешка I + Тошнота I на 4с за палочку, клики ЛКМ + ходьба + воск + резкие рывки камеры + 1% шанс смерти в тик
         Cigarette.SugarTier tier17 = Cigarette.sugarTier(17);
         assertNotNull(tier17);
         assertEquals(1, tier17.speedAmplifier());
@@ -188,13 +202,19 @@ final class ApvshTest {
         assertTrue(tier17.involuntaryLmb());
         assertTrue(tier17.involuntaryWalk());
         assertEquals(0.01, tier17.deathChance(), 1e-9, "1% шанс смерти в тик");
+        assertTrue(tier17.nausea(), "Тошнота I на предпоследней стадии");
+        assertTrue(tier17.waxParticles(), "частицы снятия воска на клиенте");
+        assertEquals(2, tier17.cameraJerkTier(), "рывки камеры тир 2 (резче и чаще)");
 
         Cigarette.SugarTier tier23 = Cigarette.sugarTier(23);
         assertNotNull(tier23);
         assertEquals(4, tier23.secondsPerBar());
         assertEquals(0.01, tier23.deathChance(), 1e-9);
+        assertTrue(tier23.nausea());
+        assertTrue(tier23.waxParticles());
+        assertEquals(2, tier23.cameraJerkTier());
 
-        // 24+ сахар: те же эффекты (4с, Скорость II + Спешка I, ЛКМ, ходьба) с 5% шансом мгновенной смерти в тик
+        // 24+ сахар: те же эффекты + Тошнота I + частые и сильные рывки камеры (тир 3) + 5% шанс смерти в тик
         Cigarette.SugarTier tier24 = Cigarette.sugarTier(24);
         assertNotNull(tier24);
         assertEquals(1, tier24.speedAmplifier());
@@ -203,10 +223,16 @@ final class ApvshTest {
         assertTrue(tier24.involuntaryLmb());
         assertTrue(tier24.involuntaryWalk());
         assertEquals(0.05, tier24.deathChance(), 1e-9, "5% шанс смерти в тик");
+        assertTrue(tier24.nausea(), "Тошнота I на последней стадии");
+        assertTrue(tier24.waxParticles(), "частицы снятия воска на клиенте");
+        assertEquals(3, tier24.cameraJerkTier(), "рывки камеры тир 3 (самые резкие и частые)");
 
         Cigarette.SugarTier tier64 = Cigarette.sugarTier(64);
         assertNotNull(tier64);
         assertEquals(0.05, tier64.deathChance(), 1e-9);
+        assertTrue(tier64.nausea());
+        assertTrue(tier64.waxParticles());
+        assertEquals(3, tier64.cameraJerkTier());
     }
 
     @Test
