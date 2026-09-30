@@ -24,8 +24,13 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
+import org.bukkit.DyeColor;
+import org.bukkit.entity.Dolphin;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.TropicalFish;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -56,6 +61,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -103,8 +109,14 @@ final class Cigarette implements Listener {
     static final NamespacedKey FILLING_GUNPOWDER = new NamespacedKey("f8-plugin", "cigarette_filling_gunpowder");
     /** Невидимое количество сахара в начинке сигареты. */
     static final NamespacedKey FILLING_SUGAR = new NamespacedKey("f8-plugin", "cigarette_filling_sugar");
+    /** Невидимое количество кристаллов призмарина в начинке сигареты. */
+    static final NamespacedKey FILLING_PRISMARINE = new NamespacedKey("f8-plugin", "cigarette_filling_prismarine");
     /** Порог передоза пороха (больше 4, т.е. 5+ пороха — взрыв крипера). */
     static final int GUNPOWDER_OVERDOSE_THRESHOLD = 5;
+    /** Порог кристаллов призмарина для получения тошноты I (5+ кристаллов). */
+    static final int PRISMARINE_NAUSEA_THRESHOLD = 5;
+    /** Длительность эффектов призмарина: 4 секунды за каждую потраченную палочку затяжки. */
+    static final int PRISMARINE_SECONDS_PER_BAR = 4;
 
     record SugarTier(
             int speedAmplifier,
@@ -112,6 +124,7 @@ final class Cigarette implements Listener {
             int secondsPerBar,
             boolean involuntaryLmb,
             boolean involuntaryWalk,
+            int walkDurationTicks,
             double deathChance,
             boolean nausea,
             boolean waxParticles,
@@ -123,30 +136,30 @@ final class Cigarette implements Listener {
      * 1..4: Скорость I на 1с за палочку затяжки;
      * 5..8: Скорость I + Спешка I на 1с за палочку;
      * 9..12: Скорость II + Спешка I на 1с за палочку + непроизвольные клики ЛКМ;
-     * 13..16: Скорость II + Спешка I на 2с за палочку + ЛКМ + непрерывная ходьба ~1с + частицы воска + рывки камеры (тир 1);
-     * 17..23: Скорость II + Спешка I + Тошнота I на 4с за палочку + ЛКМ + ходьба + частицы воска + резкие рывки камеры (тир 2) + 1% шанс мгновенной смерти от остановки сердца в тик;
-     * 24+: Скорость II + Спешка I + Тошнота I на 4с за палочку + ЛКМ + ходьба + частицы воска + частые и сильные рывки камеры (тир 3) + 5% шанс мгновенной смерти от остановки сердца в тик.
+     * 13..16: Скорость II + Спешка I на 2с за палочку + ЛКМ + непрерывная ходьба ~0.5с (10 тиков) + частицы воска + рывки камеры (тир 1);
+     * 17..23: Скорость II + Спешка I + Тошнота I на 4с за палочку + ЛКМ + ходьба ~1с (20 тиков) + частицы воска + резкие рывки камеры (тир 2) + 1% шанс мгновенной смерти от остановки сердца в тик;
+     * 24+: Скорость II + Спешка I + Тошнота I на 4с за палочку + ЛКМ + ходьба ~1с (20 тиков) + частицы воска + частые и сильные рывки камеры (тир 3) + 5% шанс мгновенной смерти от остановки сердца в тик.
      */
     static SugarTier sugarTier(int sugar) {
         if (sugar <= 0) {
             return null;
         }
         if (sugar <= 4) {
-            return new SugarTier(0, false, 1, false, false, 0.0, false, false, 0);
+            return new SugarTier(0, false, 1, false, false, 0, 0.0, false, false, 0);
         }
         if (sugar <= 8) {
-            return new SugarTier(0, true, 1, false, false, 0.0, false, false, 0);
+            return new SugarTier(0, true, 1, false, false, 0, 0.0, false, false, 0);
         }
         if (sugar <= 12) {
-            return new SugarTier(1, true, 1, true, false, 0.0, false, false, 0);
+            return new SugarTier(1, true, 1, true, false, 0, 0.0, false, false, 0);
         }
         if (sugar <= 16) {
-            return new SugarTier(1, true, 2, true, true, 0.0, false, true, 1);
+            return new SugarTier(1, true, 2, true, true, 10, 0.0, false, true, 1);
         }
         if (sugar <= 23) {
-            return new SugarTier(1, true, 4, true, true, 0.01, true, true, 2);
+            return new SugarTier(1, true, 4, true, true, 20, 0.01, true, true, 2);
         }
-        return new SugarTier(1, true, 4, true, true, 0.05, true, true, 3);
+        return new SugarTier(1, true, 4, true, true, 20, 0.05, true, true, 3);
     }
 
     enum Variant {
@@ -228,6 +241,10 @@ final class Cigarette implements Listener {
     private final Set<UUID> cardiacArrestVictims = new HashSet<>();
     private BukkitTask sugarTicker;
 
+    /** Активные эффекты призмарина и галлюцинации. */
+    private final Map<UUID, PrismarineSession> prismarineSessions = new HashMap<>();
+    private final List<HallucinationEntity> hallucinations = new ArrayList<>();
+
     /** Зависимость: один отложенный переход на игрока, активные сообщения — общая задача. */
     private final Map<UUID, AddictionState> addictions = new HashMap<>();
     private final Set<UUID> warningPlayers = new HashSet<>();
@@ -244,6 +261,7 @@ final class Cigarette implements Listener {
         private int remainingTicks;
         private final boolean hasLmb;
         private final boolean hasWalk;
+        private final int walkDurationTicks;
         private final double deathChance;
         private final boolean hasNausea;
         private final boolean hasWaxParticles;
@@ -255,11 +273,12 @@ final class Cigarette implements Listener {
         private Vector walkDirection;
         private int cameraJerkCooldown;
 
-        SugarSession(int remainingTicks, boolean hasLmb, boolean hasWalk, double deathChance,
-                     boolean hasNausea, boolean hasWaxParticles, int cameraJerkTier) {
+        SugarSession(int remainingTicks, boolean hasLmb, boolean hasWalk, int walkDurationTicks,
+                     double deathChance, boolean hasNausea, boolean hasWaxParticles, int cameraJerkTier) {
             this.remainingTicks = remainingTicks;
             this.hasLmb = hasLmb;
             this.hasWalk = hasWalk;
+            this.walkDurationTicks = walkDurationTicks;
             this.deathChance = deathChance;
             this.hasNausea = hasNausea;
             this.hasWaxParticles = hasWaxParticles;
@@ -285,6 +304,43 @@ final class Cigarette implements Listener {
         }
     }
 
+    private static final class PrismarineSession {
+        private int remainingTicks;
+        private final int crystalCount;
+        private int bubbleCooldown;
+        private int creatureCooldown;
+
+        PrismarineSession(int remainingTicks, int crystalCount) {
+            this.remainingTicks = remainingTicks;
+            this.crystalCount = crystalCount;
+            this.bubbleCooldown = ThreadLocalRandom.current().nextInt(10, 25);
+            this.creatureCooldown = ThreadLocalRandom.current().nextInt(30, 80);
+        }
+    }
+
+    private static final class HallucinationEntity {
+        final Entity entity;
+        final Player player;
+        final boolean isDolphin;
+        double angle;
+        final double radius;
+        final double heightOffset;
+        final double speed;
+        int lifeTicks;
+
+        HallucinationEntity(Entity entity, Player player, boolean isDolphin,
+                            double angle, double radius, double heightOffset, double speed, int lifeTicks) {
+            this.entity = entity;
+            this.player = player;
+            this.isDolphin = isDolphin;
+            this.angle = angle;
+            this.radius = radius;
+            this.heightOffset = heightOffset;
+            this.speed = speed;
+            this.lifeTicks = lifeTicks;
+        }
+    }
+
     private static final class AddictionState {
         /** 0 — отсчёт суток; 1..3 — стадии ломки. */
         private int stage;
@@ -302,7 +358,7 @@ final class Cigarette implements Listener {
                 WITHDRAWAL_STAGE_TICKS);
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         ticker = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, PERIOD, PERIOD);
-        sugarTicker = Bukkit.getScheduler().runTaskTimer(plugin, this::tickSugar, 1L, 1L);
+        sugarTicker = Bukkit.getScheduler().runTaskTimer(plugin, this::tickEffects, 1L, 1L);
     }
 
     /** Выключение: гасим шкалу, дым и текущие тяги. */
@@ -316,6 +372,16 @@ final class Cigarette implements Listener {
             sugarTicker = null;
         }
         sugarSessions.clear();
+        for (HallucinationEntity h : hallucinations) {
+            if (h.entity != null && h.entity.isValid()) {
+                try {
+                    h.entity.remove();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        hallucinations.clear();
+        prismarineSessions.clear();
         cardiacArrestVictims.clear();
         for (Smoke flow : smoke.values()) {
             flow.stop();
@@ -394,30 +460,44 @@ final class Cigarette implements Listener {
         return Variant.BIG;
     }
 
+    /** Создаёт сигарету с заданной начинкой кристаллов призмарина. */
+    static ItemStack createWithPrismarine(int prismarine) {
+        return createWithFilling(0, 0, prismarine);
+    }
+
     /** Создаёт сигарету с заданной начинкой пороха. Модель выбирается по количеству пороха. */
     static ItemStack createWithGunpowder(int gunpowder) {
-        return createWithFilling(gunpowder, 0);
+        return createWithFilling(gunpowder, 0, 0);
     }
 
     /** Создаёт сигарету с заданной начинкой сахара. */
     static ItemStack createWithSugar(int sugar) {
-        return createWithFilling(0, sugar);
+        return createWithFilling(0, sugar, 0);
     }
 
     /** Создаёт сигарету с заданной начинкой пороха и сахара. Модель выбирается по суммарной начинке. */
     static ItemStack createWithFilling(int gunpowder, int sugar) {
-        int total = gunpowder + sugar;
+        return createWithFilling(gunpowder, sugar, 0);
+    }
+
+    /** Создаёт сигарету с заданной начинкой пороха, сахара и призмарина. Модель выбирается по суммарной начинке. */
+    static ItemStack createWithFilling(int gunpowder, int sugar, int prismarine) {
+        int total = gunpowder + sugar + prismarine;
         Variant variant = variantForFilling(total > 0 ? total : 1);
-        return create(false, variant, gunpowder, sugar);
+        return create(false, variant, gunpowder, sugar, prismarine);
     }
 
     static ItemStack create(boolean lit, Variant variant, int gunpowder) {
-        return create(lit, variant, gunpowder, 0);
+        return create(lit, variant, gunpowder, 0, 0);
     }
 
     static ItemStack create(boolean lit, Variant variant, int gunpowder, int sugar) {
+        return create(lit, variant, gunpowder, sugar, 0);
+    }
+
+    static ItemStack create(boolean lit, Variant variant, int gunpowder, int sugar, int prismarine) {
         ItemStack item = create(lit, variant);
-        if (gunpowder > 0 || sugar > 0) {
+        if (gunpowder > 0 || sugar > 0 || prismarine > 0) {
             ItemMeta meta = item.getItemMeta();
             if (meta != null) {
                 if (gunpowder > 0) {
@@ -425,6 +505,9 @@ final class Cigarette implements Listener {
                 }
                 if (sugar > 0) {
                     meta.getPersistentDataContainer().set(FILLING_SUGAR, PersistentDataType.INTEGER, sugar);
+                }
+                if (prismarine > 0) {
+                    meta.getPersistentDataContainer().set(FILLING_PRISMARINE, PersistentDataType.INTEGER, prismarine);
                 }
                 item.setItemMeta(meta);
             }
@@ -447,6 +530,15 @@ final class Cigarette implements Listener {
             return 0;
         }
         Integer value = item.getItemMeta().getPersistentDataContainer().get(FILLING_SUGAR, PersistentDataType.INTEGER);
+        return value == null ? 0 : Math.max(0, value);
+    }
+
+    /** Сколько кристаллов призмарина содержится в сигарете. */
+    static int prismarineFilling(ItemStack item) {
+        if (!isCigarette(item)) {
+            return 0;
+        }
+        Integer value = item.getItemMeta().getPersistentDataContainer().get(FILLING_PRISMARINE, PersistentDataType.INTEGER);
         return value == null ? 0 : Math.max(0, value);
     }
 
@@ -679,6 +771,12 @@ final class Cigarette implements Listener {
                     block.getWorld().spawnParticle(Particle.EXPLOSION, origin, 1, 0.0D, 0.0D, 0.0D, 0.0D);
                 }
             }
+            int prismarine = prismarineFilling(stored);
+            if (prismarine > 0) {
+                Location origin = block.getLocation().add(0.5, 0.5, 0.5).add(facing.clone().multiply(0.55));
+                block.getWorld().spawnParticle(Particle.BUBBLE_COLUMN_UP, origin, 8, 0.15, 0.15, 0.15, 0.04);
+                block.getWorld().spawnParticle(Particle.NAUTILUS, origin, 4, 0.1, 0.1, 0.1, 0.02);
+            }
             return true;
         }
         return false;
@@ -688,7 +786,8 @@ final class Cigarette implements Listener {
         return variant(first) == variant(second)
                 && isLit(first) == isLit(second)
                 && gunpowderFilling(first) == gunpowderFilling(second)
-                && sugarFilling(first) == sugarFilling(second);
+                && sugarFilling(first) == sugarFilling(second)
+                && prismarineFilling(first) == prismarineFilling(second);
     }
 
     static int dropperBarsToSmoke(int available) {
@@ -865,6 +964,19 @@ final class Cigarette implements Listener {
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
         sugarSessions.remove(id);
+        prismarineSessions.remove(id);
+        hallucinations.removeIf(h -> {
+            if (h.player.getUniqueId().equals(id)) {
+                if (h.entity != null && h.entity.isValid()) {
+                    try {
+                        h.entity.remove();
+                    } catch (Throwable ignored) {
+                    }
+                }
+                return true;
+            }
+            return false;
+        });
         cardiacArrestVictims.remove(id);
         puffs.remove(id);
         stopInhaleSound(player);
@@ -886,6 +998,14 @@ final class Cigarette implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         UUID id = event.getPlayer().getUniqueId();
+        for (HallucinationEntity h : hallucinations) {
+            if (h.entity != null && h.entity.isValid() && !h.player.getUniqueId().equals(id)) {
+                try {
+                    event.getPlayer().hideEntity(plugin, h.entity);
+                } catch (Throwable ignored) {
+                }
+            }
+        }
         AddictionState addiction = addictions.get(id);
         if (addiction == null) {
             return;
@@ -1030,6 +1150,10 @@ final class Cigarette implements Listener {
         if (sugar > 0) {
             applySugarEffects(player, sugar, spent);
         }
+        int prismarine = prismarineFilling(item);
+        if (prismarine > 0) {
+            applyPrismarineEffects(player, prismarine, spent);
+        }
         // Любая реальная затяжка начинает зависимость, если её ещё не было,
         // либо сбрасывает цикл после повторного курения.
         startOrResetAddiction(player);
@@ -1061,12 +1185,259 @@ final class Cigarette implements Listener {
         int totalRemaining = (existing != null) ? Math.max(existing.remainingTicks, durationTicks) : durationTicks;
         boolean lmb = tier.involuntaryLmb() || (existing != null && existing.hasLmb);
         boolean walk = tier.involuntaryWalk() || (existing != null && existing.hasWalk);
+        int walkDuration = Math.max(tier.walkDurationTicks(), (existing != null) ? existing.walkDurationTicks : 0);
         double deathChance = Math.max(tier.deathChance(), (existing != null) ? existing.deathChance : 0.0);
         boolean nausea = tier.nausea() || (existing != null && existing.hasNausea);
         boolean wax = tier.waxParticles() || (existing != null && existing.hasWaxParticles);
         int jerkTier = Math.max(tier.cameraJerkTier(), (existing != null) ? existing.cameraJerkTier : 0);
 
-        sugarSessions.put(id, new SugarSession(totalRemaining, lmb, walk, deathChance, nausea, wax, jerkTier));
+        sugarSessions.put(id, new SugarSession(totalRemaining, lmb, walk, walkDuration, deathChance, nausea, wax, jerkTier));
+    }
+
+    void applyPrismarineEffects(Player player, int prismarine, int spent) {
+        if (prismarine <= 0 || spent <= 0) {
+            return;
+        }
+        int durationTicks = spent * PRISMARINE_SECONDS_PER_BAR * 20; // 4 секунды за каждую палочку тяги
+        player.addPotionEffect(new PotionEffect(PotionEffectType.WATER_BREATHING, durationTicks, 0), true);
+        if (prismarine >= PRISMARINE_NAUSEA_THRESHOLD) {
+            player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, durationTicks, 0), true);
+        }
+        player.playSound(player.getLocation(), Sound.BLOCK_CONDUIT_AMBIENT, SoundCategory.PLAYERS, 0.45F, 1.25F);
+
+        UUID id = player.getUniqueId();
+        PrismarineSession existing = prismarineSessions.get(id);
+        int totalRemaining = (existing != null) ? Math.max(existing.remainingTicks, durationTicks) : durationTicks;
+        int totalCrystals = (existing != null) ? Math.max(existing.crystalCount, prismarine) : prismarine;
+        prismarineSessions.put(id, new PrismarineSession(totalRemaining, totalCrystals));
+    }
+
+    static int prismarineEffectDurationTicks(int spent) {
+        return spent * PRISMARINE_SECONDS_PER_BAR * 20;
+    }
+
+    static boolean hasPrismarineNausea(int crystals) {
+        return crystals >= PRISMARINE_NAUSEA_THRESHOLD;
+    }
+
+    private void tickEffects() {
+        tickSugar();
+        tickPrismarine();
+        tickHallucinations();
+    }
+
+    private void tickPrismarine() {
+        if (prismarineSessions.isEmpty()) {
+            return;
+        }
+        for (Iterator<Map.Entry<UUID, PrismarineSession>> it = prismarineSessions.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<UUID, PrismarineSession> entry = it.next();
+            UUID id = entry.getKey();
+            Player player = Bukkit.getPlayer(id);
+            if (player == null || !player.isOnline() || player.isDead()) {
+                it.remove();
+                continue;
+            }
+            PrismarineSession session = entry.getValue();
+            session.remainingTicks--;
+            if (session.remainingTicks <= 0) {
+                it.remove();
+                continue;
+            }
+
+            if (player.getGameMode() == GameMode.SPECTATOR) {
+                continue;
+            }
+
+            int crystals = session.crystalCount;
+
+            // Периодические пузырьки воздуха, поднимающиеся из-под земли на клиенте игрока
+            session.bubbleCooldown--;
+            if (session.bubbleCooldown <= 0) {
+                int minCool = Math.max(6, 25 - Math.min(18, crystals));
+                int maxCool = Math.max(minCool + 4, 40 - Math.min(24, crystals));
+                session.bubbleCooldown = ThreadLocalRandom.current().nextInt(minCool, maxCool + 1);
+
+                spawnClientGroundBubbles(player, crystals);
+            }
+
+            // Шанс появления плывущей в воздухе галлюцинации (дельфин или тропическая рыбка)
+            session.creatureCooldown--;
+            if (session.creatureCooldown <= 0) {
+                int minCool = Math.max(35, 120 - Math.min(75, crystals * 3));
+                int maxCool = Math.max(minCool + 20, 220 - Math.min(120, crystals * 4));
+                session.creatureCooldown = ThreadLocalRandom.current().nextInt(minCool, maxCool + 1);
+
+                double spawnChance = Math.min(0.85, 0.22 + crystals * 0.03);
+                if (ThreadLocalRandom.current().nextDouble() < spawnChance) {
+                    spawnHallucinationCreature(player, crystals);
+                }
+            }
+
+            // Мягкие частицы наутилуса вокруг игрока (красивые, не перегружающие)
+            if (ThreadLocalRandom.current().nextInt(100) < Math.min(45, 12 + crystals * 2)) {
+                Location eye = player.getEyeLocation();
+                ThreadLocalRandom rnd = ThreadLocalRandom.current();
+                Location partLoc = eye.clone().add(
+                        (rnd.nextDouble() - 0.5) * 3.0,
+                        (rnd.nextDouble() - 0.5) * 1.5,
+                        (rnd.nextDouble() - 0.5) * 3.0
+                );
+                player.spawnParticle(Particle.NAUTILUS, partLoc, 1, 0.05, 0.05, 0.05, 0.02);
+            }
+        }
+    }
+
+    private void spawnClientGroundBubbles(Player player, int crystals) {
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        Location playerLoc = player.getLocation();
+        int burstCount = Math.min(16, 3 + crystals / 3);
+        int spots = Math.min(4, 1 + crystals / 6);
+        for (int s = 0; s < spots; s++) {
+            double offsetX = (rnd.nextDouble() - 0.5) * 5.0;
+            double offsetZ = (rnd.nextDouble() - 0.5) * 5.0;
+            Location ground = playerLoc.clone().add(offsetX, 0.05, offsetZ);
+            player.spawnParticle(Particle.BUBBLE_COLUMN_UP, ground, burstCount, 0.25, 0.6, 0.25, 0.06);
+            if (rnd.nextBoolean()) {
+                player.spawnParticle(Particle.BUBBLE_POP, ground.clone().add(0, 0.8, 0), 2, 0.15, 0.2, 0.15, 0.02);
+            }
+        }
+        float pitch = 1.0F + (rnd.nextFloat() - 0.5F) * 0.3F;
+        player.playSound(playerLoc, Sound.BLOCK_BUBBLE_COLUMN_UPWARDS_AMBIENT, SoundCategory.AMBIENT, 0.25F, pitch);
+    }
+
+    private void spawnHallucinationCreature(Player player, int crystals) {
+        long countForPlayer = hallucinations.stream()
+                .filter(h -> h.player.getUniqueId().equals(player.getUniqueId()))
+                .count();
+        if (countForPlayer >= 3) {
+            return;
+        }
+
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        boolean isDolphin = rnd.nextBoolean();
+
+        Location eye = player.getEyeLocation();
+        double initialAngle = rnd.nextDouble(0, 2 * Math.PI);
+        double radius = isDolphin ? rnd.nextDouble(3.5, 6.0) : rnd.nextDouble(2.0, 4.0);
+        double heightOffset = (rnd.nextDouble() - 0.4) * 1.6;
+        double startX = eye.getX() + Math.cos(initialAngle) * radius;
+        double startY = eye.getY() + heightOffset;
+        double startZ = eye.getZ() + Math.sin(initialAngle) * radius;
+        Location spawnLoc = new Location(player.getWorld(), startX, startY, startZ);
+
+        Entity entity;
+        try {
+            if (isDolphin) {
+                entity = player.getWorld().spawn(spawnLoc, Dolphin.class, d -> {
+                    d.setAI(false);
+                    d.setGravity(false);
+                    d.setInvulnerable(true);
+                    d.setSilent(true);
+                    d.setCollidable(false);
+                    d.setPersistent(false);
+                    d.setRemoveWhenFarAway(true);
+                });
+            } else {
+                entity = player.getWorld().spawn(spawnLoc, TropicalFish.class, fish -> {
+                    fish.setAI(false);
+                    fish.setGravity(false);
+                    fish.setInvulnerable(true);
+                    fish.setSilent(true);
+                    fish.setCollidable(false);
+                    fish.setPersistent(false);
+                    fish.setRemoveWhenFarAway(true);
+                    try {
+                        TropicalFish.Pattern[] patterns = TropicalFish.Pattern.values();
+                        DyeColor[] dyes = DyeColor.values();
+                        fish.setPattern(patterns[rnd.nextInt(patterns.length)]);
+                        fish.setBodyColor(dyes[rnd.nextInt(dyes.length)]);
+                        fish.setPatternColor(dyes[rnd.nextInt(dyes.length)]);
+                    } catch (Throwable ignored) {
+                    }
+                });
+            }
+        } catch (Throwable t) {
+            return;
+        }
+
+        if (entity == null) {
+            return;
+        }
+
+        for (Player other : Bukkit.getOnlinePlayers()) {
+            if (!other.getUniqueId().equals(player.getUniqueId())) {
+                try {
+                    other.hideEntity(plugin, entity);
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+
+        int lifeTicks = rnd.nextInt(70, 130);
+        double speed = (rnd.nextBoolean() ? 1 : -1) * rnd.nextDouble(0.035, 0.065);
+        HallucinationEntity hallucination = new HallucinationEntity(
+                entity, player, isDolphin, initialAngle, radius, heightOffset, speed, lifeTicks
+        );
+        hallucinations.add(hallucination);
+
+        player.playSound(spawnLoc, Sound.ENTITY_DOLPHIN_AMBIENT_WATER, SoundCategory.AMBIENT, 0.25F, 1.4F);
+    }
+
+    private void tickHallucinations() {
+        if (hallucinations.isEmpty()) {
+            return;
+        }
+        for (Iterator<HallucinationEntity> it = hallucinations.iterator(); it.hasNext(); ) {
+            HallucinationEntity h = it.next();
+            if (!h.player.isOnline() || h.player.isDead() || h.entity == null || !h.entity.isValid()) {
+                if (h.entity != null && h.entity.isValid()) {
+                    try {
+                        h.entity.remove();
+                    } catch (Throwable ignored) {
+                    }
+                }
+                it.remove();
+                continue;
+            }
+
+            h.lifeTicks--;
+            if (h.lifeTicks <= 0) {
+                Location loc = h.entity.getLocation();
+                h.player.spawnParticle(Particle.NAUTILUS, loc, 6, 0.2, 0.2, 0.2, 0.04);
+                h.player.spawnParticle(Particle.BUBBLE_POP, loc, 4, 0.2, 0.2, 0.2, 0.03);
+                try {
+                    h.entity.remove();
+                } catch (Throwable ignored) {
+                }
+                it.remove();
+                continue;
+            }
+
+            h.angle += h.speed;
+            Location eye = h.player.getEyeLocation();
+            double x = eye.getX() + Math.cos(h.angle) * h.radius;
+            double z = eye.getZ() + Math.sin(h.angle) * h.radius;
+            double y = eye.getY() + h.heightOffset + Math.sin(h.angle * 2.5) * 0.25;
+
+            double dx = -Math.sin(h.angle) * Math.signum(h.speed);
+            double dz = Math.cos(h.angle) * Math.signum(h.speed);
+            float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+            float pitch = (float) (-Math.cos(h.angle * 2.5) * 12.0);
+
+            Location nextLoc = new Location(h.player.getWorld(), x, y, z, yaw, pitch);
+            try {
+                h.entity.teleport(nextLoc);
+            } catch (Throwable ignored) {
+            }
+
+            if (h.lifeTicks % 2 == 0) {
+                h.player.spawnParticle(Particle.BUBBLE_COLUMN_UP, nextLoc, 1, 0.08, 0.08, 0.08, 0.02);
+            }
+            if (h.lifeTicks % 8 == 0) {
+                h.player.spawnParticle(Particle.NAUTILUS, nextLoc, 1, 0.05, 0.05, 0.05, 0.01);
+            }
+        }
     }
 
     private void tickSugar() {
@@ -1123,7 +1494,7 @@ final class Cigarette implements Listener {
                 }
             }
 
-            // Непроизвольная ходьба (не рывками, а непрерывно ~1 секунду)
+            // Непроизвольная ходьба (не рывками, а непрерывно: ~0.5с на 13-16, ~1.0с на 17+)
             if (session.hasWalk) {
                 if (session.walkTicksRemaining > 0) {
                     session.walkTicksRemaining--;
@@ -1132,7 +1503,10 @@ final class Cigarette implements Listener {
                     session.walkCooldown--;
                     if (session.walkCooldown <= 0) {
                         session.walkCooldown = ThreadLocalRandom.current().nextInt(30, 60);
-                        session.walkTicksRemaining = ThreadLocalRandom.current().nextInt(18, 24); // ~1 секунда
+                        int dur = session.walkDurationTicks;
+                        int minTicks = Math.max(1, (int) Math.round(dur * 0.9));
+                        int maxTicks = Math.max(minTicks, (int) Math.round(dur * 1.1));
+                        session.walkTicksRemaining = ThreadLocalRandom.current().nextInt(minTicks, maxTicks + 1);
                         double angle = ThreadLocalRandom.current().nextDouble(0, 2 * Math.PI);
                         double speed = 0.24;
                         session.walkDirection = new Vector(Math.cos(angle) * speed, 0, Math.sin(angle) * speed);
@@ -1205,6 +1579,19 @@ final class Cigarette implements Listener {
             event.deathMessage(msg);
         }
         sugarSessions.remove(player.getUniqueId());
+        prismarineSessions.remove(player.getUniqueId());
+        hallucinations.removeIf(h -> {
+            if (h.player.getUniqueId().equals(player.getUniqueId())) {
+                if (h.entity != null && h.entity.isValid()) {
+                    try {
+                        h.entity.remove();
+                    } catch (Throwable ignored) {
+                    }
+                }
+                return true;
+            }
+            return false;
+        });
         Puff puff = puffs.remove(player.getUniqueId());
         if (puff != null) {
             stopInhaleSound(player);
@@ -1516,12 +1903,13 @@ final class Cigarette implements Listener {
         int remaining = bars(item);
         int gunpowder = gunpowderFilling(item);
         int sugar = sugarFilling(item);
+        int prismarine = prismarineFilling(item);
         ItemStack unlitRemainder = null;
         if (item.getAmount() > 1) {
             unlitRemainder = item.clone();
             unlitRemainder.setAmount(item.getAmount() - 1);
         }
-        ItemStack fired = create(true, variant(item), gunpowder, sugar);
+        ItemStack fired = create(true, variant(item), gunpowder, sugar, prismarine);
         fired.setAmount(1);
         setBars(fired, remaining);
         setHandItem(player, hand, fired);

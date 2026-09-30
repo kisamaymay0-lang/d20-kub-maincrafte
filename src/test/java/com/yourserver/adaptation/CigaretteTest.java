@@ -231,4 +231,23 @@ final class CigaretteTest {
         assertEquals(80, 1 * tier20.secondsPerBar() * 20);
         assertEquals(16 * 80, 16 * tier20.secondsPerBar() * 20);
     }
+
+    @Test
+    void длительностьЭффектовПризмаринаМасштабируетсяПоЧетыреСекундыЗаПалочку() {
+        assertEquals(4, Cigarette.PRISMARINE_SECONDS_PER_BAR);
+        assertEquals(80, Cigarette.prismarineEffectDurationTicks(1), "1 палочка = 4 секунды (80 тиков)");
+        assertEquals(160, Cigarette.prismarineEffectDurationTicks(2), "2 палочки = 8 секунд (160 тиков)");
+        assertEquals(320, Cigarette.prismarineEffectDurationTicks(4), "4 палочки = 16 секунд (320 тиков)");
+        assertEquals(1280, Cigarette.prismarineEffectDurationTicks(16), "16 палочек = 64 секунды (1280 тиков)");
+        assertEquals(2560, Cigarette.prismarineEffectDurationTicks(32), "32 палочки = 128 секунд (2560 тиков)");
+    }
+
+    @Test
+    void порогТошнотыОтПризмарина() {
+        assertEquals(5, Cigarette.PRISMARINE_NAUSEA_THRESHOLD);
+        assertEquals(false, Cigarette.hasPrismarineNausea(1));
+        assertEquals(false, Cigarette.hasPrismarineNausea(4));
+        assertEquals(true, Cigarette.hasPrismarineNausea(5));
+        assertEquals(true, Cigarette.hasPrismarineNausea(20));
+    }
 }

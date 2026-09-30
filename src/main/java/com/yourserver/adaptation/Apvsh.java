@@ -92,14 +92,14 @@ public final class Apvsh implements Listener {
     /** 5 слотов для наполнения во втором ряду (индексы 10..14). */
     public static final Set<Integer> FILLING_SLOTS = Set.of(10, 11, 12, 13, 14);
 
-    /** Разрешённые материалы для наполнения: порох и сахар. */
+    /** Разрешённые материалы для наполнения: порох, сахар и кристалл призмарина. */
     public static boolean isAllowedFilling(ItemStack item) {
         if (item == null) return false;
         return isAllowedFilling(item.getType());
     }
 
     public static boolean isAllowedFilling(Material material) {
-        return material == Material.GUNPOWDER || material == Material.SUGAR;
+        return material == Material.GUNPOWDER || material == Material.SUGAR || material == Material.PRISMARINE_CRYSTALS;
     }
 
     /** Слот для наполняемого предмета (бумага) во втором ряду (индекс 16). */
@@ -335,6 +335,7 @@ public final class Apvsh implements Listener {
 
         int totalGunpowder = 0;
         int totalSugar = 0;
+        int totalPrismarine = 0;
         for (int s : FILLING_SLOTS) {
             ItemStack filling = inv.getItem(s);
             if (filling != null) {
@@ -342,11 +343,13 @@ public final class Apvsh implements Listener {
                     totalGunpowder += filling.getAmount();
                 } else if (filling.getType() == Material.SUGAR) {
                     totalSugar += filling.getAmount();
+                } else if (filling.getType() == Material.PRISMARINE_CRYSTALS) {
+                    totalPrismarine += filling.getAmount();
                 }
             }
         }
 
-        if (totalGunpowder <= 0 && totalSugar <= 0) {
+        if (totalGunpowder <= 0 && totalSugar <= 0 && totalPrismarine <= 0) {
             return false;
         }
 
@@ -363,7 +366,7 @@ public final class Apvsh implements Listener {
         }
 
         // 3. Создаём готовую сигарету с начинкой
-        ItemStack cigarette = Cigarette.createWithFilling(totalGunpowder, totalSugar);
+        ItemStack cigarette = Cigarette.createWithFilling(totalGunpowder, totalSugar, totalPrismarine);
         inv.setItem(PAPER_SLOT, cigarette);
 
         // 4. Проигрываем звук удара наковальни

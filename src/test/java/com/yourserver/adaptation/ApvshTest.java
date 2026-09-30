@@ -103,9 +103,10 @@ final class ApvshTest {
     }
 
     @Test
-    void наполнениеПринимаетПорохИСахарНоОтвергаетДругиеМатериалы() {
+    void наполнениеПринимаетПорохСахарИПризмаринНоОтвергаетДругиеМатериалы() {
         assertTrue(Apvsh.isAllowedFilling(Material.GUNPOWDER), "порох разрешён");
         assertTrue(Apvsh.isAllowedFilling(Material.SUGAR), "сахар разрешён");
+        assertTrue(Apvsh.isAllowedFilling(Material.PRISMARINE_CRYSTALS), "кристаллы призмарина разрешены");
         assertFalse(Apvsh.isAllowedFilling(Material.PAPER), "бумага не является наполнителем");
         assertFalse(Apvsh.isAllowedFilling(Material.DIAMOND), "алмаз запрещён");
         assertFalse(Apvsh.isAllowedFilling((Material) null), "null запрещён");
@@ -124,6 +125,7 @@ final class ApvshTest {
         assertEquals(1, tier1.secondsPerBar(), "1 секунда за палочку");
         assertFalse(tier1.involuntaryLmb(), "без ЛКМ");
         assertFalse(tier1.involuntaryWalk(), "без ходьбы");
+        assertEquals(0, tier1.walkDurationTicks(), "0 тиков ходьбы");
         assertEquals(0.0, tier1.deathChance(), "без шанса смерти");
         assertFalse(tier1.nausea(), "без тошноты");
         assertFalse(tier1.waxParticles(), "без частиц воска");
@@ -143,6 +145,7 @@ final class ApvshTest {
         assertEquals(1, tier5.secondsPerBar());
         assertFalse(tier5.involuntaryLmb());
         assertFalse(tier5.involuntaryWalk());
+        assertEquals(0, tier5.walkDurationTicks());
         assertEquals(0.0, tier5.deathChance());
         assertFalse(tier5.nausea());
         assertFalse(tier5.waxParticles());
@@ -161,6 +164,7 @@ final class ApvshTest {
         assertEquals(1, tier9.secondsPerBar());
         assertTrue(tier9.involuntaryLmb(), "непроизвольные клики ЛКМ");
         assertFalse(tier9.involuntaryWalk());
+        assertEquals(0, tier9.walkDurationTicks());
         assertEquals(0.0, tier9.deathChance());
         assertFalse(tier9.nausea());
         assertFalse(tier9.waxParticles());
@@ -172,7 +176,7 @@ final class ApvshTest {
         assertTrue(tier12.involuntaryLmb());
         assertFalse(tier12.involuntaryWalk());
 
-        // 13-16 сахар: Скорость II + Спешка I на 2с за палочку, побочные: клики ЛКМ + непроизвольная ходьба ~1с + частицы воска + рывки камеры
+        // 13-16 сахар: Скорость II + Спешка I на 2с за палочку, побочные: клики ЛКМ + сокращённая ходьба ~0.5с (10 тиков) + воск + рывки камеры
         Cigarette.SugarTier tier13 = Cigarette.sugarTier(13);
         assertNotNull(tier13);
         assertEquals(1, tier13.speedAmplifier());
@@ -180,6 +184,7 @@ final class ApvshTest {
         assertEquals(2, tier13.secondsPerBar(), "2 секунды за палочку");
         assertTrue(tier13.involuntaryLmb());
         assertTrue(tier13.involuntaryWalk(), "непроизвольная ходьба");
+        assertEquals(10, tier13.walkDurationTicks(), "непроизвольная ходьба сокращена до 0.5с (10 тиков)");
         assertEquals(0.0, tier13.deathChance());
         assertFalse(tier13.nausea(), "на 13-16 ещё нет тошноты");
         assertTrue(tier13.waxParticles(), "частицы снятия воска на клиенте");
@@ -190,10 +195,11 @@ final class ApvshTest {
         assertEquals(2, tier16.secondsPerBar());
         assertTrue(tier16.involuntaryLmb());
         assertTrue(tier16.involuntaryWalk());
+        assertEquals(10, tier16.walkDurationTicks());
         assertTrue(tier16.waxParticles());
         assertEquals(1, tier16.cameraJerkTier());
 
-        // 17-23 сахар: Скорость II + Спешка I + Тошнота I на 4с за палочку, клики ЛКМ + ходьба + воск + резкие рывки камеры + 1% шанс смерти в тик
+        // 17-23 сахар: Скорость II + Спешка I + Тошнота I на 4с за палочку, клики ЛКМ + ходьба ~1.0с (20 тиков) + воск + резкие рывки камеры + 1% шанс смерти в тик
         Cigarette.SugarTier tier17 = Cigarette.sugarTier(17);
         assertNotNull(tier17);
         assertEquals(1, tier17.speedAmplifier());
@@ -201,6 +207,7 @@ final class ApvshTest {
         assertEquals(4, tier17.secondsPerBar(), "4 секунды за палочку");
         assertTrue(tier17.involuntaryLmb());
         assertTrue(tier17.involuntaryWalk());
+        assertEquals(20, tier17.walkDurationTicks(), "непроизвольная ходьба 1.0с (20 тиков)");
         assertEquals(0.01, tier17.deathChance(), 1e-9, "1% шанс смерти в тик");
         assertTrue(tier17.nausea(), "Тошнота I на предпоследней стадии");
         assertTrue(tier17.waxParticles(), "частицы снятия воска на клиенте");
@@ -209,12 +216,13 @@ final class ApvshTest {
         Cigarette.SugarTier tier23 = Cigarette.sugarTier(23);
         assertNotNull(tier23);
         assertEquals(4, tier23.secondsPerBar());
+        assertEquals(20, tier23.walkDurationTicks());
         assertEquals(0.01, tier23.deathChance(), 1e-9);
         assertTrue(tier23.nausea());
         assertTrue(tier23.waxParticles());
         assertEquals(2, tier23.cameraJerkTier());
 
-        // 24+ сахар: те же эффекты + Тошнота I + частые и сильные рывки камеры (тир 3) + 5% шанс смерти в тик
+        // 24+ сахар: те же эффекты + Тошнота I + частые и сильные рывки камеры (тир 3) + ходьба ~1.0с (20 тиков) + 5% шанс смерти в тик
         Cigarette.SugarTier tier24 = Cigarette.sugarTier(24);
         assertNotNull(tier24);
         assertEquals(1, tier24.speedAmplifier());
@@ -222,6 +230,7 @@ final class ApvshTest {
         assertEquals(4, tier24.secondsPerBar());
         assertTrue(tier24.involuntaryLmb());
         assertTrue(tier24.involuntaryWalk());
+        assertEquals(20, tier24.walkDurationTicks(), "непроизвольная ходьба 1.0с (20 тиков)");
         assertEquals(0.05, tier24.deathChance(), 1e-9, "5% шанс смерти в тик");
         assertTrue(tier24.nausea(), "Тошнота I на последней стадии");
         assertTrue(tier24.waxParticles(), "частицы снятия воска на клиенте");
@@ -229,10 +238,31 @@ final class ApvshTest {
 
         Cigarette.SugarTier tier64 = Cigarette.sugarTier(64);
         assertNotNull(tier64);
+        assertEquals(20, tier64.walkDurationTicks());
         assertEquals(0.05, tier64.deathChance(), 1e-9);
         assertTrue(tier64.nausea());
         assertTrue(tier64.waxParticles());
         assertEquals(3, tier64.cameraJerkTier());
+    }
+
+    @Test
+    void эффектыПризмаринаДействуютЧетыреСекундыЗаПалочкуТяги() {
+        assertEquals(4, Cigarette.PRISMARINE_SECONDS_PER_BAR, "4 секунды за палочку");
+        assertEquals(80, Cigarette.prismarineEffectDurationTicks(1), "1 палочка = 4 секунды (80 тиков)");
+        assertEquals(320, Cigarette.prismarineEffectDurationTicks(4), "4 палочки = 16 секунд (320 тиков)");
+        assertEquals(1280, Cigarette.prismarineEffectDurationTicks(16), "16 палочек = 64 секунды (1280 тиков)");
+        assertEquals(2560, Cigarette.prismarineEffectDurationTicks(32), "32 палочки = 128 секунд (2560 тиков)");
+    }
+
+    @Test
+    void тошнотаОтПризмаринаВыдаетсяПриПятиИБолееКристаллах() {
+        assertEquals(5, Cigarette.PRISMARINE_NAUSEA_THRESHOLD, "порог тошноты: 5 кристаллов");
+        assertFalse(Cigarette.hasPrismarineNausea(0), "0 кристаллов — без тошноты");
+        assertFalse(Cigarette.hasPrismarineNausea(1), "1 кристалл — без тошноты");
+        assertFalse(Cigarette.hasPrismarineNausea(4), "4 кристалла — без тошноты");
+        assertTrue(Cigarette.hasPrismarineNausea(5), "5 кристаллов — тошнота I");
+        assertTrue(Cigarette.hasPrismarineNausea(10), "10 кристаллов — тошнота I");
+        assertTrue(Cigarette.hasPrismarineNausea(64), "64 кристалла — тошнота I");
     }
 
     @Test
