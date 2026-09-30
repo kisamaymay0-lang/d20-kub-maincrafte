@@ -18,11 +18,13 @@ import org.bukkit.block.BlockState;
 import org.bukkit.block.Dropper;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Directional;
+import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
@@ -30,6 +32,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockDispenseEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
@@ -44,6 +47,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayDeque;
@@ -97,6 +101,50 @@ final class Cigarette implements Listener {
     private static final NamespacedKey BARS = new NamespacedKey("f8-plugin", "cigarette_bars");
     /** Невидимое количество пороха в начинке сигареты. */
     static final NamespacedKey FILLING_GUNPOWDER = new NamespacedKey("f8-plugin", "cigarette_filling_gunpowder");
+    /** Невидимое количество сахара в начинке сигареты. */
+    static final NamespacedKey FILLING_SUGAR = new NamespacedKey("f8-plugin", "cigarette_filling_sugar");
+    /** Порог передоза пороха (больше 4, т.е. 5+ пороха — взрыв крипера). */
+    static final int GUNPOWDER_OVERDOSE_THRESHOLD = 5;
+
+    record SugarTier(
+            int speedAmplifier,
+            boolean haste,
+            int secondsPerBar,
+            boolean involuntaryLmb,
+            boolean involuntaryWalk,
+            double deathChance
+    ) {}
+
+    /**
+     * Градация эффектов сахара по количеству крупиц:
+     * 1..4: Скорость I на 1с за палочку затяжки;
+     * 5..8: Скорость I + Спешка I на 1с за палочку;
+     * 9..12: Скорость II + Спешка I на 1с за палочку + непроизвольные клики ЛКМ;
+     * 13..16: Скорость II + Спешка I на 2с за палочку + ЛКМ + спотыкания/ходьба;
+     * 17..23: Скорость II + Спешка I на 4с за палочку + ЛКМ + ходьба + 1% шанс мгновенной смерти от остановки сердца в тик;
+     * 24+: Скорость II + Спешка I на 4с за палочку + ЛКМ + ходьба + 5% шанс мгновенной смерти от остановки сердца в тик.
+     */
+    static SugarTier sugarTier(int sugar) {
+        if (sugar <= 0) {
+            return null;
+        }
+        if (sugar <= 4) {
+            return new SugarTier(0, false, 1, false, false, 0.0);
+        }
+        if (sugar <= 8) {
+            return new SugarTier(0, true, 1, false, false, 0.0);
+        }
+        if (sugar <= 12) {
+            return new SugarTier(1, true, 1, true, false, 0.0);
+        }
+        if (sugar <= 16) {
+            return new SugarTier(1, true, 2, true, true, 0.0);
+        }
+        if (sugar <= 23) {
+            return new SugarTier(1, true, 4, true, true, 0.01);
+        }
+        return new SugarTier(1, true, 4, true, true, 0.05);
+    }
 
     enum Variant {
         BIG("big", "sigareta-big", "sigareta-big-fire", RESERVE),
@@ -172,6 +220,11 @@ final class Cigarette implements Listener {
     /** Скользящие окна тяг: записи добавляются только при фактическом списании палочек. */
     private final Map<UUID, SmokingWindow> smokingWindows = new HashMap<>();
 
+    /** Активные эффекты и передозировки сахара. */
+    private final Map<UUID, SugarSession> sugarSessions = new HashMap<>();
+    private final Set<UUID> cardiacArrestVictims = new HashSet<>();
+    private BukkitTask sugarTicker;
+
     /** Зависимость: один отложенный переход на игрока, активные сообщения — общая задача. */
     private final Map<UUID, AddictionState> addictions = new HashMap<>();
     private final Set<UUID> warningPlayers = new HashSet<>();
@@ -183,6 +236,24 @@ final class Cigarette implements Listener {
     private record Puff(EquipmentSlot hand, int since, int capacity) { }
 
     private record SavedPotionEffect(PotionEffect effect, int capturedTick) { }
+
+    private static final class SugarSession {
+        private int remainingTicks;
+        private final boolean hasLmb;
+        private final boolean hasWalk;
+        private final double deathChance;
+        private int lmbCooldown;
+        private int walkCooldown;
+
+        SugarSession(int remainingTicks, boolean hasLmb, boolean hasWalk, double deathChance) {
+            this.remainingTicks = remainingTicks;
+            this.hasLmb = hasLmb;
+            this.hasWalk = hasWalk;
+            this.deathChance = deathChance;
+            this.lmbCooldown = ThreadLocalRandom.current().nextInt(15, 35);
+            this.walkCooldown = ThreadLocalRandom.current().nextInt(15, 30);
+        }
+    }
 
     private static final class AddictionState {
         /** 0 — отсчёт суток; 1..3 — стадии ломки. */
@@ -201,6 +272,7 @@ final class Cigarette implements Listener {
                 WITHDRAWAL_STAGE_TICKS);
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         ticker = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, PERIOD, PERIOD);
+        sugarTicker = Bukkit.getScheduler().runTaskTimer(plugin, this::tickSugar, 1L, 1L);
     }
 
     /** Выключение: гасим шкалу, дым и текущие тяги. */
@@ -209,6 +281,12 @@ final class Cigarette implements Listener {
             ticker.cancel();
             ticker = null;
         }
+        if (sugarTicker != null) {
+            sugarTicker.cancel();
+            sugarTicker = null;
+        }
+        sugarSessions.clear();
+        cardiacArrestVictims.clear();
         for (Smoke flow : smoke.values()) {
             flow.stop();
         }
@@ -288,16 +366,36 @@ final class Cigarette implements Listener {
 
     /** Создаёт сигарету с заданной начинкой пороха. Модель выбирается по количеству пороха. */
     static ItemStack createWithGunpowder(int gunpowder) {
-        Variant variant = variantForFilling(gunpowder);
-        return create(false, variant, gunpowder);
+        return createWithFilling(gunpowder, 0);
+    }
+
+    /** Создаёт сигарету с заданной начинкой сахара. */
+    static ItemStack createWithSugar(int sugar) {
+        return createWithFilling(0, sugar);
+    }
+
+    /** Создаёт сигарету с заданной начинкой пороха и сахара. Модель выбирается по суммарной начинке. */
+    static ItemStack createWithFilling(int gunpowder, int sugar) {
+        int total = gunpowder + sugar;
+        Variant variant = variantForFilling(total > 0 ? total : 1);
+        return create(false, variant, gunpowder, sugar);
     }
 
     static ItemStack create(boolean lit, Variant variant, int gunpowder) {
+        return create(lit, variant, gunpowder, 0);
+    }
+
+    static ItemStack create(boolean lit, Variant variant, int gunpowder, int sugar) {
         ItemStack item = create(lit, variant);
-        if (gunpowder > 0) {
+        if (gunpowder > 0 || sugar > 0) {
             ItemMeta meta = item.getItemMeta();
             if (meta != null) {
-                meta.getPersistentDataContainer().set(FILLING_GUNPOWDER, PersistentDataType.INTEGER, gunpowder);
+                if (gunpowder > 0) {
+                    meta.getPersistentDataContainer().set(FILLING_GUNPOWDER, PersistentDataType.INTEGER, gunpowder);
+                }
+                if (sugar > 0) {
+                    meta.getPersistentDataContainer().set(FILLING_SUGAR, PersistentDataType.INTEGER, sugar);
+                }
                 item.setItemMeta(meta);
             }
         }
@@ -310,6 +408,15 @@ final class Cigarette implements Listener {
             return 0;
         }
         Integer value = item.getItemMeta().getPersistentDataContainer().get(FILLING_GUNPOWDER, PersistentDataType.INTEGER);
+        return value == null ? 0 : Math.max(0, value);
+    }
+
+    /** Сколько сахара содержится в сигарете. */
+    static int sugarFilling(ItemStack item) {
+        if (!isCigarette(item)) {
+            return 0;
+        }
+        Integer value = item.getItemMeta().getPersistentDataContainer().get(FILLING_SUGAR, PersistentDataType.INTEGER);
         return value == null ? 0 : Math.max(0, value);
     }
 
@@ -536,7 +643,11 @@ final class Cigarette implements Listener {
             int gunpowder = gunpowderFilling(stored);
             if (gunpowder > 0) {
                 Location origin = block.getLocation().add(0.5, 0.5, 0.5).add(facing.clone().multiply(0.55));
-                block.getWorld().spawnParticle(Particle.EXPLOSION, origin, 1, 0.0D, 0.0D, 0.0D, 0.0D);
+                if (gunpowder >= GUNPOWDER_OVERDOSE_THRESHOLD) {
+                    block.getWorld().createExplosion(origin, 2.8F, false, true);
+                } else {
+                    block.getWorld().spawnParticle(Particle.EXPLOSION, origin, 1, 0.0D, 0.0D, 0.0D, 0.0D);
+                }
             }
             return true;
         }
@@ -546,7 +657,8 @@ final class Cigarette implements Listener {
     private static boolean sameCigaretteType(ItemStack first, ItemStack second) {
         return variant(first) == variant(second)
                 && isLit(first) == isLit(second)
-                && gunpowderFilling(first) == gunpowderFilling(second);
+                && gunpowderFilling(first) == gunpowderFilling(second)
+                && sugarFilling(first) == sugarFilling(second);
     }
 
     static int dropperBarsToSmoke(int available) {
@@ -722,6 +834,8 @@ final class Cigarette implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
+        sugarSessions.remove(id);
+        cardiacArrestVictims.remove(id);
         puffs.remove(id);
         stopInhaleSound(player);
         litAtTick.remove(id);
@@ -807,7 +921,20 @@ final class Cigarette implements Listener {
             }
             int left = bars(item);
             int capacity = puff.capacity();
-            int filled = barsFor(tick - puff.since(), left, capacity);
+            int heldTicks = tick - puff.since();
+            int filled = barsFor(heldTicks, left, capacity);
+
+            int gunpowder = gunpowderFilling(item);
+            if (gunpowder > 0 && heldTicks >= 4) {
+                // Шанс неожиданного срыва тяги при наличии пороха: першит/срывается и сразу начинается выдох/взрыв
+                double interruptChance = Math.min(0.20, 0.03 + gunpowder * 0.003);
+                if (ThreadLocalRandom.current().nextDouble() < interruptChance) {
+                    it.remove();
+                    finish(player, puff);
+                    continue;
+                }
+            }
+
             showGauge(player, filled, capacity);
         }
     }
@@ -860,10 +987,18 @@ final class Cigarette implements Listener {
         }
         int gunpowder = gunpowderFilling(item);
         if (gunpowder > 0) {
-            Location where = mouth(player);
-            player.getWorld().spawnParticle(Particle.EXPLOSION, where, 1, 0.0D, 0.0D, 0.0D, 0.0D);
-            player.playSound(where, Sound.ENTITY_GENERIC_EXPLODE, SoundCategory.PLAYERS, 0.6F, 1.4F);
-            player.damage(gunpowder * 1.0D);
+            if (gunpowder >= GUNPOWDER_OVERDOSE_THRESHOLD) {
+                player.getWorld().createExplosion(player.getLocation(), 2.8F, false, true);
+            } else {
+                Location where = mouth(player);
+                player.getWorld().spawnParticle(Particle.EXPLOSION, where, 1, 0.0D, 0.0D, 0.0D, 0.0D);
+                player.playSound(where, Sound.ENTITY_GENERIC_EXPLODE, SoundCategory.PLAYERS, 0.6F, 1.4F);
+                player.damage(gunpowder * 1.0D);
+            }
+        }
+        int sugar = sugarFilling(item);
+        if (sugar > 0) {
+            applySugarEffects(player, sugar, spent);
         }
         // Любая реальная затяжка начинает зависимость, если её ещё не было,
         // либо сбрасывает цикл после повторного курения.
@@ -876,6 +1011,119 @@ final class Cigarette implements Listener {
             return;
         }
         breakUp(player, hand);
+    }
+
+    void applySugarEffects(Player player, int sugar, int spent) {
+        SugarTier tier = sugarTier(sugar);
+        if (tier == null || spent <= 0) {
+            return;
+        }
+        int durationTicks = spent * tier.secondsPerBar() * 20;
+        player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, durationTicks, tier.speedAmplifier()), true);
+        if (tier.haste()) {
+            player.addPotionEffect(new PotionEffect(PotionEffectType.HASTE, durationTicks, 0), true);
+        }
+        UUID id = player.getUniqueId();
+        SugarSession existing = sugarSessions.get(id);
+        int totalRemaining = (existing != null) ? Math.max(existing.remainingTicks, durationTicks) : durationTicks;
+        boolean lmb = tier.involuntaryLmb() || (existing != null && existing.hasLmb);
+        boolean walk = tier.involuntaryWalk() || (existing != null && existing.hasWalk);
+        double deathChance = Math.max(tier.deathChance(), (existing != null) ? existing.deathChance : 0.0);
+
+        sugarSessions.put(id, new SugarSession(totalRemaining, lmb, walk, deathChance));
+    }
+
+    private void tickSugar() {
+        if (sugarSessions.isEmpty()) {
+            return;
+        }
+        for (Iterator<Map.Entry<UUID, SugarSession>> it = sugarSessions.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<UUID, SugarSession> entry = it.next();
+            UUID id = entry.getKey();
+            Player player = Bukkit.getPlayer(id);
+            if (player == null || !player.isOnline() || player.isDead()) {
+                it.remove();
+                continue;
+            }
+            SugarSession session = entry.getValue();
+            session.remainingTicks--;
+            if (session.remainingTicks <= 0) {
+                it.remove();
+                continue;
+            }
+
+            // Шанс мгновенной смерти от остановки сердца за тик (1% при 17-23, 5% при 24+)
+            if (session.deathChance > 0 && ThreadLocalRandom.current().nextDouble() < session.deathChance) {
+                it.remove();
+                triggerCardiacArrest(player);
+                continue;
+            }
+
+            if (player.getGameMode() == GameMode.SPECTATOR) {
+                continue;
+            }
+
+            // Непроизвольные клики ЛКМ / удары
+            if (session.hasLmb) {
+                session.lmbCooldown--;
+                if (session.lmbCooldown <= 0) {
+                    session.lmbCooldown = ThreadLocalRandom.current().nextInt(15, 40);
+                    performInvoluntaryPunch(player);
+                }
+            }
+
+            // Непроизвольная ходьба / спотыкания
+            if (session.hasWalk) {
+                session.walkCooldown--;
+                if (session.walkCooldown <= 0) {
+                    session.walkCooldown = ThreadLocalRandom.current().nextInt(15, 35);
+                    performInvoluntaryWalk(player);
+                }
+            }
+        }
+    }
+
+    private void performInvoluntaryPunch(Player player) {
+        player.swingMainHand();
+        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_ATTACK_NODAMAGE, SoundCategory.PLAYERS, 0.7F, 1.2F);
+        RayTraceResult result = player.getWorld().rayTraceEntities(
+                player.getEyeLocation(),
+                player.getLocation().getDirection(),
+                3.0,
+                0.5,
+                entity -> entity != player && entity instanceof LivingEntity
+        );
+        if (result != null && result.getHitEntity() instanceof LivingEntity target) {
+            player.attack(target);
+        }
+    }
+
+    private void performInvoluntaryWalk(Player player) {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        double angle = random.nextDouble(0, 2 * Math.PI);
+        double speed = random.nextDouble(0.2, 0.35);
+        Vector stumble = new Vector(Math.cos(angle) * speed, 0.05, Math.sin(angle) * speed);
+        player.setVelocity(player.getVelocity().add(stumble));
+    }
+
+    private void triggerCardiacArrest(Player player) {
+        cardiacArrestVictims.add(player.getUniqueId());
+        player.setHealth(0.0);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onPlayerDeath(PlayerDeathEvent event) {
+        Player player = event.getEntity();
+        if (cardiacArrestVictims.remove(player.getUniqueId())) {
+            Component msg = Component.text(player.getName() + " умер от остановки сердца");
+            event.deathMessage(msg);
+        }
+        sugarSessions.remove(player.getUniqueId());
+        Puff puff = puffs.remove(player.getUniqueId());
+        if (puff != null) {
+            stopInhaleSound(player);
+            player.sendActionBar(Component.empty());
+        }
     }
 
     /** Считает только реально потраченные палочки; нет фонового опроса или задачи на игрока. */
@@ -1181,12 +1429,13 @@ final class Cigarette implements Listener {
         }
         int remaining = bars(item);
         int gunpowder = gunpowderFilling(item);
+        int sugar = sugarFilling(item);
         ItemStack unlitRemainder = null;
         if (item.getAmount() > 1) {
             unlitRemainder = item.clone();
             unlitRemainder.setAmount(item.getAmount() - 1);
         }
-        ItemStack fired = create(true, variant(item), gunpowder);
+        ItemStack fired = create(true, variant(item), gunpowder, sugar);
         fired.setAmount(1);
         setBars(fired, remaining);
         setHandItem(player, hand, fired);

@@ -92,6 +92,16 @@ public final class Apvsh implements Listener {
     /** 5 слотов для наполнения во втором ряду (индексы 10..14). */
     public static final Set<Integer> FILLING_SLOTS = Set.of(10, 11, 12, 13, 14);
 
+    /** Разрешённые материалы для наполнения: порох и сахар. */
+    public static boolean isAllowedFilling(ItemStack item) {
+        if (item == null) return false;
+        return isAllowedFilling(item.getType());
+    }
+
+    public static boolean isAllowedFilling(Material material) {
+        return material == Material.GUNPOWDER || material == Material.SUGAR;
+    }
+
     /** Слот для наполняемого предмета (бумага) во втором ряду (индекс 16). */
     public static final int PAPER_SLOT = 16;
 
@@ -324,14 +334,19 @@ public final class Apvsh implements Listener {
         }
 
         int totalGunpowder = 0;
+        int totalSugar = 0;
         for (int s : FILLING_SLOTS) {
             ItemStack filling = inv.getItem(s);
-            if (filling != null && filling.getType() == Material.GUNPOWDER) {
-                totalGunpowder += filling.getAmount();
+            if (filling != null) {
+                if (filling.getType() == Material.GUNPOWDER) {
+                    totalGunpowder += filling.getAmount();
+                } else if (filling.getType() == Material.SUGAR) {
+                    totalSugar += filling.getAmount();
+                }
             }
         }
 
-        if (totalGunpowder <= 0) {
+        if (totalGunpowder <= 0 && totalSugar <= 0) {
             return false;
         }
 
@@ -342,13 +357,13 @@ public final class Apvsh implements Listener {
             inv.setItem(PAPER_SLOT, null);
         }
 
-        // 2. Расходуем весь порох из слотов наполнения
+        // 2. Расходуем всё наполнение из слотов наполнения
         for (int s : FILLING_SLOTS) {
             inv.setItem(s, null);
         }
 
-        // 3. Создаём готовую сигарету с порохом
-        ItemStack cigarette = Cigarette.createWithGunpowder(totalGunpowder);
+        // 3. Создаём готовую сигарету с начинкой
+        ItemStack cigarette = Cigarette.createWithFilling(totalGunpowder, totalSugar);
         inv.setItem(PAPER_SLOT, cigarette);
 
         // 4. Проигрываем звук удара наковальни
@@ -586,22 +601,22 @@ public final class Apvsh implements Listener {
             }
 
             if (FILLING_SLOTS.contains(rawSlot)) {
-                // В слоты для наполнения можно класть только порох (до 64 шт.)
+                // В слоты для наполнения можно класть только порох и сахар (до 64 шт.)
                 if (event.getClick() == ClickType.NUMBER_KEY) {
                     ItemStack hotbar = event.getWhoClicked().getInventory().getItem(event.getHotbarButton());
-                    if (hotbar != null && hotbar.getType() != Material.AIR && hotbar.getType() != Material.GUNPOWDER) {
+                    if (hotbar != null && hotbar.getType() != Material.AIR && !isAllowedFilling(hotbar)) {
                         event.setCancelled(true);
                         return;
                     }
                 } else if (event.getClick() == ClickType.SWAP_OFFHAND) {
                     ItemStack offhand = event.getWhoClicked().getInventory().getItemInOffHand();
-                    if (offhand != null && offhand.getType() != Material.AIR && offhand.getType() != Material.GUNPOWDER) {
+                    if (offhand != null && offhand.getType() != Material.AIR && !isAllowedFilling(offhand)) {
                         event.setCancelled(true);
                         return;
                     }
                 } else {
                     ItemStack cursor = event.getCursor();
-                    if (cursor != null && cursor.getType() != Material.AIR && cursor.getType() != Material.GUNPOWDER) {
+                    if (cursor != null && cursor.getType() != Material.AIR && !isAllowedFilling(cursor)) {
                         event.setCancelled(true);
                         return;
                     }
@@ -659,12 +674,13 @@ public final class Apvsh implements Listener {
                 }
                 event.setCancelled(true);
 
-                if (clicked.getType() == Material.GUNPOWDER) {
+                if (isAllowedFilling(clicked)) {
+                    Material fillingType = clicked.getType();
                     int toAdd = clicked.getAmount();
-                    // 1 проход: складываем в уже существующие неполные стопки пороха
+                    // 1 проход: складываем в уже существующие неполные стопки того же материала
                     for (int s : FILLING_SLOTS) {
                         ItemStack existing = top.getItem(s);
-                        if (existing != null && existing.getType() == Material.GUNPOWDER) {
+                        if (existing != null && existing.getType() == fillingType) {
                             int space = 64 - existing.getAmount();
                             if (space > 0) {
                                 int add = Math.min(space, toAdd);
@@ -738,7 +754,7 @@ public final class Apvsh implements Listener {
                 }
                 if (FILLING_SLOTS.contains(rawSlot)) {
                     ItemStack dragged = event.getOldCursor();
-                    if (dragged == null || dragged.getType() != Material.GUNPOWDER) {
+                    if (dragged == null || !isAllowedFilling(dragged)) {
                         event.setCancelled(true);
                         return;
                     }

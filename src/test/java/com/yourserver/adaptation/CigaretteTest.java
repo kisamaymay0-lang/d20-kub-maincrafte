@@ -213,4 +213,22 @@ final class CigaretteTest {
             collectBars(child, found);
         }
     }
+
+    @Test
+    void длительностьЭффектовСахараМасштабируетсяОтПалочекЗатяжки() {
+        // 1-4 сахар: 1с за палочку (20 тиков за палочку)
+        Cigarette.SugarTier tier1 = Cigarette.sugarTier(3);
+        assertEquals(20, 1 * tier1.secondsPerBar() * 20);
+        assertEquals(16 * 20, 16 * tier1.secondsPerBar() * 20);
+
+        // 13-16 сахар: 2с за палочку (40 тиков за палочку)
+        Cigarette.SugarTier tier14 = Cigarette.sugarTier(14);
+        assertEquals(40, 1 * tier14.secondsPerBar() * 20);
+        assertEquals(16 * 40, 16 * tier14.secondsPerBar() * 20);
+
+        // 17+ сахар: 4с за палочку (80 тиков за палочку)
+        Cigarette.SugarTier tier20 = Cigarette.sugarTier(20);
+        assertEquals(80, 1 * tier20.secondsPerBar() * 20);
+        assertEquals(16 * 80, 16 * tier20.secondsPerBar() * 20);
+    }
 }
