@@ -52,6 +52,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
     private Apvsh apvsh;
+    private Shaker shaker;
     /** Сигарета из /f8: тикает шкалу тяги и дым, поэтому нужен доступ на выключении. */
     private Cigarette cigarette;
     /** Политые кораллы: список живёт в файле, поэтому нужен доступ на выключении. */
@@ -144,6 +145,11 @@ public void onEnable() {
 
     // Сигарета: слушает клики сама, поэтому registerEvents внутри конструктора.
     cigarette = new Cigarette(this);
+
+    // Шейкер — инструмент для смешивания напитков и коктейлей.
+    shaker = new Shaker(this);
+    getServer().getPluginManager().registerEvents(shaker, this);
+    shaker.registerRecipe();
 
     // Миниигра особого предмета биома: вылавливается вместо обычной рыбы.
     specialCatch = new SpecialCatch(this, ancientJug, winterFishing);
@@ -1434,5 +1440,9 @@ public void onEnable() {
 
     public Apvsh getApvsh() {
         return apvsh;
+    }
+
+    public Shaker getShaker() {
+        return shaker;
     }
 }
