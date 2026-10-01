@@ -3,6 +3,7 @@ package com.yourserver.adaptation;
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
@@ -56,16 +57,21 @@ import java.util.UUID;
  * <ul>
  *   <li><b>Добавление ингредиентов:</b> Шейкер в главной руке, предмет во второй
  *       руке + Shift + ПКМ — добавляет 1 штуку предмета в шейкер (максимум 5 слотов, по 1 шт).
- *       При добавлении жидкостей (бутылочки мёда, воды или зелий) пустая стеклянная бутылочка
- *       не расходуется, а остаётся у игрока во второй руке.</li>
+ *       При добавлении жидкостей (бутылочки мёда, воды или зелий) бутылочка опустошается
+ *       и пустая стеклянная бутылочка остаётся у игрока во второй руке.</li>
+ *   <li><b>Готовый напиток как материал:</b> При взбивании напиток остаётся внутри шейкера
+ *       как один из предметов-материалов, занимая слот; игрок может добавлять ещё ресурсы,
+ *       не выливая напиток сразу.</li>
  *   <li><b>Извлечение ингредиентов:</b> Шейкер в главной руке, пустая вторая рука + Shift + ПКМ —
- *       извлекает последний добавленный предмет напрямую в инвентарь игрока.</li>
+ *       извлекает твёрдый предмет напрямую в инвентарь игрока.
+ *       Если игрок пытается забрать жидкость без пустой бутылочки, выводится сообщение
+ *       <b>«Нужна бутылочка!»</b>.</li>
  *   <li><b>Смешивание:</b> Быстрые и непрерывные движения камерой вверх-вниз с шейкером в руке.
  *       Требует 16 взмахов практически без пауз (таймаут между взмахами ~0.35с), что исключает
  *       случайное взбивание при строительстве или ходьбе.
  *       По окончании на клиенте вылетают зелёные частицы и звучит победный сигнал.</li>
- *   <li><b>Забор напитка:</b> Пустая стеклянная бутылочка во второй руке + ПКМ забирает
- *       готовый напиток.</li>
+ *   <li><b>Забор напитка:</b> Пустая стеклянная бутылочка во второй руке + ПКМ переливает
+ *       жидкость в бутылочку.</li>
  * </ul>
  *
  * <h2>Рецепты</h2>
@@ -90,8 +96,6 @@ public class Shaker implements Listener {
 
     public static final NamespacedKey SHAKER_KEY = new NamespacedKey("adaptation", "shaker");
     public static final NamespacedKey CONTENTS_KEY = new NamespacedKey("adaptation", "shaker_contents");
-    public static final NamespacedKey MIXED_KEY = new NamespacedKey("adaptation", "shaker_mixed");
-    public static final NamespacedKey DRINK_KEY = new NamespacedKey("adaptation", "shaker_drink");
     public static final NamespacedKey DRINK_PDC_KEY = new NamespacedKey("adaptation", "shaker_drink_type");
 
     public static final String RECIPE_MEAD = "mead";
@@ -114,7 +118,7 @@ public class Shaker implements Listener {
             item.setData(DataComponentTypes.MAX_STACK_SIZE, 1);
         } catch (Throwable ignored) {
         }
-        updateMeta(item, new ArrayList<>(), false, null);
+        updateMeta(item, new ArrayList<>());
         return item;
     }
 
@@ -128,20 +132,23 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Проверка, смешано ли уже содержимое шейкера в готовый напиток.
+     * Проверка, есть ли внутри шейкера готовый смешанный напиток.
      */
     public static boolean isMixed(ItemStack item) {
         if (!isShaker(item)) return false;
-        Byte b = item.getItemMeta().getPersistentDataContainer().get(MIXED_KEY, PersistentDataType.BYTE);
-        return b != null && b == (byte) 1;
+        List<ItemStack> contents = getContents(item);
+        return findDrinkIndex(contents) != -1;
     }
 
     /**
-     * Получить тип напитка в смешанном шейкере.
+     * Получить тип первого готового напитка в шейкере.
      */
     public static String getDrink(ItemStack item) {
-        if (!isMixed(item)) return null;
-        return item.getItemMeta().getPersistentDataContainer().get(DRINK_KEY, PersistentDataType.STRING);
+        if (!isShaker(item)) return null;
+        List<ItemStack> contents = getContents(item);
+        int idx = findDrinkIndex(contents);
+        if (idx == -1) return null;
+        return contents.get(idx).getItemMeta().getPersistentDataContainer().get(DRINK_PDC_KEY, PersistentDataType.STRING);
     }
 
     /**
@@ -154,9 +161,10 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Обновить мета-данные шейкера (PDC, имя, модель, подсказку с содержимым).
+     * Обновить мета-данные шейкера (PDC, имя, модель, список содержимого).
+     * Не добавляет тёмно-серых подсказок в конце описания.
      */
-    public static void updateMeta(ItemStack item, List<ItemStack> contents, boolean mixed, String drink) {
+    public static void updateMeta(ItemStack item, List<ItemStack> contents) {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
 
@@ -166,51 +174,52 @@ public class Shaker implements Listener {
         PersistentDataContainer pdc = meta.getPersistentDataContainer();
         pdc.set(SHAKER_KEY, PersistentDataType.BYTE, (byte) 1);
 
-        if (mixed && drink != null) {
-            pdc.set(MIXED_KEY, PersistentDataType.BYTE, (byte) 1);
-            pdc.set(DRINK_KEY, PersistentDataType.STRING, drink);
-            pdc.remove(CONTENTS_KEY);
+        if (contents != null && !contents.isEmpty()) {
+            pdc.set(CONTENTS_KEY, PersistentDataType.BYTE_ARRAY, serializeItemList(contents));
         } else {
-            pdc.remove(MIXED_KEY);
-            pdc.remove(DRINK_KEY);
-            if (contents != null && !contents.isEmpty()) {
-                pdc.set(CONTENTS_KEY, PersistentDataType.BYTE_ARRAY, serializeItemList(contents));
-            } else {
-                pdc.remove(CONTENTS_KEY);
-            }
+            pdc.remove(CONTENTS_KEY);
         }
 
         List<Component> lore = new ArrayList<>();
-        if (mixed && drink != null) {
-            lore.add(Component.text("Готовый напиток:", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-            switch (drink) {
-                case RECIPE_MEAD -> lore.add(Component.text("• Медовуха", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
-                case RECIPE_DAIQUIRI -> lore.add(Component.text("• Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
-                default -> lore.add(Component.text("• Муть", NamedTextColor.DARK_GREEN).decoration(TextDecoration.ITALIC, false));
-            }
-            lore.add(Component.empty());
-            lore.add(Component.text("Возьмите пустую бутылочку во вторую руку", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
-            lore.add(Component.text("и нажмите ПКМ, чтобы забрать напиток.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
+        int count = contents == null ? 0 : contents.size();
+        if (count == 0) {
+            lore.add(Component.text("Пустой шейкер (0/" + MAX_SLOTS + ")", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
         } else {
-            int count = contents == null ? 0 : contents.size();
-            if (count == 0) {
-                lore.add(Component.text("Пустой шейкер (0/" + MAX_SLOTS + ")", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-                lore.add(Component.empty());
-                lore.add(Component.text("Положите ингредиент во вторую руку", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
-                lore.add(Component.text("и нажмите Shift + ПКМ, чтобы добавить.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
-            } else {
-                lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-                for (ItemStack ingredient : contents) {
-                    lore.add(Component.text("• " + getItemDisplayName(ingredient), NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
-                }
+            lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+            for (ItemStack ingredient : contents) {
+                lore.add(Component.text("• " + getItemDisplayName(ingredient), getItemColor(ingredient)).decoration(TextDecoration.ITALIC, false));
+            }
+            if (canShake(contents)) {
                 lore.add(Component.empty());
                 lore.add(Component.text("Трясите камеру вверх-вниз для смешивания.", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
-                lore.add(Component.text("Shift + ПКМ с пустой рукой — забрать в инвентарь.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
             }
         }
 
         meta.lore(lore);
         item.setItemMeta(meta);
+    }
+
+    /**
+     * Перегрузка для совместимости.
+     */
+    public static void updateMeta(ItemStack item, List<ItemStack> contents, boolean mixed, String drink) {
+        updateMeta(item, contents);
+    }
+
+    /**
+     * Цвет названия предмета/напитка в подсказке шейкера.
+     */
+    public static TextColor getItemColor(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return NamedTextColor.WHITE;
+        String drink = item.getItemMeta().getPersistentDataContainer().get(DRINK_PDC_KEY, PersistentDataType.STRING);
+        if (drink != null) {
+            return switch (drink) {
+                case RECIPE_MEAD -> NamedTextColor.GOLD;
+                case RECIPE_DAIQUIRI -> NamedTextColor.AQUA;
+                default -> NamedTextColor.DARK_GREEN;
+            };
+        }
+        return NamedTextColor.WHITE;
     }
 
     /**
@@ -286,6 +295,61 @@ public class Shaker implements Listener {
         return item != null && isBottledLiquid(item.getType());
     }
 
+    /**
+     * Является ли предмет жидкостью (готовый напиток, зелье, вода или мёд),
+     * для забора которой нужна стеклянная бутылочка.
+     */
+    public static boolean isLiquid(ItemStack item) {
+        if (item == null) return false;
+        if (item.hasItemMeta() && item.getItemMeta().getPersistentDataContainer().has(DRINK_PDC_KEY)) {
+            return true;
+        }
+        Material m = item.getType();
+        return m == Material.HONEY_BOTTLE || m == Material.POTION || m == Material.DRAGON_BREATH;
+    }
+
+    /**
+     * Проверка, является ли предмет готовым напитком шейкера.
+     */
+    public static boolean isDrink(ItemStack item) {
+        return item != null && item.hasItemMeta() && item.getItemMeta().getPersistentDataContainer().has(DRINK_PDC_KEY);
+    }
+
+    /**
+     * Можно ли взбивать текущее содержимое шейкера (есть ли несмешанные ингредиенты).
+     */
+    public static boolean canShake(List<ItemStack> contents) {
+        if (contents == null || contents.isEmpty()) return false;
+        if (contents.size() == 1 && isDrink(contents.get(0))) return false;
+        return true;
+    }
+
+    /**
+     * Поиск индекса жидкости внутри списка предметов шейкера (с конца).
+     */
+    public static int findLiquidIndex(List<ItemStack> contents) {
+        if (contents == null || contents.isEmpty()) return -1;
+        for (int i = contents.size() - 1; i >= 0; i--) {
+            if (isLiquid(contents.get(i))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Поиск индекса готового напитка шейкера (с конца).
+     */
+    public static int findDrinkIndex(List<ItemStack> contents) {
+        if (contents == null || contents.isEmpty()) return -1;
+        for (int i = contents.size() - 1; i >= 0; i--) {
+            if (isDrink(contents.get(i))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     public enum IngredientKind {
         HONEY_BOTTLE,
         WATER_BOTTLE,
@@ -297,6 +361,7 @@ public class Shaker implements Listener {
 
     public static IngredientKind classifyIngredient(ItemStack item) {
         if (item == null) return IngredientKind.OTHER;
+        if (isDrink(item)) return IngredientKind.OTHER;
         if (WaterBottle.isWaterBottle(item)) return IngredientKind.WATER_BOTTLE;
         if (item.getType() == Material.HONEY_BOTTLE) return IngredientKind.HONEY_BOTTLE;
         if (item.getType() == Material.SUGAR) return IngredientKind.SUGAR;
@@ -408,7 +473,7 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Взаимодействие с шейкером: добавление ингредиентов, извлечение в инвентарь, забор готового напитка.
+     * Взаимодействие с шейкером: добавление ингредиентов, извлечение в инвентарь, забор жидкости в бутылочку.
      */
     @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerInteract(PlayerInteractEvent event) {
@@ -430,57 +495,42 @@ public class Shaker implements Listener {
         ItemStack offHand = player.getInventory().getItemInOffHand();
         boolean hasOffItem = offHand != null && offHand.getType() != Material.AIR;
         boolean sneaking = player.isSneaking();
-        boolean mixed = isMixed(shaker);
+        List<ItemStack> contents = getContents(shaker);
 
-        // Случай 1: шейкер смешан -> забор напитка в пустую бутылочку
-        if (mixed) {
-            if (hasOffItem && offHand.getType() == Material.GLASS_BOTTLE) {
+        // Случай 1: игрок держит пустую бутылочку во второй (левой) руке — сбор жидкости
+        if (hasOffItem && offHand.getType() == Material.GLASS_BOTTLE) {
+            int liquidIdx = findLiquidIndex(contents);
+            if (liquidIdx != -1) {
                 event.setCancelled(true);
                 event.setUseInteractedBlock(Event.Result.DENY);
                 event.setUseItemInHand(Event.Result.DENY);
 
-                String drinkType = getDrink(shaker);
-                ItemStack drink = createDrinkItem(drinkType);
+                ItemStack liquidItem = contents.remove(liquidIdx);
 
-                // Расходуем 1 бутылочку из второй руки
                 if (offHand.getAmount() > 1) {
                     offHand.setAmount(offHand.getAmount() - 1);
                     player.getInventory().setItemInOffHand(offHand);
-                    giveOrDrop(player, drink);
+                    giveOrDrop(player, liquidItem);
                 } else {
-                    player.getInventory().setItemInOffHand(drink);
+                    player.getInventory().setItemInOffHand(liquidItem);
                 }
 
-                // Очищаем шейкер
-                updateMeta(shaker, new ArrayList<>(), false, null);
+                updateMeta(shaker, contents);
                 player.getInventory().setItemInMainHand(shaker);
 
                 player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_FILL, SoundCategory.PLAYERS, 0.7F, 1.1F);
-                player.sendActionBar(Component.text("Вы забрали напиток из шейкера!", NamedTextColor.GREEN));
                 return;
             }
-
-            if (sneaking) {
-                event.setCancelled(true);
-                event.setUseInteractedBlock(Event.Result.DENY);
-                event.setUseItemInHand(Event.Result.DENY);
-                player.sendActionBar(Component.text("Возьмите пустую бутылочку во вторую руку, чтобы забрать напиток!", NamedTextColor.RED));
-                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
-                return;
-            }
-            return;
         }
 
-        // Случай 2: шейкер не смешан -> Shift + ПКМ действия
+        // Случай 2: Shift + ПКМ действия
         if (sneaking) {
             event.setCancelled(true);
             event.setUseInteractedBlock(Event.Result.DENY);
             event.setUseItemInHand(Event.Result.DENY);
 
-            List<ItemStack> contents = getContents(shaker);
-
             if (hasOffItem) {
-                // Добавление предмета из второй руки
+                // Добавление предмета из второй руки в шейкер
                 if (isShaker(offHand)) {
                     player.sendActionBar(Component.text("Нельзя положить шейкер в шейкер!", NamedTextColor.RED));
                     player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
@@ -493,14 +543,13 @@ public class Shaker implements Listener {
                     return;
                 }
 
-                // Берём 1 штуку из второй руки
                 ItemStack inserted = offHand.clone();
                 inserted.setAmount(1);
                 contents.add(inserted);
 
                 boolean liquid = isBottledLiquid(offHand);
                 if (liquid) {
-                    // При наливании жидкости бутылочка остаётся у игрока во второй руке
+                    // При наливании жидкости опустошается бутылка и остаётся во второй руке
                     ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
                     if (offHand.getAmount() > 1) {
                         offHand.setAmount(offHand.getAmount() - 1);
@@ -520,26 +569,49 @@ public class Shaker implements Listener {
                     player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.6F, 1.1F);
                 }
 
-                updateMeta(shaker, contents, false, null);
+                updateMeta(shaker, contents);
                 player.getInventory().setItemInMainHand(shaker);
 
                 player.sendActionBar(Component.text("Добавлено: " + getItemDisplayName(inserted) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
+                return;
             } else {
-                // Извлечение последнего предмета напрямую в инвентарь игрока
+                // Вторая рука пуста: попытка извлечь предмет
                 if (contents.isEmpty()) {
                     player.sendActionBar(Component.text("Шейкер пуст!", NamedTextColor.GRAY));
                     player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
                     return;
                 }
 
+                ItemStack topItem = contents.get(contents.size() - 1);
+                if (isLiquid(topItem)) {
+                    // Для сбора жидкости нужна пустая бутылочка во второй (левой) руке
+                    player.sendActionBar(Component.text("Нужна бутылочка!", NamedTextColor.RED));
+                    player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                    return;
+                }
+
+                // Извлечение твёрдого предмета напрямую в инвентарь игрока
                 ItemStack removed = contents.remove(contents.size() - 1);
                 giveOrDrop(player, removed);
 
-                updateMeta(shaker, contents, false, null);
+                updateMeta(shaker, contents);
                 player.getInventory().setItemInMainHand(shaker);
 
                 player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_REMOVE_ONE, SoundCategory.PLAYERS, 0.6F, 1.1F);
                 player.sendActionBar(Component.text("Извлечено в инвентарь: " + getItemDisplayName(removed) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
+                return;
+            }
+        }
+
+        // Случай 3: ПКМ без Shift с пустой второй рукой при наличии жидкости в шейкере
+        if (!hasOffItem) {
+            int liquidIdx = findLiquidIndex(contents);
+            if (liquidIdx != -1) {
+                event.setCancelled(true);
+                event.setUseInteractedBlock(Event.Result.DENY);
+                event.setUseItemInHand(Event.Result.DENY);
+                player.sendActionBar(Component.text("Нужна бутылочка!", NamedTextColor.RED));
+                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
             }
         }
     }
@@ -570,12 +642,12 @@ public class Shaker implements Listener {
 
         Player player = event.getPlayer();
         ItemStack mainHand = player.getInventory().getItemInMainHand();
-        if (!isShaker(mainHand) || isMixed(mainHand)) {
+        if (!isShaker(mainHand)) {
             return;
         }
 
         List<ItemStack> contents = getContents(mainHand);
-        if (contents.isEmpty()) {
+        if (!canShake(contents)) {
             return;
         }
 
@@ -609,13 +681,9 @@ public class Shaker implements Listener {
                 tracker.strokeCount++;
                 tracker.lastStrokeTick = now;
 
-                // Звук взбалтывания с повышением тона
+                // Звук взбалтывания с повышением тона (без надписей в action bar)
                 float pitch = 0.9F + (tracker.strokeCount / (float) REQUIRED_STROKES) * 0.7F;
                 player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.5F, pitch);
-
-                // Визуальный индикатор в action bar
-                int percent = (tracker.strokeCount * 100) / REQUIRED_STROKES;
-                player.sendActionBar(Component.text("Взбивание: " + percent + "%", NamedTextColor.YELLOW));
 
                 // Порог: 16 непрерывных взмахов (8 полных циклов вверх-вниз)
                 if (tracker.strokeCount >= REQUIRED_STROKES) {
@@ -637,12 +705,17 @@ public class Shaker implements Listener {
 
     private void finishMixing(Player player, ItemStack shaker) {
         List<ItemStack> contents = getContents(shaker);
-        if (contents.isEmpty() || isMixed(shaker)) {
+        if (!canShake(contents)) {
             return;
         }
 
         String drink = matchRecipe(contents);
-        updateMeta(shaker, contents, true, drink);
+        ItemStack drinkItem = createDrinkItem(drink);
+
+        // Готовый напиток остаётся внутри шейкера как материал, занимая 1 слот
+        contents.clear();
+        contents.add(drinkItem);
+        updateMeta(shaker, contents);
         player.getInventory().setItemInMainHand(shaker);
 
         // Зелёные частицы на клиенте игрока

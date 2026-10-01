@@ -149,6 +149,10 @@ final class ShakerTest {
     void пустойСоставНеСмешивается() {
         assertNull(Shaker.matchRecipeFromKinds(null));
         assertNull(Shaker.matchRecipeFromKinds(List.of()));
+        assertFalse(Shaker.canShake(null));
+        assertFalse(Shaker.canShake(List.of()));
+        assertEquals(-1, Shaker.findLiquidIndex(null));
+        assertEquals(-1, Shaker.findLiquidIndex(List.of()));
     }
 
     @Test
