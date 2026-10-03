@@ -1,0 +1,39 @@
+# АПВШ — аппарат для создания и наполнения сигарет и другого.
+# Кастомный блок CraftEngine.
+#
+# Куда положить: в ВАШ пак, который уже стоит в CraftEngine —
+#   plugins/CraftEngine/resources/<имя вашего пака>/configuration/blocks/apvsh.yml
+# CraftEngine читает конфиги только из паков (resources/<имя>/configuration/,
+# рекурсивно по подпапкам). Рядом в паке должен быть pack.yml с
+#   namespace: f8resurs
+# Дальше — /ce reload all.
+#
+# Модель и текстура блока: copper_note_block.json (f8resurs:block/copper_note_block),
+# она уже есть в ресурспаке f8resurs.
+# state.auto_state: solid — модель copper_note_block это обычный cube_all,
+# глухой куб, проводит редстоун для срабатывания от сигнала.
+
+blocks:
+
+  f8resurs:apvsh:
+    state:
+      auto_state: solid
+      model:
+        path: "f8resurs:block/copper_note_block"
+    settings:
+      hardness: 0.8
+      resistance: 0.8
+      replaceable: false
+      is_suffocating: true
+      is_view_blocking: true
+      is_redstone_conductor: true
+      can_occlude: true
+      propagate_skylight: false
+      tags:
+        - minecraft:mineable/axe
+      sounds:
+        break: minecraft:block.copper.break
+        step: minecraft:block.copper.step
+        place: minecraft:block.copper.place
+        hit: minecraft:block.copper.hit
+        fall: minecraft:block.copper.fall
