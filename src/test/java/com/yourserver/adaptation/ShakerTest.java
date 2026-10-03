@@ -166,4 +166,31 @@ final class ShakerTest {
         assertTrue(Shaker.deserializeItemList(null).isEmpty());
         assertTrue(Shaker.deserializeItemList(new byte[0]).isEmpty());
     }
+
+    @Test
+    void запрещеныЛюбыеБлокиКромеЛюбогоЛьда() {
+        // Разрешены любые виды льда
+        assertTrue(Shaker.isAllowedIngredient(Material.ICE));
+        assertTrue(Shaker.isAllowedIngredient(Material.PACKED_ICE));
+        assertTrue(Shaker.isAllowedIngredient(Material.BLUE_ICE));
+        assertTrue(Shaker.isAllowedIngredient(Material.FROSTED_ICE));
+
+        // Разрешены не-блочные предметы (ингредиенты)
+        assertTrue(Shaker.isAllowedIngredient(Material.SUGAR));
+        assertTrue(Shaker.isAllowedIngredient(Material.SWEET_BERRIES));
+        assertTrue(Shaker.isAllowedIngredient(Material.HONEY_BOTTLE));
+        assertTrue(Shaker.isAllowedIngredient(Material.POTION));
+        assertTrue(Shaker.isAllowedIngredient(Material.APPLE));
+
+        // Запрещены блоки (камни, земля, дерево, обсидиан и т.д.)
+        assertFalse(Shaker.isAllowedIngredient(Material.STONE));
+        assertFalse(Shaker.isAllowedIngredient(Material.DIRT));
+        assertFalse(Shaker.isAllowedIngredient(Material.OAK_PLANKS));
+        assertFalse(Shaker.isAllowedIngredient(Material.COBBLESTONE));
+        assertFalse(Shaker.isAllowedIngredient(Material.OBSIDIAN));
+
+        // Null и воздух запрещены
+        assertFalse(Shaker.isAllowedIngredient((Material) null));
+        assertFalse(Shaker.isAllowedIngredient(Material.AIR));
+    }
 }
