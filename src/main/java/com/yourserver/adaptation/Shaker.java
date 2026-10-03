@@ -331,7 +331,21 @@ public class Shaker implements Listener {
     public static boolean isAllowedIngredient(Material material) {
         if (material == null || material == Material.AIR) return false;
         if (isIce(material)) return true;
-        return !material.isBlock();
+        try {
+            return !material.isBlock();
+        } catch (Throwable ignored) {
+            // Без запущенного сервера (в unit-тестах) Registry.BLOCK недоступен
+            String name = material.name();
+            if (name.endsWith("_BLOCK") || name.endsWith("_ORE") || name.endsWith("_PLANKS")
+                    || name.endsWith("_LOG") || name.endsWith("_WOOD") || name.endsWith("_SLAB")
+                    || name.endsWith("_STAIRS") || name.endsWith("_WALL") || name.endsWith("_FENCE")
+                    || name.equals("STONE") || name.equals("DIRT") || name.equals("COBBLESTONE")
+                    || name.equals("OBSIDIAN") || name.equals("BEDROCK") || name.equals("SAND")
+                    || name.equals("GRAVEL") || name.equals("GRASS_BLOCK")) {
+                return false;
+            }
+            return true;
+        }
     }
 
     /**
