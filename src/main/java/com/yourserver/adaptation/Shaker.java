@@ -21,7 +21,6 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
@@ -58,15 +57,17 @@ import java.util.UUID;
  *   <li><b>Открытие/закрытие:</b> Shift + ПКМ без предмета во второй руке переключает состояние.</li>
  *   <li><b>Добавление предметов:</b> Shift + ПКМ предметом в свободной руке кладёт его в открытый шейкер.
  *       Запрещены любые блоки, кроме любого льда. При запрете проигрывается тихий звук без сообщений.
- *       При добавлении жидкостей пустая стеклянная бутылочка остаётся у игрока.</li>
+ *       При добавлении жидкостей из бутылочки пустая стеклянная бутылочка остаётся у игрока.
+ *       При добавлении жидкостей из ведра (молоко, вода) пустое ведро остаётся у игрока.</li>
  *   <li><b>Готовый напиток как материал:</b> Напиток остаётся внутри шейкера как материал,
  *       и в шейкер можно продолжать докладывать ингредиенты без предварительного извлечения.</li>
  *   <li><b>Извлечение предметов:</b> Твёрдые предметы из открытого шейкера извлекаются через
- *       Shift + ЛКМ напрямую в инвентарь игрока. Для забора жидкости нужна пустая бутылочка
- *       в руке (ПКМ), иначе выводится «Нужна бутылочка!».</li>
+ *       Shift + ЛКМ напрямую в инвентарь игрока. Для забора бутилированной жидкости нужна пустая бутылочка
+ *       в руке (ПКМ), для забора ведровой жидкости — пустое ведро (ПКМ).</li>
  *   <li><b>Взбивание с открытым шейкером:</b> С открытым шейкером нельзя смешивать напитки.
- *       Первые 4 взмаха идут вхолостую, а затем каждые 2 взмаха из шейкера вылетает 1 предмет
- *       (выпадает из игрока со звуком подбирания предметов Sound.ENTITY_ITEM_PICKUP).
+ *       Первые 4 взмаха идут вхолостую. Начиная с 6-го взмаха каждые 2 взмаха из шейкера вылетает
+ *       или выливается 1 предмет: жидкости выливаются всплеском капель без выпадения предметом,
+ *       а твёрдые предметы вылетают наружу со звуком Sound.ENTITY_ITEM_PICKUP.
  *       Смешивание рецепта происходит только при закрытом шейкере (16 непрерывных взмахов).</li>
  * </ul>
  */
@@ -81,6 +82,7 @@ public class Shaker implements Listener {
     public static final String MODEL_CLOSE = "sheiker_close";
     public static final NamespacedKey MODEL_OPEN_KEY = new NamespacedKey("f8resurs", MODEL_OPEN);
     public static final NamespacedKey MODEL_CLOSE_KEY = new NamespacedKey("f8resurs", MODEL_CLOSE);
+    public static final NamespacedKey MODEL_ICED_LATTE_KEY = new NamespacedKey("f8resurs", "iced_latte");
     public static final NamespacedKey MODEL_KEY = MODEL_OPEN_KEY;
     public static final String MODEL_NAME = MODEL_OPEN;
 
@@ -91,6 +93,7 @@ public class Shaker implements Listener {
 
     public static final String RECIPE_MEAD = "mead";
     public static final String RECIPE_DAIQUIRI = "daiquiri";
+    public static final String RECIPE_ICED_LATTE = "iced_latte";
     public static final String RECIPE_MURK = "murk";
 
     private final Plugin plugin;
@@ -228,6 +231,7 @@ public class Shaker implements Listener {
             return switch (drink) {
                 case RECIPE_MEAD -> NamedTextColor.GOLD;
                 case RECIPE_DAIQUIRI -> NamedTextColor.AQUA;
+                case RECIPE_ICED_LATTE -> TextColor.color(0xE8, 0xC4, 0x99);
                 default -> NamedTextColor.DARK_GREEN;
             };
         }
@@ -265,6 +269,11 @@ public class Shaker implements Listener {
             case BLUE_ICE -> "Синий лёд";
             case FROSTED_ICE -> "Талый лёд";
             case GLASS_BOTTLE -> "Стеклянная бутылочка";
+            case COCOA_BEANS -> "Какао-бобы";
+            case MILK_BUCKET -> "Ведро молока";
+            case WATER_BUCKET -> "Ведро воды";
+            case LAVA_BUCKET -> "Ведро лавы";
+            case BUCKET -> "Ведро";
             default -> formatMaterialName(mat);
         };
     }
@@ -276,7 +285,7 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Проверка, является ли предмет бутилированной жидкостью, оставляющей пустую бутылочку.
+     * Проверка, является ли предмет бутилированной жидкостью, оставляющей пустую стеклянную бутылочку.
      */
     public static boolean isBottledLiquid(Material type) {
         if (type == null) return false;
@@ -292,11 +301,26 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Проверка, является ли предмет жидкостью (готовый напиток, мёд, зелье/вода).
+     * Проверка, является ли предмет ведровой жидкостью, оставляющей пустое ведро.
+     */
+    public static boolean isBucketLiquid(Material type) {
+        if (type == null) return false;
+        return type == Material.MILK_BUCKET
+                || type == Material.WATER_BUCKET
+                || type == Material.LAVA_BUCKET;
+    }
+
+    public static boolean isBucketLiquid(ItemStack item) {
+        return item != null && isBucketLiquid(item.getType());
+    }
+
+    /**
+     * Проверка, является ли предмет жидкостью (готовый напиток, мёд, зелье/вода, ведро молока/воды).
      */
     public static boolean isLiquid(ItemStack item) {
         if (item == null) return false;
         if (isDrink(item)) return true;
+        if (isBucketLiquid(item)) return true;
         return isBottledLiquid(item.getType());
     }
 
@@ -367,12 +391,39 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Поиск индекса жидкости внутри списка предметов шейкера (с конца).
+     * Поиск индекса любой жидкости внутри списка предметов шейкера (с конца).
      */
     public static int findLiquidIndex(List<ItemStack> contents) {
         if (contents == null || contents.isEmpty()) return -1;
         for (int i = contents.size() - 1; i >= 0; i--) {
             if (isLiquid(contents.get(i))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Поиск индекса ведровой жидкости внутри списка предметов шейкера (с конца).
+     */
+    public static int findBucketLiquidIndex(List<ItemStack> contents) {
+        if (contents == null || contents.isEmpty()) return -1;
+        for (int i = contents.size() - 1; i >= 0; i--) {
+            if (isBucketLiquid(contents.get(i))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Поиск индекса бутилированной жидкости или готового напитка шейкера (с конца).
+     */
+    public static int findBottledLiquidOrDrinkIndex(List<ItemStack> contents) {
+        if (contents == null || contents.isEmpty()) return -1;
+        for (int i = contents.size() - 1; i >= 0; i--) {
+            ItemStack it = contents.get(i);
+            if (isDrink(it) || isBottledLiquid(it)) {
                 return i;
             }
         }
@@ -398,6 +449,8 @@ public class Shaker implements Listener {
         SUGAR,
         SWEET_BERRIES,
         ICE,
+        COCOA_BEANS,
+        MILK_BUCKET,
         OTHER
     }
 
@@ -408,6 +461,8 @@ public class Shaker implements Listener {
         if (mat == Material.SUGAR) return IngredientKind.SUGAR;
         if (mat == Material.SWEET_BERRIES) return IngredientKind.SWEET_BERRIES;
         if (isIce(mat)) return IngredientKind.ICE;
+        if (mat == Material.COCOA_BEANS) return IngredientKind.COCOA_BEANS;
+        if (mat == Material.MILK_BUCKET) return IngredientKind.MILK_BUCKET;
         if (mat == Material.POTION) {
             ItemMeta meta = item.getItemMeta();
             if (meta instanceof PotionMeta potionMeta) {
@@ -436,6 +491,7 @@ public class Shaker implements Listener {
      * Сопоставление классифицированных ингредиентов:
      * - Медовуха (4): 1 мед, 2 сахара, 1 вода.
      * - Дайкири (5): 1 сахар, 2 сладких ягоды, 1 вода, 1 лед.
+     * - Айс-латте (5): 1 какао-боб, 1 ведро молока, 2 льда, 1 бутылка меда.
      * - Муть: любые другие комбинации.
      */
     public static String matchRecipeFromKinds(List<IngredientKind> kinds) {
@@ -463,6 +519,15 @@ public class Shaker implements Listener {
             return RECIPE_DAIQUIRI;
         }
 
+        // Айс-латте: ровно 1 какао-боб, 1 ведро молока, 2 льда, 1 бутылка меда (всего 5 предметов)
+        if (kinds.size() == 5
+                && counts.getOrDefault(IngredientKind.COCOA_BEANS, 0) == 1
+                && counts.getOrDefault(IngredientKind.MILK_BUCKET, 0) == 1
+                && counts.getOrDefault(IngredientKind.ICE, 0) == 2
+                && counts.getOrDefault(IngredientKind.HONEY_BOTTLE, 0) == 1) {
+            return RECIPE_ICED_LATTE;
+        }
+
         return RECIPE_MURK;
     }
 
@@ -487,6 +552,13 @@ public class Shaker implements Listener {
             meta.setColor(Color.fromRGB(0xF0, 0x46, 0x6E));
             meta.addCustomEffect(new PotionEffect(PotionEffectType.SPEED, 30 * 20, 0), true);
             meta.addCustomEffect(new PotionEffect(PotionEffectType.REGENERATION, 10 * 20, 0), true);
+            potion.setItemMeta(meta);
+        } else if (RECIPE_ICED_LATTE.equals(recipe)) {
+            meta.displayName(Component.text("Айс-латте", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
+            meta.setColor(Color.fromRGB(0xE8, 0xC4, 0x99));
+            meta.setItemModel(MODEL_ICED_LATTE_KEY);
+            meta.addCustomEffect(new PotionEffect(PotionEffectType.SPEED, 45 * 20, 0), true);
+            meta.addCustomEffect(new PotionEffect(PotionEffectType.HASTE, 45 * 20, 0), true);
             potion.setItemMeta(meta);
         } else {
             meta.setBasePotionType(null);
@@ -641,7 +713,11 @@ public class Shaker implements Listener {
 
                 ItemStack top = contents.get(contents.size() - 1);
                 if (isLiquid(top)) {
-                    player.sendActionBar(Component.text("Нужна бутылочка!", NamedTextColor.RED));
+                    if (isBucketLiquid(top)) {
+                        player.sendActionBar(Component.text("Нужно ведро!", NamedTextColor.RED));
+                    } else {
+                        player.sendActionBar(Component.text("Нужна бутылочка!", NamedTextColor.RED));
+                    }
                     player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
                     return;
                 }
@@ -659,7 +735,7 @@ public class Shaker implements Listener {
 
         // ========== ПКМ: Забор жидкости, открытие/закрытие, добавление предметов ==========
 
-        // 1. Забор жидкости в стеклянную бутылочку
+        // 1a. Забор бутилированной жидкости / готового напитка в стеклянную бутылочку
         if (hasOtherItem && otherItem.getType() == Material.GLASS_BOTTLE) {
             if (!open) {
                 event.setCancelled(true);
@@ -670,7 +746,7 @@ public class Shaker implements Listener {
                 return;
             }
 
-            int liquidIdx = findLiquidIndex(contents);
+            int liquidIdx = findBottledLiquidOrDrinkIndex(contents);
             if (liquidIdx != -1) {
                 event.setCancelled(true);
                 event.setUseInteractedBlock(Event.Result.DENY);
@@ -691,6 +767,58 @@ public class Shaker implements Listener {
                 setHandItem(player, shakerHand, shaker);
 
                 player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_FILL, SoundCategory.PLAYERS, 0.7F, 1.1F);
+                return;
+            } else if (findBucketLiquidIndex(contents) != -1) {
+                event.setCancelled(true);
+                event.setUseInteractedBlock(Event.Result.DENY);
+                event.setUseItemInHand(Event.Result.DENY);
+                lastInteractTick.put(player.getUniqueId(), currentTick);
+                player.sendActionBar(Component.text("Нужно ведро!", NamedTextColor.RED));
+                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                return;
+            }
+        }
+
+        // 1b. Забор ведровой жидкости в пустое ведро
+        if (hasOtherItem && otherItem.getType() == Material.BUCKET) {
+            if (!open) {
+                event.setCancelled(true);
+                event.setUseInteractedBlock(Event.Result.DENY);
+                event.setUseItemInHand(Event.Result.DENY);
+                lastInteractTick.put(player.getUniqueId(), currentTick);
+                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                return;
+            }
+
+            int bucketIdx = findBucketLiquidIndex(contents);
+            if (bucketIdx != -1) {
+                event.setCancelled(true);
+                event.setUseInteractedBlock(Event.Result.DENY);
+                event.setUseItemInHand(Event.Result.DENY);
+                lastInteractTick.put(player.getUniqueId(), currentTick);
+
+                ItemStack bucketItem = contents.remove(bucketIdx);
+
+                if (otherItem.getAmount() > 1) {
+                    otherItem.setAmount(otherItem.getAmount() - 1);
+                    setHandItem(player, otherHand, otherItem);
+                    giveOrDrop(player, bucketItem);
+                } else {
+                    setHandItem(player, otherHand, bucketItem);
+                }
+
+                updateMeta(shaker, contents, true);
+                setHandItem(player, shakerHand, shaker);
+
+                player.playSound(player.getLocation(), Sound.ITEM_BUCKET_FILL, SoundCategory.PLAYERS, 0.7F, 1.1F);
+                return;
+            } else if (findBottledLiquidOrDrinkIndex(contents) != -1) {
+                event.setCancelled(true);
+                event.setUseInteractedBlock(Event.Result.DENY);
+                event.setUseItemInHand(Event.Result.DENY);
+                lastInteractTick.put(player.getUniqueId(), currentTick);
+                player.sendActionBar(Component.text("Нужна бутылочка!", NamedTextColor.RED));
+                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
                 return;
             }
         }
@@ -742,8 +870,20 @@ public class Shaker implements Listener {
             inserted.setAmount(1);
             contents.add(inserted);
 
-            boolean liquid = isBottledLiquid(otherItem);
-            if (liquid) {
+            boolean bucketLiquid = isBucketLiquid(otherItem);
+            boolean bottledLiquid = isBottledLiquid(otherItem);
+
+            if (bucketLiquid) {
+                ItemStack emptyBucket = new ItemStack(Material.BUCKET);
+                if (otherItem.getAmount() > 1) {
+                    otherItem.setAmount(otherItem.getAmount() - 1);
+                    setHandItem(player, otherHand, otherItem);
+                    giveOrDrop(player, emptyBucket);
+                } else {
+                    setHandItem(player, otherHand, emptyBucket);
+                }
+                player.playSound(player.getLocation(), Sound.ITEM_BUCKET_EMPTY, SoundCategory.PLAYERS, 0.7F, 1.0F);
+            } else if (bottledLiquid) {
                 ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
                 if (otherItem.getAmount() > 1) {
                     otherItem.setAmount(otherItem.getAmount() - 1);
@@ -777,7 +917,13 @@ public class Shaker implements Listener {
                 event.setUseInteractedBlock(Event.Result.DENY);
                 event.setUseItemInHand(Event.Result.DENY);
                 lastInteractTick.put(player.getUniqueId(), currentTick);
-                player.sendActionBar(Component.text("Нужна бутылочка!", NamedTextColor.RED));
+
+                ItemStack topLiquid = contents.get(liquidIdx);
+                if (isBucketLiquid(topLiquid)) {
+                    player.sendActionBar(Component.text("Нужно ведро!", NamedTextColor.RED));
+                } else {
+                    player.sendActionBar(Component.text("Нужна бутылочка!", NamedTextColor.RED));
+                }
                 player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
             }
         }
@@ -786,8 +932,9 @@ public class Shaker implements Listener {
     /**
      * Отслеживание взмахов камеры игрока вверх-вниз для смешивания.
      * Если шейкер закрыт: требует 16 непрерывных взмахов для смешивания.
-     * Если шейкер открыт: смешивание невозможно — первые 4 взмаха идут вхолостую,
-     * а затем каждые 2 взмаха из шейкера вылетает 1 предмет со звуком подбирания предметов.
+     * Если шейкер открыт: смешивание невозможно — первые 4 взмаха идут вхолостую.
+     * Каждые 2 взмаха (начиная с 6-го) вылетает/выливается 1 предмет: жидкости выливаются
+     * всплеском капель без выпадения предметом, а твёрдые предметы вылетают наружу.
      */
     private static final class ShakeTracker {
         float strokeDelta = 0.0f;
@@ -861,17 +1008,25 @@ public class Shaker implements Listener {
                 tracker.strokeCount++;
                 tracker.lastStrokeTick = now;
 
-                // Механика открытого шейкера: смешивание невозможно, только вылетают предметы
+                // Механика открытого шейкера: смешивание невозможно, только вылетают/выливаются предметы
                 if (open) {
                     if (tracker.strokeCount > 4 && (tracker.strokeCount - 4) % 2 == 0) {
                         if (!contents.isEmpty()) {
                             ItemStack spilled = contents.remove(contents.size() - 1);
-                            Item dropped = player.getWorld().dropItemNaturally(player.getLocation(), spilled);
-                            dropped.setVelocity(player.getLocation().getDirection().multiply(0.35).add(new Vector(0, 0.2, 0)));
+                            boolean liquid = isLiquid(spilled);
 
-                            // Звук вылета предметов как звук подбирания предметов (ENTITY_ITEM_PICKUP)
-                            player.playSound(player.getLocation(), Sound.ENTITY_ITEM_PICKUP, SoundCategory.PLAYERS, 1.0F, 1.0F);
-                            player.spawnParticle(Particle.SPLASH, player.getEyeLocation().add(player.getLocation().getDirection().multiply(0.5)), 15, 0.25, 0.25, 0.25, 0.1);
+                            if (liquid) {
+                                // Жидкости не выпадают предметом: играется всплеск капель и жидкость пропадает из шейкера
+                                player.playSound(player.getLocation(), Sound.ENTITY_SPLASH_POTION_BREAK, SoundCategory.PLAYERS, 0.8F, 1.2F);
+                                player.spawnParticle(Particle.SPLASH, player.getEyeLocation().add(player.getLocation().getDirection().multiply(0.5)), 25, 0.3, 0.3, 0.3, 0.15);
+                            } else {
+                                // Твёрдые предметы вылетают из шейкера наружу со звуком ENTITY_ITEM_PICKUP
+                                Item dropped = player.getWorld().dropItemNaturally(player.getLocation(), spilled);
+                                dropped.setVelocity(player.getLocation().getDirection().multiply(0.35).add(new Vector(0, 0.2, 0)));
+
+                                player.playSound(player.getLocation(), Sound.ENTITY_ITEM_PICKUP, SoundCategory.PLAYERS, 1.0F, 1.0F);
+                                player.spawnParticle(Particle.SPLASH, player.getEyeLocation().add(player.getLocation().getDirection().multiply(0.5)), 15, 0.25, 0.25, 0.25, 0.1);
+                            }
 
                             updateMeta(shaker, contents, true);
                             setHandItem(player, shakerHand, shaker);

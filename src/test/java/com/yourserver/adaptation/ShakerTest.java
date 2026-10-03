@@ -168,6 +168,43 @@ final class ShakerTest {
     }
 
     @Test
+    void рецептАйсЛаттеУспешноОпределяется() {
+        // Айс-латте: 1 какао-боб, 1 ведро молока, 2 льда, 1 бутылка меда (всего 5 предметов)
+        List<Shaker.IngredientKind> ingredients = List.of(
+                Shaker.IngredientKind.COCOA_BEANS,
+                Shaker.IngredientKind.MILK_BUCKET,
+                Shaker.IngredientKind.ICE,
+                Shaker.IngredientKind.ICE,
+                Shaker.IngredientKind.HONEY_BOTTLE
+        );
+        assertEquals(Shaker.RECIPE_ICED_LATTE, Shaker.matchRecipeFromKinds(ingredients));
+
+        // Перемешанный порядок
+        List<Shaker.IngredientKind> shuffled = List.of(
+                Shaker.IngredientKind.ICE,
+                Shaker.IngredientKind.HONEY_BOTTLE,
+                Shaker.IngredientKind.COCOA_BEANS,
+                Shaker.IngredientKind.ICE,
+                Shaker.IngredientKind.MILK_BUCKET
+        );
+        assertEquals(Shaker.RECIPE_ICED_LATTE, Shaker.matchRecipeFromKinds(shuffled));
+        assertEquals("f8resurs:iced_latte", Shaker.MODEL_ICED_LATTE_KEY.asString());
+    }
+
+    @Test
+    void определениеВедровыхЖидкостей() {
+        assertTrue(Shaker.isBucketLiquid(Material.MILK_BUCKET));
+        assertTrue(Shaker.isBucketLiquid(Material.WATER_BUCKET));
+        assertTrue(Shaker.isBucketLiquid(Material.LAVA_BUCKET));
+
+        assertFalse(Shaker.isBucketLiquid(Material.BUCKET));
+        assertFalse(Shaker.isBucketLiquid(Material.POTION));
+        assertFalse(Shaker.isBucketLiquid(Material.HONEY_BOTTLE));
+        assertFalse(Shaker.isBucketLiquid(Material.SUGAR));
+        assertFalse(Shaker.isBucketLiquid((Material) null));
+    }
+
+    @Test
     void запрещеныЛюбыеБлокиКромеЛюбогоЛьда() {
         // Разрешены любые виды льда
         assertTrue(Shaker.isAllowedIngredient(Material.ICE));
@@ -181,6 +218,8 @@ final class ShakerTest {
         assertTrue(Shaker.isAllowedIngredient(Material.HONEY_BOTTLE));
         assertTrue(Shaker.isAllowedIngredient(Material.POTION));
         assertTrue(Shaker.isAllowedIngredient(Material.APPLE));
+        assertTrue(Shaker.isAllowedIngredient(Material.COCOA_BEANS));
+        assertTrue(Shaker.isAllowedIngredient(Material.MILK_BUCKET));
 
         // Запрещены блоки (камни, земля, дерево, обсидиан и т.д.)
         assertFalse(Shaker.isAllowedIngredient(Material.STONE));

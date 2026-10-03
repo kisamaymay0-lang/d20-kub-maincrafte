@@ -3,42 +3,29 @@ package com.yourserver.adaptation;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Particle;
+import org.bukkit.entity.GlowItemFrame;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.ItemFrame;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 
 /**
- * Рамка, которую можно спрятать ножницами.
+ * Рамка, которую можно переключать в невидимое состояние ножницами.
  *
  * <h2>Что делает</h2>
  *
- * - **Шифт + ПКМ ножницами по рамке** — рамка становится невидимой (или снова
- *   видимой, если уже спрятана). Предмет внутри не пропадает: он остаётся в
- *   рамке, просто рамку не видно.
- * - **Клик по спрятанной рамке** (любой: ЛКМ или ПКМ) — предмет вылетает из
- *   неё наружу, и в том месте проходит немного дымки: видно, что рамка
- *   изменилась, даже когда её самой не видно.
- * - **Пустая спрятанная рамка** ломается как обычно: клик по ней не мешает
- *   снять рамку с блока.
- *
- * <h2>Почему так</h2>
- *
- * Невидимая рамка в ванили — это и есть «спрятать предмет»: исчезает и рамка,
- * и то, что в ней лежало. Здесь предмет остаётся внутри, пока игрок сам не
- * достанет его кликом, — то есть рамку можно убрать из вида и вернуть содержимое
- * без поломки и без потери. Рамка после этого остаётся невидимой: прятали её
- * именно затм.
- *
- * <h2>Чего здесь нет</h2>
- *
- * Ножницы не изнашиваются: действие похоже на переключатель, а не на работу
- * инструментом.
+ * - **Шифт + ПКМ ножницами по рамке** — переключает видимость рамки (видимая/невидимая)
+ *   с частицами облачка дымки.
+ * - **Без ограничений:** невидимая рамка работает в точности как стандартная рамка
+ *   (помещение, извлечение, вращение предмета, поломка — без особых перехватов).
+ * - **Выпадение:** при разрушении невидимой рамки всегда выпадает обычная (или светящаяся)
+ *   рамка, а не невидимая.
  */
 final class FrameVeil implements Listener {
 
@@ -61,40 +48,17 @@ final class FrameVeil implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    public void takeOut(PlayerInteractEntityEvent event) {
-        if (event.getHand() != EquipmentSlot.HAND) return;
-        if (!(event.getRightClicked() instanceof ItemFrame frame)) return;
-        if (frame.isVisible()) return;
-
-        Player player = event.getPlayer();
-        ItemStack held = player.getInventory().getItemInMainHand();
-        boolean withShears = held != null && held.getType() == Material.SHEARS;
-        if (player.isSneaking() && withShears) return; // это прятанье, его обрабатывает shears()
-
-        event.setCancelled(true);
-        popOut(frame);
-    }
-
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    public void punchOut(EntityDamageByEntityEvent event) {
+    public void onDrop(EntityDropItemEvent event) {
         if (!(event.getEntity() instanceof ItemFrame frame)) return;
-        if (frame.isVisible()) return;
-        if (isAir(frame.getItem())) return; // пустую рамку ломать можно как обычно
-
-        event.setCancelled(true);
-        popOut(frame);
+        Item dropped = event.getItemDrop();
+        ItemStack stack = dropped.getItemStack();
+        if (stack.getType() == Material.ITEM_FRAME || stack.getType() == Material.GLOW_ITEM_FRAME) {
+            boolean glow = frame instanceof GlowItemFrame;
+            dropped.setItemStack(new ItemStack(glow ? Material.GLOW_ITEM_FRAME : Material.ITEM_FRAME, 1));
+        }
     }
 
-    /** Выбросить предмет из рамки: он летит наружу, рамка остаётся спрятанной. */
-    private static void popOut(ItemFrame frame) {
-        ItemStack item = frame.getItem();
-        if (isAir(item)) return;
-        frame.setItem(null, false);
-        frame.getWorld().dropItem(dropSpot(frame), item);
-        puff(frame);
-    }
-
-    /** Точка выброса: чуть перед рамкой, чтобы предмет не оказался в блоке. */
+    /** Точка частиц: чуть перед рамкой. */
     private static Location dropSpot(ItemFrame frame) {
         Location at = frame.getLocation();
         return at.add(frame.getFacing().getDirection().multiply(0.6));
@@ -106,9 +70,5 @@ final class FrameVeil implements Listener {
                 dropSpot(frame),
                 PUFF, 0.18, 0.18, 0.18, 0.02
         );
-    }
-
-    private static boolean isAir(ItemStack item) {
-        return item == null || item.getType().isAir() || item.getAmount() <= 0;
     }
 }
