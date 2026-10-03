@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Тесты функционала шейкера:
  * - Вместимость 5 слотов
- * - Идентификатор модели f8resurs:sheiker
+ * - Идентификаторы моделей f8resurs:sheiker_open и f8resurs:sheiker_close
  * - Определение любого типа льда
  * - Определение бутилированных жидкостей (бутылочка остаётся у игрока)
  * - Требования взбалтывания: 16 взмахов, таймаут 7 тиков
@@ -30,9 +30,11 @@ final class ShakerTest {
     }
 
     @Test
-    void модельШейкераБеретсяИзРесурспака() {
-        assertEquals("sheiker", Shaker.MODEL_NAME);
-        assertEquals("f8resurs:sheiker", Shaker.MODEL_KEY.asString());
+    void моделиШейкераОткрытыйИЗакрытый() {
+        assertEquals("sheiker_open", Shaker.MODEL_OPEN);
+        assertEquals("sheiker_close", Shaker.MODEL_CLOSE);
+        assertEquals("f8resurs:sheiker_open", Shaker.MODEL_OPEN_KEY.asString());
+        assertEquals("f8resurs:sheiker_close", Shaker.MODEL_CLOSE_KEY.asString());
     }
 
     @Test

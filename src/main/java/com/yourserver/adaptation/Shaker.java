@@ -13,6 +13,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
@@ -34,6 +35,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.potion.PotionType;
+import org.bukkit.util.Vector;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -50,38 +52,26 @@ import java.util.UUID;
 /**
  * Шейкер (Shaker) — инструмент для смешивания напитков и коктейлей.
  *
- * <p>Модель: {@code sheiker.json} из ресурспака (f8resurs:sheiker).
- * В инвентаре содержимое отображается в описании (лоре) аналогично Древнему кувшину.
+ * <p>Модели: {@code sheiker_open.json} (открытый) и {@code sheiker_close.json} (закрытый).
  *
  * <h2>Механика взаимодействия</h2>
  * <ul>
- *   <li><b>Добавление ингредиентов:</b> Шейкер в главной руке, предмет во второй
- *       руке + Shift + ПКМ — добавляет 1 штуку предмета в шейкер (максимум 5 слотов, по 1 шт).
- *       При добавлении жидкостей (бутылочки мёда, воды или зелий) бутылочка опустошается
- *       и пустая стеклянная бутылочка остаётся у игрока во второй руке.</li>
- *   <li><b>Готовый напиток как материал:</b> При взбивании напиток остаётся внутри шейкера
- *       как один из предметов-материалов, занимая слот; игрок может добавлять ещё ресурсы,
- *       не выливая напиток сразу.</li>
- *   <li><b>Извлечение ингредиентов:</b> Шейкер в главной руке, пустая вторая рука + Shift + ПКМ —
- *       извлекает твёрдый предмет напрямую в инвентарь игрока.
- *       Если игрок пытается забрать жидкость без пустой бутылочки, выводится сообщение
- *       <b>«Нужна бутылочка!»</b>.</li>
- *   <li><b>Смешивание:</b> Быстрые и непрерывные движения камерой вверх-вниз с шейкером в руке.
- *       Требует 16 взмахов практически без пауз (таймаут между взмахами ~0.35с), что исключает
- *       случайное взбивание при строительстве или ходьбе.
- *       По окончании на клиенте вылетают зелёные частицы и звучит победный сигнал.</li>
- *   <li><b>Забор напитка:</b> Пустая стеклянная бутылочка во второй руке + ПКМ переливает
- *       жидкость в бутылочку.</li>
- * </ul>
- *
- * <h2>Рецепты</h2>
- * <ul>
- *   <li><b>Медовуха:</b> 1 бутылочка мёда, 2 сахара, 1 бутылочка воды.
- *       Эффекты: Регенерация I (30с), Насыщение I (10с).</li>
- *   <li><b>Дайкири:</b> 1 сахар, 2 сладких ягоды, 1 бутылочка воды, 1 блок любого льда.
- *       Эффекты: Скорость I (30с), Регенерация I (10с).</li>
- *   <li><b>Муть:</b> Любой неудавшийся рецепт / неизвестная смесь. Текстура и цвет зелья отравления.
- *       Эффекты: только Тошнота I (10с) и Отравление I (5с).</li>
+ *   <li><b>Обе руки:</b> Шейкер можно держать как в основной руке, так и во второй (левой).
+ *       Взаимодействие работает симметрично в обеих руках.</li>
+ *   <li><b>Открытие и закрытие:</b> Shift + ПКМ без предмета во второй руке переключает
+ *       состояние шейкера (открыт/закрыт). Модель меняется на {@code sheiker_open} или
+ *       {@code sheiker_close}.</li>
+ *   <li><b>Добавление ингредиентов:</b> В открытый шейкер через Shift + ПКМ предметом из другой руки.
+ *       При добавлении жидкостей бутылочка опустошается и пустая стеклянная бутылочка остаётся
+ *       у игрока в руке. В закрытый шейкер класть нельзя.</li>
+ *   <li><b>Готовый напиток как материал:</b> При взбивании готовый напиток остаётся внутри шейкера
+ *       как материал (1 слот из 5); не забирая его, можно докладывать другие ингредиенты.</li>
+ *   <li><b>Извлечение предметов:</b> Твёрдые предметы из открытого шейкера извлекаются через
+ *       Shift + ЛКМ напрямую в инвентарь игрока. Для забора жидкости нужна пустая бутылочка
+ *       в руке (ПКМ), иначе выводится «Нужна бутылочка!».</li>
+ *   <li><b>Взбивание с открытым шейкером:</b> Если трясти открытый шейкер, первые 4 взмаха
+ *       проходят вхолостую, а затем каждые 2 взмаха из шейкера вылетает 1 предмет (выпадает
+ *       из игрока). Чтобы напиток успешно смешался, шейкер должен быть закрыт (16 взмахов).</li>
  * </ul>
  */
 public class Shaker implements Listener {
@@ -91,11 +81,16 @@ public class Shaker implements Listener {
     public static final int STROKE_TIMEOUT_TICKS = 7;
     public static final float MIN_STROKE_PITCH = 20.0f;
 
-    public static final String MODEL_NAME = "sheiker";
-    public static final NamespacedKey MODEL_KEY = new NamespacedKey("f8resurs", MODEL_NAME);
+    public static final String MODEL_OPEN = "sheiker_open";
+    public static final String MODEL_CLOSE = "sheiker_close";
+    public static final NamespacedKey MODEL_OPEN_KEY = new NamespacedKey("f8resurs", MODEL_OPEN);
+    public static final NamespacedKey MODEL_CLOSE_KEY = new NamespacedKey("f8resurs", MODEL_CLOSE);
+    public static final NamespacedKey MODEL_KEY = MODEL_OPEN_KEY;
+    public static final String MODEL_NAME = MODEL_OPEN;
 
     public static final NamespacedKey SHAKER_KEY = new NamespacedKey("adaptation", "shaker");
     public static final NamespacedKey CONTENTS_KEY = new NamespacedKey("adaptation", "shaker_contents");
+    public static final NamespacedKey OPEN_KEY = new NamespacedKey("adaptation", "shaker_open");
     public static final NamespacedKey DRINK_PDC_KEY = new NamespacedKey("adaptation", "shaker_drink_type");
 
     public static final String RECIPE_MEAD = "mead";
@@ -110,7 +105,7 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Создать пустой шейкер.
+     * Создать новый шейкер (по умолчанию открытый).
      */
     public static ItemStack create() {
         ItemStack item = new ItemStack(Material.IRON_NUGGET);
@@ -129,6 +124,27 @@ public class Shaker implements Listener {
         if (item == null || !item.hasItemMeta()) return false;
         Byte b = item.getItemMeta().getPersistentDataContainer().get(SHAKER_KEY, PersistentDataType.BYTE);
         return b != null && b == (byte) 1;
+    }
+
+    /**
+     * Открыт ли шейкер.
+     */
+    public static boolean isOpen(ItemStack item) {
+        if (!isShaker(item)) return false;
+        Byte b = item.getItemMeta().getPersistentDataContainer().get(OPEN_KEY, PersistentDataType.BYTE);
+        return b == null || b == (byte) 1;
+    }
+
+    /**
+     * Установить состояние открытости шейкера.
+     */
+    public static void setOpen(ItemStack item, boolean open) {
+        if (!isShaker(item)) return;
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return;
+        meta.getPersistentDataContainer().set(OPEN_KEY, PersistentDataType.BYTE, (byte) (open ? 1 : 0));
+        meta.setItemModel(open ? MODEL_OPEN_KEY : MODEL_CLOSE_KEY);
+        item.setItemMeta(meta);
     }
 
     /**
@@ -162,17 +178,20 @@ public class Shaker implements Listener {
 
     /**
      * Обновить мета-данные шейкера (PDC, имя, модель, список содержимого).
-     * Не добавляет тёмно-серых подсказок в конце описания.
+     * В лоре не содержится тёмно-серых подсказок.
      */
     public static void updateMeta(ItemStack item, List<ItemStack> contents) {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
 
+        boolean open = isOpen(item);
+
         meta.displayName(Component.text("Шейкер", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
-        meta.setItemModel(MODEL_KEY);
+        meta.setItemModel(open ? MODEL_OPEN_KEY : MODEL_CLOSE_KEY);
 
         PersistentDataContainer pdc = meta.getPersistentDataContainer();
         pdc.set(SHAKER_KEY, PersistentDataType.BYTE, (byte) 1);
+        pdc.set(OPEN_KEY, PersistentDataType.BYTE, (byte) (open ? 1 : 0));
 
         if (contents != null && !contents.isEmpty()) {
             pdc.set(CONTENTS_KEY, PersistentDataType.BYTE_ARRAY, serializeItemList(contents));
@@ -182,10 +201,11 @@ public class Shaker implements Listener {
 
         List<Component> lore = new ArrayList<>();
         int count = contents == null ? 0 : contents.size();
+        String status = open ? "(открыт)" : "(закрыт)";
         if (count == 0) {
-            lore.add(Component.text("Пустой шейкер (0/" + MAX_SLOTS + ")", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+            lore.add(Component.text("Пустой шейкер (0/" + MAX_SLOTS + ") " + status, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
         } else {
-            lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+            lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + ") " + status + ":", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
             for (ItemStack ingredient : contents) {
                 lore.add(Component.text("• " + getItemDisplayName(ingredient), getItemColor(ingredient)).decoration(TextDecoration.ITALIC, false));
             }
@@ -199,9 +219,6 @@ public class Shaker implements Listener {
         item.setItemMeta(meta);
     }
 
-    /**
-     * Перегрузка для совместимости.
-     */
     public static void updateMeta(ItemStack item, List<ItemStack> contents, boolean mixed, String drink) {
         updateMeta(item, contents);
     }
@@ -296,8 +313,7 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Является ли предмет жидкостью (готовый напиток, зелье, вода или мёд),
-     * для забора которой нужна стеклянная бутылочка.
+     * Является ли предмет жидкостью (готовый напиток, зелье, вода или мёд).
      */
     public static boolean isLiquid(ItemStack item) {
         if (item == null) return false;
@@ -416,8 +432,6 @@ public class Shaker implements Listener {
 
     /**
      * Создать готовый напиток по рецепту.
-     * Не добавляет ручных строк описания эффектов — ванильный интерфейс зелий
-     * отображает эффекты автоматически и без лишнего дублирования.
      */
     public static ItemStack createDrinkItem(String drinkType) {
         ItemStack potion = new ItemStack(Material.POTION);
@@ -473,32 +487,116 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Взаимодействие с шейкером: добавление ингредиентов, извлечение в инвентарь, забор жидкости в бутылочку.
+     * Взаимодействие с шейкером в любой руке:
+     * - Открытие/закрытие (Shift + ПКМ без предмета во второй руке)
+     * - Загрузка предметов (Shift + ПКМ с предметом)
+     * - Извлечение твёрдых предметов в инвентарь (Shift + ЛКМ)
+     * - Сбор жидкости в бутылочку (ПКМ с бутылочкой во второй руке)
      */
     @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerInteract(PlayerInteractEvent event) {
-        if (event.getHand() != EquipmentSlot.HAND) {
+        EquipmentSlot eventHand = event.getHand();
+        if (eventHand != EquipmentSlot.HAND && eventHand != EquipmentSlot.OFF_HAND) {
             return;
         }
 
         Action action = event.getAction();
-        if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) {
+        boolean isRightClick = action == Action.RIGHT_CLICK_AIR || action == Action.RIGHT_CLICK_BLOCK;
+        boolean isLeftClick = action == Action.LEFT_CLICK_AIR || action == Action.LEFT_CLICK_BLOCK;
+
+        if (!isRightClick && !isLeftClick) {
             return;
         }
 
         Player player = event.getPlayer();
-        ItemStack shaker = player.getInventory().getItemInMainHand();
-        if (!isShaker(shaker)) {
+        ItemStack mainItem = player.getInventory().getItemInMainHand();
+        ItemStack offItem = player.getInventory().getItemInOffHand();
+
+        boolean mainHasShaker = isShaker(mainItem);
+        boolean offHasShaker = isShaker(offItem);
+
+        if (!mainHasShaker && !offHasShaker) {
             return;
         }
 
-        ItemStack offHand = player.getInventory().getItemInOffHand();
-        boolean hasOffItem = offHand != null && offHand.getType() != Material.AIR;
+        EquipmentSlot shakerHand;
+        EquipmentSlot otherHand;
+        ItemStack shaker;
+        ItemStack otherItem;
+
+        if (mainHasShaker) {
+            shakerHand = EquipmentSlot.HAND;
+            otherHand = EquipmentSlot.OFF_HAND;
+            shaker = mainItem;
+            otherItem = offItem;
+            if (eventHand != EquipmentSlot.HAND) {
+                return;
+            }
+        } else {
+            shakerHand = EquipmentSlot.OFF_HAND;
+            otherHand = EquipmentSlot.HAND;
+            shaker = offItem;
+            otherItem = mainItem;
+            if (eventHand != EquipmentSlot.HAND && otherItem != null && otherItem.getType() != Material.AIR) {
+                return;
+            }
+        }
+
+        boolean hasOtherItem = otherItem != null && otherItem.getType() != Material.AIR;
         boolean sneaking = player.isSneaking();
         List<ItemStack> contents = getContents(shaker);
+        boolean open = isOpen(shaker);
 
-        // Случай 1: игрок держит пустую бутылочку во второй (левой) руке — сбор жидкости
-        if (hasOffItem && offHand.getType() == Material.GLASS_BOTTLE) {
+        // ========== ЛКМ: Извлечение твёрдых предметов из открытого шейкера ==========
+        if (isLeftClick) {
+            if (sneaking) {
+                event.setCancelled(true);
+                event.setUseInteractedBlock(Event.Result.DENY);
+                event.setUseItemInHand(Event.Result.DENY);
+
+                if (!open) {
+                    player.sendActionBar(Component.text("Шейкер закрыт! Откройте его (Shift + ПКМ).", NamedTextColor.RED));
+                    player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                    return;
+                }
+
+                if (contents.isEmpty()) {
+                    player.sendActionBar(Component.text("Шейкер пуст!", NamedTextColor.GRAY));
+                    return;
+                }
+
+                ItemStack top = contents.get(contents.size() - 1);
+                if (isLiquid(top)) {
+                    player.sendActionBar(Component.text("Нужна бутылочка!", NamedTextColor.RED));
+                    player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                    return;
+                }
+
+                ItemStack removed = contents.remove(contents.size() - 1);
+                giveOrDrop(player, removed);
+                updateMeta(shaker, contents);
+                setHandItem(player, shakerHand, shaker);
+
+                player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_REMOVE_ONE, SoundCategory.PLAYERS, 0.6F, 1.1F);
+                player.sendActionBar(Component.text("Извлечено в инвентарь: " + getItemDisplayName(removed) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
+                return;
+            }
+            return;
+        }
+
+        // ========== ПКМ: Забор жидкости, открытие/закрытие, добавление предметов ==========
+
+        // 1. Забор жидкости в стеклянную бутылочку
+        if (hasOtherItem && otherItem.getType() == Material.GLASS_BOTTLE) {
+            if (!open) {
+                event.setCancelled(true);
+                event.setUseInteractedBlock(Event.Result.DENY);
+                event.setUseItemInHand(Event.Result.DENY);
+                player.sendActionBar(Component.text("Шейкер закрыт! Откройте его (Shift + ПКМ).", NamedTextColor.RED));
+                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                return;
+            }
+
             int liquidIdx = findLiquidIndex(contents);
             if (liquidIdx != -1) {
                 event.setCancelled(true);
@@ -507,104 +605,101 @@ public class Shaker implements Listener {
 
                 ItemStack liquidItem = contents.remove(liquidIdx);
 
-                if (offHand.getAmount() > 1) {
-                    offHand.setAmount(offHand.getAmount() - 1);
-                    player.getInventory().setItemInOffHand(offHand);
+                if (otherItem.getAmount() > 1) {
+                    otherItem.setAmount(otherItem.getAmount() - 1);
+                    setHandItem(player, otherHand, otherItem);
                     giveOrDrop(player, liquidItem);
                 } else {
-                    player.getInventory().setItemInOffHand(liquidItem);
+                    setHandItem(player, otherHand, liquidItem);
                 }
 
                 updateMeta(shaker, contents);
-                player.getInventory().setItemInMainHand(shaker);
+                setHandItem(player, shakerHand, shaker);
 
                 player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_FILL, SoundCategory.PLAYERS, 0.7F, 1.1F);
                 return;
             }
         }
 
-        // Случай 2: Shift + ПКМ действия
-        if (sneaking) {
+        // 2. Shift + ПКМ без предмета во второй руке — ОТКРЫТИЕ / ЗАКРЫТИЕ шейкера
+        if (sneaking && !hasOtherItem) {
             event.setCancelled(true);
             event.setUseInteractedBlock(Event.Result.DENY);
             event.setUseItemInHand(Event.Result.DENY);
 
-            if (hasOffItem) {
-                // Добавление предмета из второй руки в шейкер
-                if (isShaker(offHand)) {
-                    player.sendActionBar(Component.text("Нельзя положить шейкер в шейкер!", NamedTextColor.RED));
-                    player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
-                    return;
-                }
+            boolean newOpen = !open;
+            setOpen(shaker, newOpen);
+            updateMeta(shaker, contents);
+            setHandItem(player, shakerHand, shaker);
 
-                if (contents.size() >= MAX_SLOTS) {
-                    player.sendActionBar(Component.text("Шейкер полон! (максимум " + MAX_SLOTS + " предметов)", NamedTextColor.RED));
-                    player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
-                    return;
-                }
-
-                ItemStack inserted = offHand.clone();
-                inserted.setAmount(1);
-                contents.add(inserted);
-
-                boolean liquid = isBottledLiquid(offHand);
-                if (liquid) {
-                    // При наливании жидкости опустошается бутылка и остаётся во второй руке
-                    ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
-                    if (offHand.getAmount() > 1) {
-                        offHand.setAmount(offHand.getAmount() - 1);
-                        player.getInventory().setItemInOffHand(offHand);
-                        giveOrDrop(player, emptyBottle);
-                    } else {
-                        player.getInventory().setItemInOffHand(emptyBottle);
-                    }
-                    player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_EMPTY, SoundCategory.PLAYERS, 0.7F, 1.0F);
-                } else {
-                    if (offHand.getAmount() > 1) {
-                        offHand.setAmount(offHand.getAmount() - 1);
-                        player.getInventory().setItemInOffHand(offHand);
-                    } else {
-                        player.getInventory().setItemInOffHand(new ItemStack(Material.AIR));
-                    }
-                    player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.6F, 1.1F);
-                }
-
-                updateMeta(shaker, contents);
-                player.getInventory().setItemInMainHand(shaker);
-
-                player.sendActionBar(Component.text("Добавлено: " + getItemDisplayName(inserted) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
-                return;
+            if (newOpen) {
+                player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_IRON, SoundCategory.PLAYERS, 0.7F, 1.3F);
+                player.sendActionBar(Component.text("Шейкер открыт", NamedTextColor.GREEN));
             } else {
-                // Вторая рука пуста: попытка извлечь предмет
-                if (contents.isEmpty()) {
-                    player.sendActionBar(Component.text("Шейкер пуст!", NamedTextColor.GRAY));
-                    player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
-                    return;
-                }
-
-                ItemStack topItem = contents.get(contents.size() - 1);
-                if (isLiquid(topItem)) {
-                    // Для сбора жидкости нужна пустая бутылочка во второй (левой) руке
-                    player.sendActionBar(Component.text("Нужна бутылочка!", NamedTextColor.RED));
-                    player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
-                    return;
-                }
-
-                // Извлечение твёрдого предмета напрямую в инвентарь игрока
-                ItemStack removed = contents.remove(contents.size() - 1);
-                giveOrDrop(player, removed);
-
-                updateMeta(shaker, contents);
-                player.getInventory().setItemInMainHand(shaker);
-
-                player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_REMOVE_ONE, SoundCategory.PLAYERS, 0.6F, 1.1F);
-                player.sendActionBar(Component.text("Извлечено в инвентарь: " + getItemDisplayName(removed) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
-                return;
+                player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_IRON, SoundCategory.PLAYERS, 0.7F, 0.9F);
+                player.sendActionBar(Component.text("Шейкер закрыт", NamedTextColor.YELLOW));
             }
+            return;
         }
 
-        // Случай 3: ПКМ без Shift с пустой второй рукой при наличии жидкости в шейкере
-        if (!hasOffItem) {
+        // 3. Shift + ПКМ с предметом — добавление ингредиента в открытый шейкер
+        if (sneaking && hasOtherItem) {
+            event.setCancelled(true);
+            event.setUseInteractedBlock(Event.Result.DENY);
+            event.setUseItemInHand(Event.Result.DENY);
+
+            if (!open) {
+                player.sendActionBar(Component.text("Шейкер закрыт! Откройте его (Shift + ПКМ).", NamedTextColor.RED));
+                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                return;
+            }
+
+            if (isShaker(otherItem)) {
+                player.sendActionBar(Component.text("Нельзя положить шейкер в шейкер!", NamedTextColor.RED));
+                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                return;
+            }
+
+            if (contents.size() >= MAX_SLOTS) {
+                player.sendActionBar(Component.text("Шейкер полон! (максимум " + MAX_SLOTS + " предметов)", NamedTextColor.RED));
+                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                return;
+            }
+
+            ItemStack inserted = otherItem.clone();
+            inserted.setAmount(1);
+            contents.add(inserted);
+
+            boolean liquid = isBottledLiquid(otherItem);
+            if (liquid) {
+                ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
+                if (otherItem.getAmount() > 1) {
+                    otherItem.setAmount(otherItem.getAmount() - 1);
+                    setHandItem(player, otherHand, otherItem);
+                    giveOrDrop(player, emptyBottle);
+                } else {
+                    setHandItem(player, otherHand, emptyBottle);
+                }
+                player.playSound(player.getLocation(), Sound.ITEM_BOTTLE_EMPTY, SoundCategory.PLAYERS, 0.7F, 1.0F);
+            } else {
+                if (otherItem.getAmount() > 1) {
+                    otherItem.setAmount(otherItem.getAmount() - 1);
+                    setHandItem(player, otherHand, otherItem);
+                } else {
+                    setHandItem(player, otherHand, new ItemStack(Material.AIR));
+                }
+                player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.6F, 1.1F);
+            }
+
+            updateMeta(shaker, contents);
+            setHandItem(player, shakerHand, shaker);
+
+            player.sendActionBar(Component.text("Добавлено: " + getItemDisplayName(inserted) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
+            return;
+        }
+
+        // 4. ПКМ без Shift с пустой рукой при наличии жидкости в открытом шейкере
+        if (!hasOtherItem && open) {
             int liquidIdx = findLiquidIndex(contents);
             if (liquidIdx != -1) {
                 event.setCancelled(true);
@@ -618,8 +713,9 @@ public class Shaker implements Listener {
 
     /**
      * Отслеживание взмахов камеры игрока вверх-вниз для смешивания.
-     * Требует непрерывных и быстрых взмахов практически без пауз (таймаут 7 тиков ~0.35с),
-     * что исключает случайное накопление при строительстве или осмотре блоков.
+     * Если шейкер закрыт: требует 16 непрерывных взмахов.
+     * Если шейкер открыт: первые 4 взмаха идут вхолостую, а затем каждые 2 взмаха
+     * из шейкера вылетает 1 предмет (выпадает из игрока в мир).
      */
     private static final class ShakeTracker {
         float strokeDelta = 0.0f;
@@ -642,20 +738,31 @@ public class Shaker implements Listener {
 
         Player player = event.getPlayer();
         ItemStack mainHand = player.getInventory().getItemInMainHand();
-        if (!isShaker(mainHand)) {
+        ItemStack offHand = player.getInventory().getItemInOffHand();
+
+        EquipmentSlot shakerHand;
+        ItemStack shaker;
+        if (isShaker(mainHand)) {
+            shakerHand = EquipmentSlot.HAND;
+            shaker = mainHand;
+        } else if (isShaker(offHand)) {
+            shakerHand = EquipmentSlot.OFF_HAND;
+            shaker = offHand;
+        } else {
             return;
         }
 
-        List<ItemStack> contents = getContents(mainHand);
+        List<ItemStack> contents = getContents(shaker);
         if (!canShake(contents)) {
             return;
         }
 
+        boolean open = isOpen(shaker);
         int dir = pitchDelta > 0 ? 1 : -1;
         int now = Bukkit.getCurrentTick();
         ShakeTracker tracker = shakeTrackers.computeIfAbsent(player.getUniqueId(), k -> new ShakeTracker());
 
-        // Строгий таймаут без пауз: если пауза между взмахами превысила 7 тиков (~0.35с), сброс в ноль
+        // Сброс серии при паузе более 7 тиков
         if (tracker.strokeCount > 0 && now - tracker.lastStrokeTick > STROKE_TIMEOUT_TICKS) {
             tracker.strokeCount = 0;
             tracker.strokeDelta = 0;
@@ -668,33 +775,55 @@ public class Shaker implements Listener {
             tracker.strokeStartTick = now;
         } else if (tracker.currentDir == dir) {
             tracker.strokeDelta += pitchDelta;
-            // Если единичный взмах длится слишком медленно, это плавный поворот, а не энергичный взмах
             if (now - tracker.strokeStartTick > STROKE_TIMEOUT_TICKS) {
                 tracker.strokeCount = 0;
                 tracker.strokeDelta = 0;
                 tracker.currentDir = 0;
             }
         } else {
-            // Смена направления взмаха камеры
             int strokeDuration = now - tracker.strokeStartTick;
             if (Math.abs(tracker.strokeDelta) >= MIN_STROKE_PITCH && strokeDuration <= STROKE_TIMEOUT_TICKS) {
                 tracker.strokeCount++;
                 tracker.lastStrokeTick = now;
 
-                // Звук взбалтывания с повышением тона (без надписей в action bar)
+                // Механика открытого шейкера: после 4 взмахов каждые 2 взмаха выпадает 1 предмет
+                if (open) {
+                    if (tracker.strokeCount > 4 && (tracker.strokeCount - 4) % 2 == 0) {
+                        if (!contents.isEmpty()) {
+                            ItemStack spilled = contents.remove(contents.size() - 1);
+                            Item dropped = player.getWorld().dropItemNaturally(player.getLocation(), spilled);
+                            dropped.setVelocity(player.getLocation().getDirection().multiply(0.25).add(new Vector(0, 0.15, 0)));
+
+                            player.playSound(player.getLocation(), Sound.ENTITY_SPLASH_POTION_BREAK, SoundCategory.PLAYERS, 0.6F, 1.2F);
+                            player.spawnParticle(Particle.SPLASH, player.getEyeLocation().add(player.getLocation().getDirection().multiply(0.5)), 12, 0.2, 0.2, 0.2, 0.08);
+                            player.sendActionBar(Component.text("Шейкер открыт! Ингредиенты вылетают!", NamedTextColor.RED));
+
+                            updateMeta(shaker, contents);
+                            setHandItem(player, shakerHand, shaker);
+
+                            if (contents.isEmpty()) {
+                                tracker.strokeCount = 0;
+                                tracker.strokeDelta = 0;
+                                tracker.currentDir = 0;
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                // Звук взбалтывания
                 float pitch = 0.9F + (tracker.strokeCount / (float) REQUIRED_STROKES) * 0.7F;
                 player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.5F, pitch);
 
-                // Порог: 16 непрерывных взмахов (8 полных циклов вверх-вниз)
+                // Порог смешивания: 16 непрерывных взмахов
                 if (tracker.strokeCount >= REQUIRED_STROKES) {
                     tracker.strokeCount = 0;
                     tracker.strokeDelta = 0;
                     tracker.currentDir = 0;
-                    finishMixing(player, mainHand);
+                    finishMixing(player, shaker, shakerHand);
                     return;
                 }
             } else {
-                // Недостаточная амплитуда или слишком медленный взмах — сброс серии
                 tracker.strokeCount = 0;
             }
             tracker.currentDir = dir;
@@ -703,7 +832,7 @@ public class Shaker implements Listener {
         }
     }
 
-    private void finishMixing(Player player, ItemStack shaker) {
+    private void finishMixing(Player player, ItemStack shaker, EquipmentSlot shakerHand) {
         List<ItemStack> contents = getContents(shaker);
         if (!canShake(contents)) {
             return;
@@ -712,17 +841,14 @@ public class Shaker implements Listener {
         String drink = matchRecipe(contents);
         ItemStack drinkItem = createDrinkItem(drink);
 
-        // Готовый напиток остаётся внутри шейкера как материал, занимая 1 слот
         contents.clear();
         contents.add(drinkItem);
         updateMeta(shaker, contents);
-        player.getInventory().setItemInMainHand(shaker);
+        setHandItem(player, shakerHand, shaker);
 
-        // Зелёные частицы на клиенте игрока
         Location particleLoc = player.getEyeLocation().add(player.getEyeLocation().getDirection().multiply(0.7));
         player.spawnParticle(Particle.HAPPY_VILLAGER, particleLoc, 25, 0.25, 0.25, 0.25, 0.05);
 
-        // Звуки окончания смешивания
         player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, SoundCategory.PLAYERS, 0.65F, 1.4F);
         player.playSound(player.getLocation(), Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.PLAYERS, 0.6F, 1.1F);
 
@@ -737,6 +863,14 @@ public class Shaker implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         shakeTrackers.remove(event.getPlayer().getUniqueId());
+    }
+
+    private static void setHandItem(Player player, EquipmentSlot slot, ItemStack item) {
+        if (slot == EquipmentSlot.HAND) {
+            player.getInventory().setItemInMainHand(item == null ? new ItemStack(Material.AIR) : item);
+        } else {
+            player.getInventory().setItemInOffHand(item == null ? new ItemStack(Material.AIR) : item);
+        }
     }
 
     private static void giveOrDrop(Player player, ItemStack item) {
