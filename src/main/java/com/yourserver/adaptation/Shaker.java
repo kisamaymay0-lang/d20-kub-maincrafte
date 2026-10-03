@@ -69,9 +69,10 @@ import java.util.UUID;
  *   <li><b>Извлечение предметов:</b> Твёрдые предметы из открытого шейкера извлекаются через
  *       Shift + ЛКМ напрямую в инвентарь игрока. Для забора жидкости нужна пустая бутылочка
  *       в руке (ПКМ), иначе выводится «Нужна бутылочка!».</li>
- *   <li><b>Взбивание с открытым шейкером:</b> Если трясти открытый шейкер, первые 4 взмаха
- *       проходят вхолостую, а затем каждые 2 взмаха из шейкера вылетает 1 предмет (выпадает
- *       из игрока). Чтобы напиток успешно смешался, шейкер должен быть закрыт (16 взмахов).</li>
+ *   <li><b>Взбивание с открытым шейкером:</b> С открытым шейкером нельзя смешивать напитки.
+ *       Первые 4 взмаха идут вхолостую, а затем каждые 2 взмаха из шейкера вылетает 1 предмет
+ *       (выпадает из игрока со звуком подбирания предметов).
+ *       Смешивание рецепта происходит только при закрытом шейкере (16 непрерывных взмахов).</li>
  * </ul>
  */
 public class Shaker implements Listener {
@@ -178,7 +179,7 @@ public class Shaker implements Listener {
 
     /**
      * Обновить мета-данные шейкера (PDC, имя, модель, список содержимого).
-     * В лоре не содержится тёмно-серых подсказок.
+     * В лоре отображается только чистое содержимое как у Древнего кувшина.
      */
     public static void updateMeta(ItemStack item, List<ItemStack> contents) {
         ItemMeta meta = item.getItemMeta();
@@ -201,17 +202,12 @@ public class Shaker implements Listener {
 
         List<Component> lore = new ArrayList<>();
         int count = contents == null ? 0 : contents.size();
-        String status = open ? "(открыт)" : "(закрыт)";
         if (count == 0) {
-            lore.add(Component.text("Пустой шейкер (0/" + MAX_SLOTS + ") " + status, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+            lore.add(Component.text("Пустой шейкер (0/" + MAX_SLOTS + ")", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
         } else {
-            lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + ") " + status + ":", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+            lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
             for (ItemStack ingredient : contents) {
                 lore.add(Component.text("• " + getItemDisplayName(ingredient), getItemColor(ingredient)).decoration(TextDecoration.ITALIC, false));
-            }
-            if (canShake(contents)) {
-                lore.add(Component.empty());
-                lore.add(Component.text("Трясите камеру вверх-вниз для смешивания.", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
             }
         }
 
@@ -555,13 +551,11 @@ public class Shaker implements Listener {
                 event.setUseItemInHand(Event.Result.DENY);
 
                 if (!open) {
-                    player.sendActionBar(Component.text("Шейкер закрыт! Откройте его (Shift + ПКМ).", NamedTextColor.RED));
                     player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
                     return;
                 }
 
                 if (contents.isEmpty()) {
-                    player.sendActionBar(Component.text("Шейкер пуст!", NamedTextColor.GRAY));
                     return;
                 }
 
@@ -578,7 +572,6 @@ public class Shaker implements Listener {
                 setHandItem(player, shakerHand, shaker);
 
                 player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_REMOVE_ONE, SoundCategory.PLAYERS, 0.6F, 1.1F);
-                player.sendActionBar(Component.text("Извлечено в инвентарь: " + getItemDisplayName(removed) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
                 return;
             }
             return;
@@ -592,7 +585,6 @@ public class Shaker implements Listener {
                 event.setCancelled(true);
                 event.setUseInteractedBlock(Event.Result.DENY);
                 event.setUseItemInHand(Event.Result.DENY);
-                player.sendActionBar(Component.text("Шейкер закрыт! Откройте его (Shift + ПКМ).", NamedTextColor.RED));
                 player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
                 return;
             }
@@ -634,10 +626,8 @@ public class Shaker implements Listener {
 
             if (newOpen) {
                 player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_IRON, SoundCategory.PLAYERS, 0.7F, 1.3F);
-                player.sendActionBar(Component.text("Шейкер открыт", NamedTextColor.GREEN));
             } else {
                 player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_IRON, SoundCategory.PLAYERS, 0.7F, 0.9F);
-                player.sendActionBar(Component.text("Шейкер закрыт", NamedTextColor.YELLOW));
             }
             return;
         }
@@ -649,19 +639,16 @@ public class Shaker implements Listener {
             event.setUseItemInHand(Event.Result.DENY);
 
             if (!open) {
-                player.sendActionBar(Component.text("Шейкер закрыт! Откройте его (Shift + ПКМ).", NamedTextColor.RED));
                 player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
                 return;
             }
 
             if (isShaker(otherItem)) {
-                player.sendActionBar(Component.text("Нельзя положить шейкер в шейкер!", NamedTextColor.RED));
                 player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
                 return;
             }
 
             if (contents.size() >= MAX_SLOTS) {
-                player.sendActionBar(Component.text("Шейкер полон! (максимум " + MAX_SLOTS + " предметов)", NamedTextColor.RED));
                 player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
                 return;
             }
@@ -693,8 +680,6 @@ public class Shaker implements Listener {
 
             updateMeta(shaker, contents);
             setHandItem(player, shakerHand, shaker);
-
-            player.sendActionBar(Component.text("Добавлено: " + getItemDisplayName(inserted) + " (" + contents.size() + "/" + MAX_SLOTS + ")", NamedTextColor.GRAY));
             return;
         }
 
@@ -713,9 +698,9 @@ public class Shaker implements Listener {
 
     /**
      * Отслеживание взмахов камеры игрока вверх-вниз для смешивания.
-     * Если шейкер закрыт: требует 16 непрерывных взмахов.
-     * Если шейкер открыт: первые 4 взмаха идут вхолостую, а затем каждые 2 взмаха
-     * из шейкера вылетает 1 предмет (выпадает из игрока в мир).
+     * Если шейкер закрыт: требует 16 непрерывных взмахов для смешивания.
+     * Если шейкер открыт: смешивание невозможно — первые 4 взмаха идут вхолостую,
+     * а затем каждые 2 взмаха из шейкера вылетает 1 предмет со звуком подбирания предметов.
      */
     private static final class ShakeTracker {
         float strokeDelta = 0.0f;
@@ -786,7 +771,7 @@ public class Shaker implements Listener {
                 tracker.strokeCount++;
                 tracker.lastStrokeTick = now;
 
-                // Механика открытого шейкера: после 4 взмахов каждые 2 взмаха выпадает 1 предмет
+                // Механика открытого шейкера: смешивание невозможно, только вылетают предметы
                 if (open) {
                     if (tracker.strokeCount > 4 && (tracker.strokeCount - 4) % 2 == 0) {
                         if (!contents.isEmpty()) {
@@ -794,9 +779,9 @@ public class Shaker implements Listener {
                             Item dropped = player.getWorld().dropItemNaturally(player.getLocation(), spilled);
                             dropped.setVelocity(player.getLocation().getDirection().multiply(0.25).add(new Vector(0, 0.15, 0)));
 
-                            player.playSound(player.getLocation(), Sound.ENTITY_SPLASH_POTION_BREAK, SoundCategory.PLAYERS, 0.6F, 1.2F);
+                            // Звук вылета предметов как звук подбирания предметов (ENTITY_ITEM_PICKUP)
+                            player.playSound(player.getLocation(), Sound.ENTITY_ITEM_PICKUP, SoundCategory.PLAYERS, 0.8F, 1.0F);
                             player.spawnParticle(Particle.SPLASH, player.getEyeLocation().add(player.getLocation().getDirection().multiply(0.5)), 12, 0.2, 0.2, 0.2, 0.08);
-                            player.sendActionBar(Component.text("Шейкер открыт! Ингредиенты вылетают!", NamedTextColor.RED));
 
                             updateMeta(shaker, contents);
                             setHandItem(player, shakerHand, shaker);
@@ -809,13 +794,16 @@ public class Shaker implements Listener {
                             }
                         }
                     }
+                    // Звук взбалтывания (с открытым шейкером не смешивается)
+                    player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.5F, 1.0F);
+                    return;
                 }
 
-                // Звук взбалтывания
+                // Закрытый шейкер: звук взбалтывания с повышением тона
                 float pitch = 0.9F + (tracker.strokeCount / (float) REQUIRED_STROKES) * 0.7F;
                 player.playSound(player.getLocation(), Sound.ITEM_BUNDLE_INSERT, SoundCategory.PLAYERS, 0.5F, pitch);
 
-                // Порог смешивания: 16 непрерывных взмахов
+                // Порог смешивания: 16 непрерывных взмахов (только при закрытом шейкере)
                 if (tracker.strokeCount >= REQUIRED_STROKES) {
                     tracker.strokeCount = 0;
                     tracker.strokeDelta = 0;
@@ -851,13 +839,6 @@ public class Shaker implements Listener {
 
         player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, SoundCategory.PLAYERS, 0.65F, 1.4F);
         player.playSound(player.getLocation(), Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.PLAYERS, 0.6F, 1.1F);
-
-        String drinkName = switch (drink) {
-            case RECIPE_MEAD -> "Медовуха";
-            case RECIPE_DAIQUIRI -> "Дайкири";
-            default -> "Муть";
-        };
-        player.sendActionBar(Component.text("Смешано: " + drinkName + "!", NamedTextColor.GREEN));
     }
 
     @EventHandler
