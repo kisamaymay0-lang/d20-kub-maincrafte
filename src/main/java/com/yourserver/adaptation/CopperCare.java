@@ -4,6 +4,8 @@ import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.Particle;
+import org.bukkit.Sound;
+import org.bukkit.SoundCategory;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
 import org.bukkit.block.Container;
@@ -107,6 +109,8 @@ final class CopperCare implements Listener {
                 block.getLocation().add(0.5, 0.5, 0.5),
                 18, 0.35, 0.35, 0.35, 0.0
         );
+
+        player.playSound(block.getLocation().add(0.5, 0.5, 0.5), Sound.ITEM_BOTTLE_FILL, SoundCategory.PLAYERS, 0.8F, 1.0F);
 
         if (player.getGameMode() != GameMode.CREATIVE) {
             WaterBottle.consume(player, hand);

@@ -169,6 +169,16 @@ final class ShakerTest {
 
     @Test
     void рецептАйсЛаттеУспешноОпределяется() {
+        // Айс-латте с горячей водой: 1 какао-боб, 1 ведро молока, 1 горячая вода, 1 лед, 1 мед
+        List<Shaker.IngredientKind> ingredientsHotWater = List.of(
+                Shaker.IngredientKind.COCOA_BEANS,
+                Shaker.IngredientKind.MILK_BUCKET,
+                Shaker.IngredientKind.HOT_WATER_BOTTLE,
+                Shaker.IngredientKind.ICE,
+                Shaker.IngredientKind.HONEY_BOTTLE
+        );
+        assertEquals(Shaker.RECIPE_ICED_LATTE, Shaker.matchRecipeFromKinds(ingredientsHotWater));
+
         // Айс-латте: 1 какао-боб, 1 ведро молока, 2 льда, 1 бутылка меда (всего 5 предметов)
         List<Shaker.IngredientKind> ingredients = List.of(
                 Shaker.IngredientKind.COCOA_BEANS,
@@ -189,6 +199,35 @@ final class ShakerTest {
         );
         assertEquals(Shaker.RECIPE_ICED_LATTE, Shaker.matchRecipeFromKinds(shuffled));
         assertEquals("f8resurs:iced_latte", Shaker.MODEL_ICED_LATTE_KEY.asString());
+    }
+
+    @Test
+    void рецептМатчаЧайУспешноОпределяется() {
+        // Матча-чай: 1 зеленый краситель, 1 горячая вода, 1 ведро молока, 1 лед, 1 мед
+        List<Shaker.IngredientKind> ingredients = List.of(
+                Shaker.IngredientKind.GREEN_DYE,
+                Shaker.IngredientKind.HOT_WATER_BOTTLE,
+                Shaker.IngredientKind.MILK_BUCKET,
+                Shaker.IngredientKind.ICE,
+                Shaker.IngredientKind.HONEY_BOTTLE
+        );
+        assertEquals(Shaker.RECIPE_MATCHA_TEA, Shaker.matchRecipeFromKinds(ingredients));
+
+        // Перемешанный порядок
+        List<Shaker.IngredientKind> shuffled = List.of(
+                Shaker.IngredientKind.HONEY_BOTTLE,
+                Shaker.IngredientKind.ICE,
+                Shaker.IngredientKind.GREEN_DYE,
+                Shaker.IngredientKind.MILK_BUCKET,
+                Shaker.IngredientKind.HOT_WATER_BOTTLE
+        );
+        assertEquals(Shaker.RECIPE_MATCHA_TEA, Shaker.matchRecipeFromKinds(shuffled));
+        assertEquals("f8resurs:matcha-chai", Shaker.MODEL_MATCHA_TEA_KEY.asString());
+    }
+
+    @Test
+    void бутылочкаГорячейВодыИдентификаторы() {
+        assertEquals("adaptation:hot_water_bottle", Shaker.HOT_WATER_KEY.asString());
     }
 
     @Test
