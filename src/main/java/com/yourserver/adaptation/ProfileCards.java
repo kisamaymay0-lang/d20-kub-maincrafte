@@ -70,7 +70,7 @@ final class ProfileCards {
     private final ProfileSubjects subjects;
     private final ProfileVoice voice;
     private final ProfileItems items;
-    private final PrefixCatalog prefixes;
+    private volatile PrefixCatalog prefixes;
     private final Set<UUID> sneaking = new HashSet<>();
     private final Map<UUID, Card> cards = new HashMap<>();
     private final BukkitTask task;
@@ -85,6 +85,9 @@ final class ProfileCards {
         for (Player player : Bukkit.getOnlinePlayers()) if (player.isSneaking()) sneaking.add(player.getUniqueId());
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 2L, 2L);
     }
+
+    /** Новый каталог префиксов после /f8 reload или /profile prefix reload. */
+    void prefixes(PrefixCatalog catalog) { this.prefixes = catalog; }
 
     void sneaking(UUID viewer, boolean value) { if (value) sneaking.add(viewer); else sneaking.remove(viewer); }
 

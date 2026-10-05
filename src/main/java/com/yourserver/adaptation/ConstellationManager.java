@@ -90,6 +90,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private double orbitRadians;
     private double orbitSpeed;
     private double depthMultiplier;
+    private double depthFill;
     private double farthestGeometry;
     private Quaternionf orbitRotation = new Quaternionf();
     private boolean renderErrorReported;
@@ -243,7 +244,8 @@ public class ConstellationManager implements Listener, CommandExecutor {
         followInterpolationTicks = 1; // Старое инертное догоняние намеренно удалено.
         double orbit = plugin.getConfig().getDouble("constellations.sky-rotation-degrees-per-second", 0.15);
         orbitSpeed = Double.isFinite(orbit) ? Math.clamp(orbit, -2.0, 2.0) : 0.15;
-        depthMultiplier = Math.clamp(positiveSetting("sky-depth-multiplier", 3.0), 1.0, 4.0);
+        depthMultiplier = Math.clamp(positiveSetting("sky-depth-multiplier", 3.0), 1.0, 8.0);
+        depthFill = Math.clamp(positiveSetting("depth-fill", 0.95), 0.5, 1.0);
         int interval = Math.clamp(plugin.getConfig().getInt("constellations.rotation-update-ticks", 4), 2, 20);
         rotationIntervalTicks = (interval + 1) / 2 * 2;
     }
@@ -546,7 +548,8 @@ public class ConstellationManager implements Listener, CommandExecutor {
         return views.computeIfAbsent(player.getUniqueId(), id -> {
             PlayerView view = new PlayerView();
             view.anchor = motionReference(player);
-            view.depthScale = SkyOrbit.depthScale(farthestGeometry, player.getClientViewDistance(), player.getViewDistance(), depthMultiplier);
+            view.depthScale = SkyOrbit.depthScale(
+                    farthestGeometry, player.getClientViewDistance(), player.getViewDistance(), depthMultiplier, depthFill);
             view.follow = new SkyFollow(point(view.anchor), Bukkit.getCurrentTick());
             return view;
         });
@@ -566,7 +569,8 @@ public class ConstellationManager implements Listener, CommandExecutor {
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (!shouldRender(player)) continue; // Уход уже созданного неба завершает visualTick.
             PlayerView view = viewFor(player);
-            float depth = SkyOrbit.depthScale(farthestGeometry, player.getClientViewDistance(), player.getViewDistance(), depthMultiplier);
+            float depth = SkyOrbit.depthScale(
+                    farthestGeometry, player.getClientViewDistance(), player.getViewDistance(), depthMultiplier, depthFill);
             if (Math.abs(depth - view.depthScale) > 0.001f) { view.depthScale = depth; view.lastAppearance = -1; }
             ensureStars(player);
             updateLines(player);
@@ -1266,6 +1270,11 @@ public class ConstellationManager implements Listener, CommandExecutor {
         s.sendMessage(ChatColor.WHITE + "/stars reload — перезагрузить файлы");
         s.sendMessage(ChatColor.WHITE + "/stars reset <игрок> — сбросить прогресс");
         s.sendMessage(ChatColor.WHITE + "/stars give <игрок> — выдать подзорную трубу");
+    }
+
+    /** Перечитать настройки неба из config.yml (используется /f8 reload и /stars reload). */
+    public void reloadSettings() {
+        reloadAll();
     }
 
     private void reloadAll() {
