@@ -210,6 +210,7 @@ public final class FrameVeil implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGH)
+    @SuppressWarnings("deprecation")
     public void onPrepareAnvil(PrepareAnvilEvent event) {
         AnvilInventory inv = event.getInventory();
         ItemStack first = inv.getFirstItem();

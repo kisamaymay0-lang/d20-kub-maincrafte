@@ -2160,7 +2160,7 @@ final class Cigarette implements Listener {
                     || Tag.BUTTONS.isTagged(mat)
                     || Tag.BEDS.isTagged(mat)
                     || Tag.SHULKER_BOXES.isTagged(mat)
-                    || Tag.ANVIL.isTagged(mat)) {
+                    || Tag.ANVILS.isTagged(mat)) {
                 return true;
             }
         } catch (Throwable ignored) {
