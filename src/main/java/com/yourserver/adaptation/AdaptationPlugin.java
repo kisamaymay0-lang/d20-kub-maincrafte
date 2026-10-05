@@ -134,7 +134,8 @@ public void onEnable() {
     getServer().getPluginManager().registerEvents(coralCare, this);
 
     getServer().getPluginManager().registerEvents(new LightBlocks(this), this);
-    getServer().getPluginManager().registerEvents(new FrameVeil(this), this);
+    getServer().getPluginManager().registerEvents(new FrameVeil(), this);
+    getServer().getPluginManager().registerEvents(new PaintingListener(), this);
 
     ancientJug = new AncientJug(this, dataWriter);
     getServer().getPluginManager().registerEvents(ancientJug, this);
