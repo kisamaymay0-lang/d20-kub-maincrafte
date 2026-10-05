@@ -22,7 +22,6 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -210,43 +209,24 @@ public final class FrameVeil implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGH)
-    @SuppressWarnings("deprecation")
     public void onPrepareAnvil(PrepareAnvilEvent event) {
-        AnvilInventory inv = event.getInventory();
-        ItemStack first = inv.getFirstItem();
-        if (first == null || first.getType() != Material.PAINTING) return;
-
-        String renameText = inv.getRenameText();
-        if (renameText == null) renameText = "";
-        renameText = renameText.trim();
-
         ItemStack result = event.getResult();
-        if (result == null || result.getType() == Material.AIR) {
-            result = first.clone();
-            result.setAmount(1);
-        }
+        if (result == null || result.getType() != Material.PAINTING) return;
 
         ItemMeta meta = result.getItemMeta();
-        if (meta != null) {
-            if ("Не курить 1".equalsIgnoreCase(renameText)) {
-                meta.displayName(Component.text("Не курить 1").decoration(TextDecoration.ITALIC, false));
-                meta.setItemModel(DONT_SMOKE_KEY);
-                result.setItemMeta(meta);
-                event.setResult(result);
-            } else if ("Не курить 2".equalsIgnoreCase(renameText)) {
-                meta.displayName(Component.text("Не курить 2").decoration(TextDecoration.ITALIC, false));
-                meta.setItemModel(DONT_SMOKE_2_KEY);
-                result.setItemMeta(meta);
-                event.setResult(result);
-            } else {
-                NamespacedKey model = meta.getItemModel();
-                if (model != null && "f8resurs".equals(model.getNamespace())
-                        && ("dont_smoke".equals(model.getKey()) || "dont_smoke2".equals(model.getKey()))) {
-                    meta.setItemModel(null);
-                    result.setItemMeta(meta);
-                    event.setResult(result);
-                }
-            }
+        if (meta == null || !meta.hasDisplayName()) return;
+
+        Component dn = meta.displayName();
+        String name = dn == null ? "" : PlainTextComponentSerializer.plainText().serialize(dn).trim();
+
+        if ("Не курить 1".equalsIgnoreCase(name)) {
+            meta.setItemModel(DONT_SMOKE_KEY);
+            result.setItemMeta(meta);
+            event.setResult(result);
+        } else if ("Не курить 2".equalsIgnoreCase(name)) {
+            meta.setItemModel(DONT_SMOKE_2_KEY);
+            result.setItemMeta(meta);
+            event.setResult(result);
         }
     }
 

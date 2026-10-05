@@ -133,8 +133,8 @@ jobs:
       if: always() && steps.maven.outputs.exit_code != '' && steps.maven.outputs.exit_code != '0'
       shell: bash
       run: |
-        grep -E "ERROR|error:|BUILD FAILURE|\.java:\[|\.java:[0-9]" mvn-build.log \
-          | head -80 \
+        grep -E "\[ERROR\] /.*\.java:" mvn-build.log \
+          | head -20 \
           | while IFS= read -r line; do
               printf '::error::%s\n' "$line" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g'
             done
