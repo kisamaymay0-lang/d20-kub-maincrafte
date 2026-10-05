@@ -23,7 +23,7 @@ final class FrameVeilTest {
     @Test
     void картиныИОбычныеБлокиНеЯвляютсяКастомнымиПредметамиДляРамок() {
         assertFalse(FrameVeil.isPluginCustomItem(null));
-        assertFalse(FrameVeil.isPluginCustomItem(new ItemStack(Material.AIR)));
+        assertFalse(FrameVeil.isPluginCustomItem(new ItemStack(Material.DIRT)));
         assertFalse(FrameVeil.isPluginCustomItem(new ItemStack(Material.STONE)));
         // Картины с особой моделью (и любые картины) исключены из правила отображения
         assertFalse(FrameVeil.isPluginCustomItem(new ItemStack(Material.PAINTING)));

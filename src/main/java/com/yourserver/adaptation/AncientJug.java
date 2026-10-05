@@ -393,9 +393,13 @@ public class AncientJug implements Listener {
         }
     }
 
-    public boolean isJug(ItemStack item) {
+    public static boolean isJugItem(ItemStack item) {
         return item != null && item.getType() == Material.NOTE_BLOCK && item.hasItemMeta()
-                && item.getItemMeta().getPersistentDataContainer().has(jugKey, PersistentDataType.BYTE);
+                && item.getItemMeta().getPersistentDataContainer().has(new NamespacedKey("adaptation", "ancient_jug"), PersistentDataType.BYTE);
+    }
+
+    public boolean isJug(ItemStack item) {
+        return isJugItem(item);
     }
 
     public int bottles(ItemStack item) {

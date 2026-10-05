@@ -15,14 +15,10 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Tag;
 import org.bukkit.World;
-import org.bukkit.block.Bell;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
-import org.bukkit.block.CommandBlock;
 import org.bukkit.block.Container;
 import org.bukkit.block.Dropper;
-import org.bukkit.block.Jukebox;
-import org.bukkit.block.Lectern;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Directional;
 import org.bukkit.GameMode;
@@ -2140,13 +2136,9 @@ final class Cigarette implements Listener {
         } catch (Throwable ignored) {
         }
 
-        // Контейнеры и блоки с GUI / состояниями
+        // Контейнеры (сундуки, бочки, печи, воронки, выбрасыватели, шалкеры, варочные стойки и др.)
         try {
-            if (block.getState() instanceof Container
-                    || block.getState() instanceof Lectern
-                    || block.getState() instanceof Jukebox
-                    || block.getState() instanceof Bell
-                    || block.getState() instanceof CommandBlock) {
+            if (block.getState() instanceof Container) {
                 return true;
             }
         } catch (Throwable ignored) {
@@ -2185,6 +2177,7 @@ final class Cigarette implements Listener {
                 || mat == Material.NOTE_BLOCK
                 || mat == Material.JUKEBOX
                 || mat == Material.BELL
+                || mat == Material.LECTERN
                 || mat == Material.REPEATER
                 || mat == Material.COMPARATOR
                 || mat == Material.DAYLIGHT_DETECTOR
@@ -2198,7 +2191,8 @@ final class Cigarette implements Listener {
                 || mat == Material.CAULDRON
                 || mat == Material.WATER_CAULDRON
                 || mat == Material.LAVA_CAULDRON
-                || mat == Material.POWDER_SNOW_CAULDRON;
+                || mat == Material.POWDER_SNOW_CAULDRON
+                || name.contains("COMMAND_BLOCK");
     }
 
     private static void setBars(ItemStack item, int bars) {
