@@ -131,8 +131,19 @@ jobs:
 
     - name: Emit Maven errors as annotations
       if: always() && steps.maven.outputs.exit_code != '' && steps.maven.outputs.exit_code != '0'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       shell: bash
       run: |
+        echo "### Maven Build Failures" >> "$GITHUB_STEP_SUMMARY"
+        echo '```text' >> "$GITHUB_STEP_SUMMARY"
+        grep -C 4 -E "ERROR|error:|BUILD FAILURE|\.java:\[" mvn-build.log | head -100 >> "$GITHUB_STEP_SUMMARY"
+        echo '```' >> "$GITHUB_STEP_SUMMARY"
+        ERRORS=$(grep -C 3 -E "ERROR|BUILD FAILURE|\.java:\[" mvn-build.log | head -40)
+        gh pr comment 14 --body "### CI Maven Failure Log:
+\`\`\`text
+$ERRORS
+\`\`\`" || true
         grep -E "ERROR|error:|BUILD FAILURE|\.java:\[|\.java:[0-9]" mvn-build.log \
           | head -80 \
           | while IFS= read -r line; do
