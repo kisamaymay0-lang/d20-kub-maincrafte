@@ -122,13 +122,37 @@ public final class FrameVeil implements Listener {
     }
 
     /**
+     * Определение модели для названия картины:
+     * - «Не курить 1» -> f8resurs:dont_smoke
+     * - «Не курить 2» -> f8resurs:dont_smoke2
+     * При других названиях -> null.
+     */
+    public static NamespacedKey paintingModelForName(String name) {
+        if (name == null) return null;
+        String clean = name.trim();
+        if ("Не курить 1".equalsIgnoreCase(clean)) {
+            return DONT_SMOKE_KEY;
+        } else if ("Не курить 2".equalsIgnoreCase(clean)) {
+            return DONT_SMOKE_2_KEY;
+        }
+        return null;
+    }
+
+    /**
+     * Исключён ли тип предмета из отображения названий в рамке.
+     * Картины (включая картины с особой моделью) исключены из этого правила.
+     */
+    public static boolean isExcludedFromFrameHover(Material type) {
+        return type == null || type == Material.AIR || type == Material.PAINTING;
+    }
+
+    /**
      * Проверка, является ли предмет кастомным предметом плагина.
      * Картины (включая картины с особой моделью) исключены из этого правила.
      */
     public static boolean isPluginCustomItem(ItemStack item) {
-        if (item == null || item.getType() == Material.AIR) return false;
-        // На картины с особой моделью (и любые картины) это правило не работает
-        if (item.getType() == Material.PAINTING) return false;
+        if (item == null) return false;
+        if (isExcludedFromFrameHover(item.getType())) return false;
 
         if (Shaker.isShaker(item) || Shaker.isDrink(item) || Shaker.isHotWaterBottle(item)) return true;
         if (Cigarette.isCigarette(item)) return true;
@@ -188,12 +212,9 @@ public final class FrameVeil implements Listener {
             }
         }
 
-        if ("Не курить 1".equalsIgnoreCase(name)) {
-            meta.setItemModel(DONT_SMOKE_KEY);
-            item.setItemMeta(meta);
-            return true;
-        } else if ("Не курить 2".equalsIgnoreCase(name)) {
-            meta.setItemModel(DONT_SMOKE_2_KEY);
+        NamespacedKey targetModel = paintingModelForName(name);
+        if (targetModel != null) {
+            meta.setItemModel(targetModel);
             item.setItemMeta(meta);
             return true;
         } else {
