@@ -169,17 +169,7 @@ final class ShakerTest {
 
     @Test
     void рецептАйсЛаттеУспешноОпределяется() {
-        // Айс-латте с горячей водой: 1 какао-боб, 1 ведро молока, 1 горячая вода, 1 лед, 1 мед
-        List<Shaker.IngredientKind> ingredientsHotWater = List.of(
-                Shaker.IngredientKind.COCOA_BEANS,
-                Shaker.IngredientKind.MILK_BUCKET,
-                Shaker.IngredientKind.HOT_WATER_BOTTLE,
-                Shaker.IngredientKind.ICE,
-                Shaker.IngredientKind.HONEY_BOTTLE
-        );
-        assertEquals(Shaker.RECIPE_ICED_LATTE, Shaker.matchRecipeFromKinds(ingredientsHotWater));
-
-        // Айс-латте: 1 какао-боб, 1 ведро молока, 2 льда, 1 бутылка меда (всего 5 предметов)
+        // Айс-латте: ровно 1 какао-боб, 1 ведро молока, 2 льда, 1 бутылка меда (всего 5 предметов)
         List<Shaker.IngredientKind> ingredients = List.of(
                 Shaker.IngredientKind.COCOA_BEANS,
                 Shaker.IngredientKind.MILK_BUCKET,
@@ -188,6 +178,16 @@ final class ShakerTest {
                 Shaker.IngredientKind.HONEY_BOTTLE
         );
         assertEquals(Shaker.RECIPE_ICED_LATTE, Shaker.matchRecipeFromKinds(ingredients));
+
+        // Вариант с горячей водой больше не варит айс-латте (дает муть)
+        List<Shaker.IngredientKind> ingredientsHotWater = List.of(
+                Shaker.IngredientKind.COCOA_BEANS,
+                Shaker.IngredientKind.MILK_BUCKET,
+                Shaker.IngredientKind.HOT_WATER_BOTTLE,
+                Shaker.IngredientKind.ICE,
+                Shaker.IngredientKind.HONEY_BOTTLE
+        );
+        assertEquals(Shaker.RECIPE_MURK, Shaker.matchRecipeFromKinds(ingredientsHotWater));
 
         // Перемешанный порядок
         List<Shaker.IngredientKind> shuffled = List.of(

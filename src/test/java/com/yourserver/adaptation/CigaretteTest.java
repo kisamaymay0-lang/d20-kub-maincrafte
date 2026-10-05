@@ -250,4 +250,9 @@ final class CigaretteTest {
         assertEquals(true, Cigarette.hasPrismarineNausea(5));
         assertEquals(true, Cigarette.hasPrismarineNausea(20));
     }
+
+    @Test
+    void проверкаФункциональныхБлоковДляСигареты() {
+        assertEquals(false, Cigarette.isFunctionalBlock(null));
+    }
 }

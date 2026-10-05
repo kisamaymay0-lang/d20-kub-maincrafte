@@ -5,6 +5,7 @@ import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.FoodProperties;
 import io.papermc.paper.datacomponent.item.TooltipDisplay;
 import io.papermc.paper.datacomponent.item.Consumable;
+import io.papermc.paper.datacomponent.item.Equippable;
 import io.papermc.paper.datacomponent.item.consumable.ItemUseAnimation;
 import io.papermc.paper.event.player.PlayerStopUsingItemEvent;
 import net.kyori.adventure.key.Key;
@@ -12,10 +13,16 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Tag;
 import org.bukkit.World;
+import org.bukkit.block.Bell;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
+import org.bukkit.block.CommandBlock;
+import org.bukkit.block.Container;
 import org.bukkit.block.Dropper;
+import org.bukkit.block.Jukebox;
+import org.bukkit.block.Lectern;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Directional;
 import org.bukkit.GameMode;
@@ -36,9 +43,12 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
@@ -632,6 +642,13 @@ final class Cigarette implements Listener {
                 .hasConsumeParticles(false)
                 .build(), "consumable");
         apply(item, DataComponentTypes.MAX_STACK_SIZE, MAX_STACK_SIZE, "max_stack_size");
+        try {
+            item.setData(DataComponentTypes.EQUIPPABLE, Equippable.equippable(EquipmentSlot.HEAD)
+                    .swappable(false)
+                    .dispensable(false)
+                    .build());
+        } catch (Throwable ignored) {
+        }
         return item;
     }
 
@@ -952,7 +969,23 @@ final class Cigarette implements Listener {
                 return;
             }
             if (isLit(handItem(player, hand))) {
-                // Не даём блоку перехватить клик; предмет используется и в воздухе, и по блоку.
+                Block clicked = event.getClickedBlock();
+                if (clicked == null && action == Action.RIGHT_CLICK_AIR) {
+                    try {
+                        clicked = player.getTargetBlockExact(4);
+                    } catch (Throwable ignored) {
+                    }
+                }
+                boolean functional = isFunctionalBlock(clicked);
+
+                if (!player.isSneaking() && functional) {
+                    // Игрок смотрит и достает до функционального блока: используется блок, курение не начинается
+                    event.setUseInteractedBlock(Event.Result.ALLOW);
+                    event.setUseItemInHand(Event.Result.DENY);
+                    return;
+                }
+
+                // Зажатие ПКМ с шифтом игнорирует все функциональные блоки
                 event.setUseInteractedBlock(Event.Result.DENY);
                 event.setUseItemInHand(Event.Result.ALLOW);
                 hold(player, hand);
@@ -1000,6 +1033,51 @@ final class Cigarette implements Listener {
         Puff puff = puffs.remove(event.getPlayer().getUniqueId());
         if (puff != null) {
             finish(event.getPlayer(), puff);
+        }
+    }
+
+    /** Смена слота в хотбаре немедленно закрывает тягу. */
+    @EventHandler
+    public void onItemHeldChange(PlayerItemHeldEvent event) {
+        Puff puff = puffs.remove(event.getPlayer().getUniqueId());
+        if (puff != null) {
+            finish(event.getPlayer(), puff);
+        }
+    }
+
+    /**
+     * Помещение сигареты в слот шлема: чисто косметический предмет на голове,
+     * не дающий брони или других параметров.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onArmorClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+
+        // Клик по слоту шлема (raw slot 5)
+        if (event.getSlotType() == InventoryType.SlotType.ARMOR && event.getRawSlot() == 5) {
+            ItemStack cursor = event.getCursor();
+            if (isCigarette(cursor)) {
+                ItemStack currentHelmet = event.getCurrentItem();
+                event.setCancelled(true);
+                event.setCurrentItem(cursor);
+                event.getWhoClicked().setItemOnCursor(currentHelmet);
+                player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_GENERIC, SoundCategory.PLAYERS, 1.0F, 1.0F);
+                return;
+            }
+        }
+
+        // Shift + клик по сигарете надевает её в слот шлема, если он пуст
+        if (event.isShiftClick()) {
+            ItemStack clicked = event.getCurrentItem();
+            if (isCigarette(clicked)) {
+                ItemStack helmet = player.getInventory().getHelmet();
+                if (helmet == null || helmet.getType() == Material.AIR) {
+                    event.setCancelled(true);
+                    event.setCurrentItem(null);
+                    player.getInventory().setHelmet(clicked);
+                    player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_GENERIC, SoundCategory.PLAYERS, 1.0F, 1.0F);
+                }
+            }
         }
     }
 
@@ -1111,6 +1189,19 @@ final class Cigarette implements Listener {
             int left = bars(item);
             int capacity = puff.capacity();
             int heldTicks = tick - puff.since();
+
+            // Если игрок отпустил ПКМ (или кликнул без удержания), тяга завершается
+            if (heldTicks >= 4) {
+                try {
+                    if (!player.isHandRaised()) {
+                        it.remove();
+                        finish(player, puff);
+                        continue;
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+
             int filled = barsFor(heldTicks, left, capacity);
 
             int gunpowder = gunpowderFilling(item);
@@ -2030,6 +2121,84 @@ final class Cigarette implements Listener {
 
     private static boolean isFlintAndSteel(ItemStack item) {
         return item != null && item.getType() == Material.FLINT_AND_STEEL;
+    }
+
+    /**
+     * Проверка, является ли блок функциональным/интерактивным при ПКМ
+     * (контейнеры, двери, кнопки, рычаги, верстаки, печи, наковальни, АПВШ и т.д.).
+     */
+    static boolean isFunctionalBlock(Block block) {
+        if (block == null) return false;
+        Material mat = block.getType();
+        if (mat == Material.AIR) return false;
+
+        // Кастомные блоки CraftEngine (АПВШ, нотный блок и др.)
+        try {
+            if (CraftEngineSupport.available() && CraftEngineSupport.idAt(block) != null) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+        }
+
+        // Контейнеры и блоки с GUI / состояниями
+        try {
+            if (block.getState() instanceof Container
+                    || block.getState() instanceof Lectern
+                    || block.getState() instanceof Jukebox
+                    || block.getState() instanceof Bell
+                    || block.getState() instanceof CommandBlock) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+        }
+
+        // Проверка по тегам
+        try {
+            if (Tag.DOORS.isTagged(mat)
+                    || Tag.TRAPDOORS.isTagged(mat)
+                    || Tag.FENCE_GATES.isTagged(mat)
+                    || Tag.BUTTONS.isTagged(mat)
+                    || Tag.BEDS.isTagged(mat)
+                    || Tag.SHULKER_BOXES.isTagged(mat)
+                    || Tag.ANVIL.isTagged(mat)) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+        }
+
+        // Материалы отдельных функциональных блоков
+        String name = mat.name();
+        if (name.endsWith("_BUTTON") || name.endsWith("_DOOR") || name.endsWith("_TRAPDOOR")
+                || name.endsWith("_GATE") || name.endsWith("_BED") || name.endsWith("_SHULKER_BOX")
+                || name.endsWith("_ANVIL") || name.endsWith("_CAKE")) {
+            return true;
+        }
+
+        return mat == Material.LEVER
+                || mat == Material.CRAFTING_TABLE
+                || mat == Material.ENCHANTING_TABLE
+                || mat == Material.ENDER_CHEST
+                || mat == Material.BEACON
+                || mat == Material.RESPAWN_ANCHOR
+                || mat == Material.LODESTONE
+                || mat == Material.COMPOSTER
+                || mat == Material.NOTE_BLOCK
+                || mat == Material.JUKEBOX
+                || mat == Material.BELL
+                || mat == Material.REPEATER
+                || mat == Material.COMPARATOR
+                || mat == Material.DAYLIGHT_DETECTOR
+                || mat == Material.CARTOGRAPHY_TABLE
+                || mat == Material.SMITHING_TABLE
+                || mat == Material.GRINDSTONE
+                || mat == Material.LOOM
+                || mat == Material.STONECUTTER
+                || mat == Material.SWEET_BERRY_BUSH
+                || mat == Material.CAKE
+                || mat == Material.CAULDRON
+                || mat == Material.WATER_CAULDRON
+                || mat == Material.LAVA_CAULDRON
+                || mat == Material.POWDER_SNOW_CAULDRON;
     }
 
     private static void setBars(ItemStack item, int bars) {

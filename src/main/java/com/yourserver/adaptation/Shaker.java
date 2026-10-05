@@ -573,23 +573,13 @@ public class Shaker implements Listener {
             return RECIPE_MATCHA_TEA;
         }
 
-        // Айс-латте: ровно 1 какао-боб, 1 ведро молока, 1 горячая вода (или вода), 1-2 льда (всего 5 предметов)
+        // Айс-латте: ровно 1 какао-боб, 1 ведро молока, 2 льда, 1 мед (всего 5 предметов)
         if (kinds.size() == 5
                 && counts.getOrDefault(IngredientKind.COCOA_BEANS, 0) == 1
                 && counts.getOrDefault(IngredientKind.MILK_BUCKET, 0) == 1
-                && counts.getOrDefault(IngredientKind.ICE, 0) >= 1) {
-            if (counts.getOrDefault(IngredientKind.HOT_WATER_BOTTLE, 0) == 1
-                    && (counts.getOrDefault(IngredientKind.HONEY_BOTTLE, 0) == 1 || counts.getOrDefault(IngredientKind.ICE, 0) == 2)) {
-                return RECIPE_ICED_LATTE;
-            }
-            if (counts.getOrDefault(IngredientKind.WATER_BOTTLE, 0) == 1
-                    && counts.getOrDefault(IngredientKind.HONEY_BOTTLE, 0) == 1) {
-                return RECIPE_ICED_LATTE;
-            }
-            if (counts.getOrDefault(IngredientKind.ICE, 0) == 2
-                    && counts.getOrDefault(IngredientKind.HONEY_BOTTLE, 0) == 1) {
-                return RECIPE_ICED_LATTE;
-            }
+                && counts.getOrDefault(IngredientKind.ICE, 0) == 2
+                && counts.getOrDefault(IngredientKind.HONEY_BOTTLE, 0) == 1) {
+            return RECIPE_ICED_LATTE;
         }
 
         return RECIPE_MURK;
