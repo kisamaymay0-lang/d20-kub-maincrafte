@@ -13,7 +13,6 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
@@ -2139,20 +2138,6 @@ final class Cigarette implements Listener {
         // Контейнеры (сундуки, бочки, печи, воронки, выбрасыватели, шалкеры, варочные стойки и др.)
         try {
             if (block.getState() instanceof Container) {
-                return true;
-            }
-        } catch (Throwable ignored) {
-        }
-
-        // Проверка по тегам
-        try {
-            if (Tag.DOORS.isTagged(mat)
-                    || Tag.TRAPDOORS.isTagged(mat)
-                    || Tag.FENCE_GATES.isTagged(mat)
-                    || Tag.BUTTONS.isTagged(mat)
-                    || Tag.BEDS.isTagged(mat)
-                    || Tag.SHULKER_BOXES.isTagged(mat)
-                    || Tag.ANVILS.isTagged(mat)) {
                 return true;
             }
         } catch (Throwable ignored) {
