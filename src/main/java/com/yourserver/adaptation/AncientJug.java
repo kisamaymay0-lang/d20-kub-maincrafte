@@ -338,7 +338,7 @@ public class AncientJug implements Listener {
         }
         ItemStack item = new ItemStack(Material.NOTE_BLOCK);
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(ProfileItems.text(TITLE, NamedTextColor.GOLD));
+        meta.itemName(ProfileItems.text(TITLE, NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
         List<Component> lore = new ArrayList<>();
         lore.add(ProfileItems.text("Особый предмет рыбалки в пустынных биомах.", NamedTextColor.GRAY));
         if (bottles > 0 && kind != null) {
@@ -394,17 +394,27 @@ public class AncientJug implements Listener {
     }
 
     public static boolean isJugItem(ItemStack item) {
-        return item != null && item.getType() == Material.NOTE_BLOCK && item.hasItemMeta()
-                && item.getItemMeta().getPersistentDataContainer().has(new NamespacedKey("adaptation", "ancient_jug"), PersistentDataType.BYTE);
+        if (item == null || item.getType() != Material.NOTE_BLOCK || !item.hasItemMeta()) return false;
+        var pdc = item.getItemMeta().getPersistentDataContainer();
+        return pdc.has(new NamespacedKey("f8-plugin", "ancient_jug"), PersistentDataType.BYTE)
+                || pdc.has(new NamespacedKey("adaptation", "ancient_jug"), PersistentDataType.BYTE);
     }
 
     public boolean isJug(ItemStack item) {
-        return isJugItem(item);
+        if (item == null || item.getType() != Material.NOTE_BLOCK || !item.hasItemMeta()) return false;
+        var pdc = item.getItemMeta().getPersistentDataContainer();
+        return pdc.has(jugKey, PersistentDataType.BYTE)
+                || pdc.has(new NamespacedKey("f8-plugin", "ancient_jug"), PersistentDataType.BYTE)
+                || pdc.has(new NamespacedKey("adaptation", "ancient_jug"), PersistentDataType.BYTE);
     }
 
     public int bottles(ItemStack item) {
         if (!isJug(item)) return 0;
-        Integer count = item.getItemMeta().getPersistentDataContainer().get(countKey, PersistentDataType.INTEGER);
+        var pdc = item.getItemMeta().getPersistentDataContainer();
+        Integer count = pdc.get(countKey, PersistentDataType.INTEGER);
+        if (count == null) {
+            count = pdc.get(new NamespacedKey("adaptation", "jug_count"), PersistentDataType.INTEGER);
+        }
         return count == null ? 0 : Math.clamp(count, 0, MAX_BOTTLES);
     }
 
@@ -412,14 +422,18 @@ public class AncientJug implements Listener {
         if (!isJug(item)) return new Contents(null, null, null, 0);
         var pdc = item.getItemMeta().getPersistentDataContainer();
         Integer count = pdc.get(countKey, PersistentDataType.INTEGER);
+        if (count == null) {
+            count = pdc.get(new NamespacedKey("adaptation", "jug_count"), PersistentDataType.INTEGER);
+        }
         int bottles = count == null ? 0 : Math.clamp(count, 0, MAX_BOTTLES);
         if (bottles == 0) return new Contents(null, null, null, 0);
-        return new Contents(
-                pdc.get(kindKey, PersistentDataType.STRING),
-                pdc.get(potionKey, PersistentDataType.STRING),
-                pdc.get(customKey, PersistentDataType.BYTE_ARRAY),
-                bottles
-        );
+        String kind = pdc.get(kindKey, PersistentDataType.STRING);
+        if (kind == null) kind = pdc.get(new NamespacedKey("adaptation", "jug_kind"), PersistentDataType.STRING);
+        String potion = pdc.get(potionKey, PersistentDataType.STRING);
+        if (potion == null) potion = pdc.get(new NamespacedKey("adaptation", "jug_potion"), PersistentDataType.STRING);
+        byte[] custom = pdc.get(customKey, PersistentDataType.BYTE_ARRAY);
+        if (custom == null) custom = pdc.get(new NamespacedKey("adaptation", "jug_custom"), PersistentDataType.BYTE_ARRAY);
+        return new Contents(kind, potion, custom, bottles);
     }
 
     private Component liquidName(String kind, String potion, byte[] custom) {
@@ -827,9 +841,11 @@ public class AncientJug implements Listener {
             return;
         }
 
-        writeContents(blockKey(block), contents);
+        String key = blockKey(block);
+        writeContents(key, contents);
+        placedCounts.put(key, contents.count);
         storage.markDirty();
-        refresh(blockKey(block));
+        refresh(key);
         // Клиент предсказал нот-блок. Возвращаем ему настоящее состояние,
         // чтобы модель кувшина появилась сразу.
         placing.sendBlockChange(block.getLocation(), block.getBlockData());

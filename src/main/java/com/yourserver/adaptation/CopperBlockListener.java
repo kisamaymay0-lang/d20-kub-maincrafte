@@ -38,6 +38,9 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -204,9 +207,9 @@ public class CopperBlockListener implements Listener {
         ItemMeta meta = item.getItemMeta();
 
         if (meta != null) {
-            meta.setDisplayName("§6Медный нотный блок");
-            meta.setLore(List.of(
-                    "§7Поставьте и нажмите ПКМ, чтобы настроить ноты"
+            meta.itemName(Component.text("Медный нотный блок", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
+            meta.lore(List.of(
+                    Component.text("Поставьте и нажмите ПКМ, чтобы настроить ноты", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)
             ));
             meta.setItemModel(new NamespacedKey(
                     "f8resurs",

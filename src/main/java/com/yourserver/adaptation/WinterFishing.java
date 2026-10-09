@@ -150,9 +150,11 @@ final class WinterFishing implements Listener {
         // PDC is the primary marker. The visible custom name is a deliberate fallback for
         // server implementations that rebuild projectile ItemStacks and discard unknown PDC.
         ItemMeta meta = item == null ? null : item.getItemMeta();
-        if (meta == null || meta.displayName() == null) return null;
+        if (meta == null) return null;
+        Component nameComp = meta.hasDisplayName() ? meta.displayName() : meta.itemName();
+        if (nameComp == null) return null;
         String name = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText()
-                .serialize(meta.displayName());
+                .serialize(nameComp);
         if (name.equals(WinterItems.Kind.RIME_POTION_SPLASH.title)) return WinterItems.Kind.RIME_POTION_SPLASH;
         if (name.equals(WinterItems.Kind.RIME_POTION_LINGERING.title)) return WinterItems.Kind.RIME_POTION_LINGERING;
         return null;

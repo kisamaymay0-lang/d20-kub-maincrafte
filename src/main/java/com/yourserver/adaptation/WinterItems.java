@@ -54,7 +54,7 @@ final class WinterItems {
     ItemStack create(Kind kind) {
         ItemStack item = new ItemStack(kind.material);
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(ProfileItems.text(kind.title, WinterRules.titleColor(kind.name())));
+        meta.itemName(ProfileItems.text(kind.title, WinterRules.titleColor(kind.name())).decoration(TextDecoration.ITALIC, false));
         String description = description(kind);
         meta.lore(List.of(ProfileItems.text(description, NamedTextColor.GRAY)));
         if (!isRimePotion(kind)) meta.setItemModel(new NamespacedKey("f8resurs", kind.id));
@@ -117,7 +117,7 @@ final class WinterItems {
         ItemStack current = create(kind);
         ItemStack legacy = current.clone();
         ItemMeta meta = legacy.getItemMeta();
-        meta.displayName(ProfileItems.text(kind.title, NamedTextColor.WHITE));
+        meta.itemName(ProfileItems.text(kind.title, NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
         meta.lore(List.of(ProfileItems.text(kind == Kind.ROE ? "Добывается из Изморози" : description(kind), NamedTextColor.GRAY)));
         legacy.setItemMeta(meta);
         return new RecipeChoice.ExactChoice(List.of(current, legacy));

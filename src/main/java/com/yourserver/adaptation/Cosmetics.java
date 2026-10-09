@@ -89,7 +89,7 @@ final class Cosmetics implements Listener {
     static ItemStack item(JavaPlugin plugin, CosmeticCatalog.Cosmetic cosmetic) {
         ItemStack item = new ItemStack(BASE_ITEM);
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(ProfileItems.text(cosmetic.name(), NamedTextColor.GOLD));
+        meta.itemName(ProfileItems.text(cosmetic.name(), NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
         meta.setItemModel(new NamespacedKey(MODEL_NAMESPACE, cosmetic.file()));
         meta.getPersistentDataContainer().set(
                 new NamespacedKey(plugin, "cosmetic"), PersistentDataType.STRING, cosmetic.id());

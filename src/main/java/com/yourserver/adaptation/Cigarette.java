@@ -611,7 +611,7 @@ final class Cigarette implements Listener {
     private static ItemStack create(boolean lit, Variant variant) {
         ItemStack item = new ItemStack(Material.PAPER);
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(ProfileItems.text(TITLE, NamedTextColor.WHITE));
+        meta.itemName(ProfileItems.text(TITLE, NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
         meta.setItemModel(new NamespacedKey("f8resurs", lit ? variant.litModel : variant.coldModel));
         meta.getPersistentDataContainer().set(LIT, PersistentDataType.INTEGER, lit ? 1 : 0);
         meta.getPersistentDataContainer().set(VARIANT, PersistentDataType.STRING, variant.id);

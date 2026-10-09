@@ -192,10 +192,10 @@ public final class Apvsh implements Listener {
         ItemStack item = new ItemStack(Material.NOTE_BLOCK);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.displayName(Component.text("§6АПВШ"));
+            meta.itemName(Component.text("АПВШ", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
             meta.lore(List.of(
-                    Component.text("§7Аппарат для создания и наполнения сигарет"),
-                    Component.text("§7Поставьте и нажмите ПКМ, чтобы открыть меню")
+                    Component.text("Аппарат для создания и наполнения сигарет", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                    Component.text("Поставьте и нажмите ПКМ, чтобы открыть меню", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)
             ));
             meta.setItemModel(new NamespacedKey("f8resurs", "copper_note_block"));
             meta.getPersistentDataContainer().set(apvshBlockKey, PersistentDataType.BYTE, (byte) 1);
@@ -439,10 +439,19 @@ public final class Apvsh implements Listener {
             return;
         }
 
-        CraftEngineApvsh.place(block);
+        if (!CraftEngineApvsh.place(block)) {
+            event.setCancelled(true);
+            event.getPlayer().sendMessage(Component.text(
+                    "§cНе удалось поставить АПВШ: CraftEngine не принял блок " + CraftEngineApvsh.ID));
+            return;
+        }
         String key = blockKey(block);
         trackedBlocks.put(key, block.getLocation());
         powerEdges.update(key, hasPower(block));
+
+        // Клиент предсказал нотный блок. Возвращаем ему настоящее состояние,
+        // чтобы модель появилась сразу.
+        event.getPlayer().sendBlockChange(block.getLocation(), block.getBlockData());
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

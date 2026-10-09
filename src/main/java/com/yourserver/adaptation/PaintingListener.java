@@ -13,7 +13,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 /**
- * Модели картин при переименовании:
+ * Модели плакатов при переименовании бумаги:
  * - «Не курить 1» -> f8resurs:dont_smoke
  * - «Не курить 2» -> f8resurs:dont_smoke2
  */
@@ -23,7 +23,7 @@ public final class PaintingListener implements Listener {
     public static final NamespacedKey DONT_SMOKE_2_KEY = new NamespacedKey("f8resurs", "dont_smoke2");
 
     /**
-     * Определение модели для названия картины.
+     * Определение модели для названия бумаги.
      */
     public static NamespacedKey paintingModelForName(String name) {
         if (name == null) return null;
@@ -37,10 +37,10 @@ public final class PaintingListener implements Listener {
     }
 
     /**
-     * Обновляет модель предмета картины.
+     * Обновляет модель предмета бумаги.
      */
     public static boolean updatePaintingModel(ItemStack item) {
-        if (item == null || item.getType() != Material.PAINTING) return false;
+        if (item == null || item.getType() != Material.PAPER) return false;
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return false;
 
@@ -72,7 +72,7 @@ public final class PaintingListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH)
     public void onPrepareAnvil(PrepareAnvilEvent event) {
         ItemStack result = event.getResult();
-        if (result == null || result.getType() != Material.PAINTING) return;
+        if (result == null || result.getType() != Material.PAPER) return;
 
         ItemMeta meta = result.getItemMeta();
         if (meta == null || !meta.hasDisplayName()) return;
@@ -94,11 +94,11 @@ public final class PaintingListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onInventoryClick(InventoryClickEvent event) {
         ItemStack cursor = event.getCursor();
-        if (cursor != null && cursor.getType() == Material.PAINTING) {
+        if (cursor != null && cursor.getType() == Material.PAPER) {
             updatePaintingModel(cursor);
         }
         ItemStack current = event.getCurrentItem();
-        if (current != null && current.getType() == Material.PAINTING) {
+        if (current != null && current.getType() == Material.PAPER) {
             updatePaintingModel(current);
         }
     }
