@@ -28,6 +28,7 @@ import io.papermc.paper.potion.PotionMix;
 import org.bukkit.inventory.CampfireRecipe;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.EquipmentSlot;
+import net.kyori.adventure.text.Component;
 import org.bukkit.inventory.FurnaceRecipe;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.RecipeChoice;
