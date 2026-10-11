@@ -130,6 +130,7 @@ public class Shaker implements Listener {
         PotionMeta meta = (PotionMeta) item.getItemMeta();
         if (meta != null) {
             meta.setBasePotionType(PotionType.WATER);
+            meta.displayName(Component.text("Бутылочка горячей воды", NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Бутылочка горячей воды", NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
             meta.getPersistentDataContainer().set(HOT_WATER_KEY, PersistentDataType.BYTE, (byte) 1);
             item.setItemMeta(meta);
@@ -223,6 +224,7 @@ public class Shaker implements Listener {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
 
+        meta.displayName(Component.text("Шейкер", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
         meta.itemName(Component.text("Шейкер", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
         meta.setItemModel(open ? MODEL_OPEN_KEY : MODEL_CLOSE_KEY);
 
@@ -238,12 +240,19 @@ public class Shaker implements Listener {
 
         List<Component> lore = new ArrayList<>();
         int count = contents == null ? 0 : contents.size();
+        String state = open ? "(открыт)" : "(закрыт)";
         if (count == 0) {
-            lore.add(Component.text("Пустой 0/" + MAX_SLOTS, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+            lore.add(Component.text("Пустой шейкер (0/" + MAX_SLOTS + ") " + state, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
         } else {
-            lore.add(Component.text("Содержимое " + count + "/" + MAX_SLOTS + ":", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+            lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + ") " + state + ":", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
             for (ItemStack ingredient : contents) {
                 lore.add(Component.text("• " + getItemDisplayName(ingredient), getItemColor(ingredient)).decoration(TextDecoration.ITALIC, false));
+            }
+            lore.add(Component.empty());
+            if (open) {
+                lore.add(Component.text("Закройте шейкер (Shift + ПКМ), чтобы смешать.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
+            } else {
+                lore.add(Component.text("Трясите камеру вверх-вниз для смешивания.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
             }
         }
 
@@ -280,6 +289,18 @@ public class Shaker implements Listener {
         if (item == null) return "Ничего";
         if (isHotWaterBottle(item)) {
             return "Бутылочка горячей воды";
+        }
+        if (isDrink(item)) {
+            String drink = item.getItemMeta().getPersistentDataContainer().get(DRINK_PDC_KEY, PersistentDataType.STRING);
+            if (drink != null) {
+                return switch (drink) {
+                    case RECIPE_MEAD -> "Медовуха";
+                    case RECIPE_DAIQUIRI -> "Дайкири";
+                    case RECIPE_ICED_LATTE -> "Айс-латте";
+                    case RECIPE_MATCHA_TEA -> "Матча-чай";
+                    default -> "Муть";
+                };
+            }
         }
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
@@ -594,20 +615,24 @@ public class Shaker implements Listener {
         if (meta == null) return potion;
 
         meta.getPersistentDataContainer().set(DRINK_PDC_KEY, PersistentDataType.STRING, recipe);
+        meta.setBasePotionType(PotionType.WATER);
 
         if (RECIPE_MEAD.equals(recipe)) {
+            meta.displayName(Component.text("Медовуха", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Медовуха", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
             meta.setColor(Color.fromRGB(0xEB, 0xAF, 0x28));
             meta.addCustomEffect(new PotionEffect(PotionEffectType.REGENERATION, 30 * 20, 0), true);
             meta.addCustomEffect(new PotionEffect(PotionEffectType.SATURATION, 10 * 20, 0), true);
             potion.setItemMeta(meta);
         } else if (RECIPE_DAIQUIRI.equals(recipe)) {
+            meta.displayName(Component.text("Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
             meta.setColor(Color.fromRGB(0xF0, 0x46, 0x6E));
             meta.addCustomEffect(new PotionEffect(PotionEffectType.SPEED, 30 * 20, 0), true);
             meta.addCustomEffect(new PotionEffect(PotionEffectType.REGENERATION, 10 * 20, 0), true);
             potion.setItemMeta(meta);
         } else if (RECIPE_ICED_LATTE.equals(recipe)) {
+            meta.displayName(Component.text("Айс-латте", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Айс-латте", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
             meta.setColor(Color.fromRGB(0xE8, 0xC4, 0x99));
             meta.setItemModel(MODEL_ICED_LATTE_KEY);
@@ -615,6 +640,7 @@ public class Shaker implements Listener {
             meta.addCustomEffect(new PotionEffect(PotionEffectType.HASTE, 45 * 20, 0), true);
             potion.setItemMeta(meta);
         } else if (RECIPE_MATCHA_TEA.equals(recipe)) {
+            meta.displayName(Component.text("Матча-чай", NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Матча-чай", NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
             meta.setColor(Color.fromRGB(0x78, 0xA8, 0x3C));
             meta.setItemModel(MODEL_MATCHA_TEA_KEY);
@@ -622,7 +648,7 @@ public class Shaker implements Listener {
             meta.addCustomEffect(new PotionEffect(PotionEffectType.ABSORPTION, 60 * 20, 0), true);
             potion.setItemMeta(meta);
         } else {
-            meta.setBasePotionType(null);
+            meta.displayName(Component.text("Муть", NamedTextColor.DARK_GREEN).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Муть", NamedTextColor.DARK_GREEN).decoration(TextDecoration.ITALIC, false));
             meta.setColor(Color.fromRGB(0x4E, 0x93, 0x31));
             meta.clearCustomEffects();
