@@ -46,9 +46,12 @@ import java.util.Random;
  *   <li><b>Структура 3x3x3:</b> Состоит из обтёсанных бамбуковых блоков (stripped_bamboo_block) и бамбуковых ступеней (bamboo_stairs) с полой сердцевиной (air).</li>
  *   <li><b>Ориентация:</b> Поддерживается горизонтальное расположение вдоль оси X и вдоль оси Z.</li>
  *   <li><b>Ингредиенты:</b> 1 Уголь/Древесный уголь, 1 Сахарный тростник, 3 Бутылочки горячей воды.</li>
+ *   <li><b>Добавление:</b> При добавлении предметов из бочки вылетают частицы WAX_OFF.</li>
+ *   <li><b>Извлечение:</b> На Shift + ПКМ можно забирать ингредиенты из бочки (для сбора жидкости нужна пустая стеклянная бутылочка).</li>
  *   <li><b>Брожение:</b> 10 секунд (200 тиков) с визуальными эффектами.</li>
- *   <li><b>Готовность:</b> После завершения брожения бочка покрывается каплями воды (dripping_water / falling_water).</li>
+ *   <li><b>Готовность:</b> После завершения брожения вся 3x3 поверхность бочки покрывается стекающими каплями воды (dripping_water / falling_water).</li>
  *   <li><b>Забор рома:</b> ПКМ с пустой бутылочкой забирает «Пиратский ром» (модель f8resurs:skull_poilo).</li>
+ *   <li><b>Разрушение бочки:</b> Твёрдые ресурсы выпадают в центре, а жидкость разливается и не выпадает.</li>
  *   <li><b>Обратная связь:</b> Исключительно внутриигровая (звуки, партиклы, предметы) без лишнего чата.</li>
  * </ul>
  */
@@ -250,7 +253,7 @@ public class BambooBarrel implements Listener {
         return b != null && b == (byte) 1;
     }
 
-    // ===== ТИК И ВИЗУАЛЬНЫЕ ЭФФЕКТЫ =====
+    // ===== ТИК И ВИЗУАЛЬНЫЕ ЭФФЕКТЫ (ПО ВСЕЙ СТРУКТУРЕ 3x3) =====
 
     private void tick() {
         Iterator<Map.Entry<Location, BarrelState>> it = barrels.entrySet().iterator();
@@ -276,13 +279,19 @@ public class BambooBarrel implements Listener {
                 continue;
             }
 
-            Location center = centerLoc.clone().add(0.5, 0.5, 0.5);
-
             if (state.brewing) {
                 state.brewingTicks -= 2;
-                world.spawnParticle(Particle.SPLASH, center.clone().add(0, 0.5, 0), 3, 0.25, 0.1, 0.25, 0.05);
-                if (RANDOM.nextFloat() < 0.3f) {
-                    world.spawnParticle(Particle.BUBBLE_POP, center.clone().add((RANDOM.nextFloat() - 0.5) * 0.6, 0.6, (RANDOM.nextFloat() - 0.5) * 0.6), 1, 0, 0.05, 0, 0.01);
+
+                // Партиклы пара и кипения по верхней плоскости 3x3 структуры бочки
+                for (int i = 0; i < 3; i++) {
+                    double px = (cx - 0.8) + RANDOM.nextDouble() * 2.6;
+                    double pz = (cz - 0.8) + RANDOM.nextDouble() * 2.6;
+                    world.spawnParticle(Particle.SPLASH, px, cy + 1.2, pz, 2, 0.15, 0.1, 0.15, 0.05);
+                }
+                if (RANDOM.nextFloat() < 0.4f) {
+                    double px = (cx - 0.5) + RANDOM.nextDouble() * 2.0;
+                    double pz = (cz - 0.5) + RANDOM.nextDouble() * 2.0;
+                    world.spawnParticle(Particle.BUBBLE_POP, px, cy + 1.4, pz, 1, 0.0, 0.05, 0.0, 0.01);
                 }
 
                 if (state.brewingTicks <= 0) {
@@ -292,13 +301,20 @@ public class BambooBarrel implements Listener {
                     world.playSound(centerLoc, Sound.BLOCK_CONDUIT_ACTIVATE, SoundCategory.BLOCKS, 0.5F, 1.5F);
                 }
             } else if (state.ready) {
-                // Покрывается каплями воды (капли стекают по бочке)
-                for (int i = 0; i < 3; i++) {
-                    double ox = (RANDOM.nextFloat() - 0.5) * 1.8;
-                    double oz = (RANDOM.nextFloat() - 0.5) * 1.8;
-                    double oy = (RANDOM.nextFloat() - 0.5) * 1.5;
-                    world.spawnParticle(Particle.DRIPPING_WATER, center.clone().add(ox, 0.6 + oy * 0.4, oz), 1, 0.05, 0.05, 0.05, 0.0);
-                    world.spawnParticle(Particle.FALLING_WATER, center.clone().add(ox, 0.3 + oy * 0.3, oz), 1, 0.05, 0.05, 0.05, 0.0);
+                // Покрывается каплями воды по всей внешней поверхности структуры 3x3
+                for (int i = 0; i < 6; i++) {
+                    double px = (cx - 1.0) + RANDOM.nextDouble() * 3.0;
+                    double pz = (cz - 1.0) + RANDOM.nextDouble() * 3.0;
+                    double py = (cy - 1.0) + RANDOM.nextDouble() * 3.0;
+
+                    if (RANDOM.nextBoolean()) {
+                        // Капли сверху и скатывающиеся вниз
+                        world.spawnParticle(Particle.DRIPPING_WATER, px, cy + 2.02, pz, 1, 0.0, 0.0, 0.0, 0.0);
+                        world.spawnParticle(Particle.FALLING_WATER, px, cy + 1.8, pz, 1, 0.0, 0.0, 0.0, 0.0);
+                    } else {
+                        // Капли по бокам корпуса
+                        world.spawnParticle(Particle.DRIPPING_WATER, px, py, pz, 1, 0.02, 0.02, 0.02, 0.0);
+                    }
                 }
             }
         }
@@ -316,6 +332,7 @@ public class BambooBarrel implements Listener {
         if (centerLoc == null) return;
 
         Player player = event.getPlayer();
+        World world = block.getWorld();
         EquipmentSlot hand = event.getHand();
         if (hand == null) hand = EquipmentSlot.HAND;
 
@@ -325,7 +342,61 @@ public class BambooBarrel implements Listener {
 
         BarrelState state = barrels.computeIfAbsent(centerLoc, k -> new BarrelState());
 
-        // 1. Забор готового рома пустой бутылочкой
+        // 1. Shift + ПКМ: Забор предметов из бочки
+        if (player.isSneaking()) {
+            if (!state.brewing && !state.ready) {
+                // Забор жидкости: требуется пустая бутылочка
+                if (held != null && held.getType() == Material.GLASS_BOTTLE && state.hotWaterCount > 0) {
+                    event.setCancelled(true);
+                    consumeOne(player, hand, held);
+                    ItemStack hotWater = Shaker.createHotWaterBottle();
+                    giveOrDrop(player, hotWater);
+                    state.hotWaterCount--;
+                    player.playSound(centerLoc, Sound.ITEM_BOTTLE_FILL, SoundCategory.BLOCKS, 0.8F, 1.0F);
+                    world.spawnParticle(Particle.SPLASH, block.getLocation().add(0.5, 0.8, 0.5), 4, 0.1, 0.1, 0.1, 0.02);
+                    if (state.isEmpty()) {
+                        barrels.remove(centerLoc);
+                    }
+                    return;
+                }
+
+                // Забор твёрдых ресурсов (сахарный тростник)
+                if (state.caneCount > 0) {
+                    event.setCancelled(true);
+                    state.caneCount--;
+                    giveOrDrop(player, new ItemStack(Material.SUGAR_CANE));
+                    player.playSound(centerLoc, Sound.ITEM_BUNDLE_REMOVE, SoundCategory.BLOCKS, 0.7F, 1.1F);
+                    world.spawnParticle(Particle.WAX_OFF, block.getLocation().add(0.5, 0.8, 0.5), 3, 0.1, 0.1, 0.1, 0.02);
+                    if (state.isEmpty()) {
+                        barrels.remove(centerLoc);
+                    }
+                    return;
+                }
+
+                // Забор твёрдых ресурсов (уголь)
+                if (state.coalCount > 0) {
+                    event.setCancelled(true);
+                    state.coalCount--;
+                    giveOrDrop(player, new ItemStack(Material.COAL));
+                    player.playSound(centerLoc, Sound.ITEM_BUNDLE_REMOVE, SoundCategory.BLOCKS, 0.7F, 1.1F);
+                    world.spawnParticle(Particle.WAX_OFF, block.getLocation().add(0.5, 0.8, 0.5), 3, 0.1, 0.1, 0.1, 0.02);
+                    if (state.isEmpty()) {
+                        barrels.remove(centerLoc);
+                    }
+                    return;
+                }
+
+                // Если в бочке только жидкость, а у игрока нет пустой бутылочки
+                if (state.hotWaterCount > 0) {
+                    event.setCancelled(true);
+                    player.playSound(centerLoc, Sound.BLOCK_WATER_AMBIENT, SoundCategory.BLOCKS, 0.4F, 1.5F);
+                    return;
+                }
+            }
+            return;
+        }
+
+        // 2. Забор готового рома пустой бутылочкой (обычный ПКМ)
         if (state.ready) {
             if (held != null && held.getType() == Material.GLASS_BOTTLE) {
                 event.setCancelled(true);
@@ -356,31 +427,33 @@ public class BambooBarrel implements Listener {
 
         if (held == null || held.getType() == Material.AIR) return;
 
-        // 2. Добавление угля (требуется 1 шт.)
+        // 3. Добавление угля (требуется 1 шт.)
         if (held.getType() == Material.COAL || held.getType() == Material.CHARCOAL) {
             if (state.coalCount < 1) {
                 event.setCancelled(true);
                 consumeOne(player, hand, held);
                 state.coalCount++;
+                spawnAddParticles(world, block, centerLoc);
                 player.playSound(centerLoc, Sound.ITEM_BUNDLE_INSERT, SoundCategory.BLOCKS, 0.7F, 1.0F);
                 checkStartBrewing(centerLoc, state);
             }
             return;
         }
 
-        // 3. Добавление сахарного тростника (требуется 1 шт.)
+        // 4. Добавление сахарного тростника (требуется 1 шт.)
         if (held.getType() == Material.SUGAR_CANE) {
             if (state.caneCount < 1) {
                 event.setCancelled(true);
                 consumeOne(player, hand, held);
                 state.caneCount++;
+                spawnAddParticles(world, block, centerLoc);
                 player.playSound(centerLoc, Sound.ITEM_BUNDLE_INSERT, SoundCategory.BLOCKS, 0.7F, 1.0F);
                 checkStartBrewing(centerLoc, state);
             }
             return;
         }
 
-        // 4. Добавление бутылочки горячей воды (требуется 3 шт.)
+        // 5. Добавление бутылочки горячей воды (требуется 3 шт.)
         if (Shaker.isHotWaterBottle(held)) {
             if (state.hotWaterCount < 3) {
                 event.setCancelled(true);
@@ -393,11 +466,20 @@ public class BambooBarrel implements Listener {
                     setHandItem(player, hand, emptyBottle);
                 }
                 state.hotWaterCount++;
+                spawnAddParticles(world, block, centerLoc);
                 player.playSound(centerLoc, Sound.ITEM_BOTTLE_EMPTY, SoundCategory.BLOCKS, 0.7F, 1.0F);
                 checkStartBrewing(centerLoc, state);
             }
             return;
         }
+    }
+
+    private static void spawnAddParticles(World world, Block clickedBlock, Location centerLoc) {
+        if (world == null) return;
+        Location clickPos = clickedBlock != null ? clickedBlock.getLocation().add(0.5, 0.8, 0.5) : centerLoc.clone().add(0.5, 1.2, 0.5);
+        world.spawnParticle(Particle.WAX_OFF, clickPos, 7, 0.25, 0.25, 0.25, 0.05);
+        Location topCenter = centerLoc.clone().add(0.5, 1.5, 0.5);
+        world.spawnParticle(Particle.WAX_OFF, topCenter, 5, 0.3, 0.1, 0.3, 0.05);
     }
 
     private void checkStartBrewing(Location centerLoc, BarrelState state) {
@@ -477,29 +559,32 @@ public class BambooBarrel implements Listener {
         Location dropLoc = loc.clone().add(0.5, 0.5, 0.5);
 
         if (state.ready) {
-            world.dropItemNaturally(dropLoc, createPirateRum());
+            // Готовый ром (жидкость) разливается и не выпадает в виде предмета
+            world.spawnParticle(Particle.SPLASH, dropLoc, 25, 0.6, 0.5, 0.6, 0.1);
+            world.playSound(dropLoc, Sound.ITEM_BOTTLE_EMPTY, SoundCategory.BLOCKS, 0.8F, 0.9F);
             return;
         }
 
         if (state.brewing) {
+            // Твёрдые ресурсы выпадают в центре, а варящаяся жидкость разливается
             world.dropItemNaturally(dropLoc, new ItemStack(Material.COAL));
             world.dropItemNaturally(dropLoc, new ItemStack(Material.SUGAR_CANE));
-            for (int i = 0; i < 3; i++) {
-                world.dropItemNaturally(dropLoc, Shaker.createHotWaterBottle());
-            }
+            world.spawnParticle(Particle.SPLASH, dropLoc, 20, 0.5, 0.5, 0.5, 0.1);
+            world.playSound(dropLoc, Sound.BLOCK_WATER_AMBIENT, SoundCategory.BLOCKS, 0.8F, 1.0F);
             return;
         }
 
+        // Твёрдые ресурсы выпадают в центре
         if (state.coalCount > 0) {
             world.dropItemNaturally(dropLoc, new ItemStack(Material.COAL, state.coalCount));
         }
         if (state.caneCount > 0) {
             world.dropItemNaturally(dropLoc, new ItemStack(Material.SUGAR_CANE, state.caneCount));
         }
+        // Жидкость (горячая вода) разливается и не выпадает
         if (state.hotWaterCount > 0) {
-            for (int i = 0; i < state.hotWaterCount; i++) {
-                world.dropItemNaturally(dropLoc, Shaker.createHotWaterBottle());
-            }
+            world.spawnParticle(Particle.SPLASH, dropLoc, 10 * state.hotWaterCount, 0.4, 0.4, 0.4, 0.1);
+            world.playSound(dropLoc, Sound.BLOCK_WATER_AMBIENT, SoundCategory.BLOCKS, 0.6F, 1.2F);
         }
     }
 

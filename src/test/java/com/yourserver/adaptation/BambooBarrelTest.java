@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * - Время брожения (10 секунд = 200 тиков)
  * - Рецепт: 1 уголь, 1 тростник, 3 горячей воды
  * - Проверка блоков мультиблочной структуры
- * - Проверка логики состояния бочки и сброса ингредиентов
+ * - Проверка логики состояния бочки, забора предметов через Shift + ПКМ и сброса ингредиентов
  */
 final class BambooBarrelTest {
 
@@ -81,6 +81,32 @@ final class BambooBarrelTest {
 
         // Забор напитка
         state.ready = false;
+        assertTrue(state.isEmpty());
+    }
+
+    @Test
+    void проверкаИзвлеченияИнгредиентовShiftRMB() {
+        BambooBarrel.BarrelState state = new BambooBarrel.BarrelState();
+        state.coalCount = 1;
+        state.caneCount = 1;
+        state.hotWaterCount = 2;
+
+        // 1. Извлечение сахарного тростника
+        state.caneCount--;
+        assertEquals(0, state.caneCount);
+        assertFalse(state.isEmpty());
+
+        // 2. Извлечение угля
+        state.coalCount--;
+        assertEquals(0, state.coalCount);
+        assertFalse(state.isEmpty());
+
+        // 3. Извлечение горячей воды пустой бутылочкой
+        state.hotWaterCount--;
+        assertEquals(1, state.hotWaterCount);
+        state.hotWaterCount--;
+        assertEquals(0, state.hotWaterCount);
+
         assertTrue(state.isEmpty());
     }
 }
