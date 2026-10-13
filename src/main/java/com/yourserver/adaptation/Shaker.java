@@ -1386,6 +1386,10 @@ public class Shaker implements Listener {
         return -1;
     }
 
+    public void registerRecipe() {
+        registerRecipes();
+    }
+
     public void registerRecipes() {
         NamespacedKey recipeKey = new NamespacedKey(plugin, "shaker");
         if (Bukkit.getRecipe(recipeKey) != null) {
