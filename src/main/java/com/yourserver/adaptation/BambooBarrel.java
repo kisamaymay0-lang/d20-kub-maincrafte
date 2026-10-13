@@ -365,7 +365,7 @@ public class BambooBarrel implements Listener {
                     event.setCancelled(true);
                     state.caneCount--;
                     giveOrDrop(player, new ItemStack(Material.SUGAR_CANE));
-                    player.playSound(centerLoc, Sound.ITEM_BUNDLE_REMOVE, SoundCategory.BLOCKS, 0.7F, 1.1F);
+                    player.playSound(centerLoc, Sound.ITEM_BUNDLE_REMOVE_ONE, SoundCategory.BLOCKS, 0.7F, 1.1F);
                     world.spawnParticle(Particle.WAX_OFF, block.getLocation().add(0.5, 0.8, 0.5), 3, 0.1, 0.1, 0.1, 0.02);
                     if (state.isEmpty()) {
                         barrels.remove(centerLoc);
@@ -378,7 +378,7 @@ public class BambooBarrel implements Listener {
                     event.setCancelled(true);
                     state.coalCount--;
                     giveOrDrop(player, new ItemStack(Material.COAL));
-                    player.playSound(centerLoc, Sound.ITEM_BUNDLE_REMOVE, SoundCategory.BLOCKS, 0.7F, 1.1F);
+                    player.playSound(centerLoc, Sound.ITEM_BUNDLE_REMOVE_ONE, SoundCategory.BLOCKS, 0.7F, 1.1F);
                     world.spawnParticle(Particle.WAX_OFF, block.getLocation().add(0.5, 0.8, 0.5), 3, 0.1, 0.1, 0.1, 0.02);
                     if (state.isEmpty()) {
                         barrels.remove(centerLoc);
