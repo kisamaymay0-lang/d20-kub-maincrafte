@@ -21,9 +21,13 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.inventory.FurnaceSmeltEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.FurnaceRecipe;
 import org.bukkit.inventory.ItemStack;
@@ -53,7 +57,7 @@ import java.util.UUID;
 /**
  * Механика предмета «Шейкер» (шейкер для приготовления напитков).
  * <ul>
- *   <li><b>Модели:</b> f8resurs:sheiker_open (открытый) и f8resurs:sheiker_close (закрытый).</li>
+ *   <li><b>Модели шейкера:</b> f8resurs:sheiker_open (открытый) и f8resurs:sheiker_close (закрытый).</li>
  *   <li><b>Вместимость:</b> максимум 5 слотов по 1 предмету.</li>
  *   <li><b>Обе руки:</b> шейкер можно держать как в основной, так и в левой руке.</li>
  *   <li><b>Открытие/закрытие:</b> Shift + ПКМ без предмета во второй руке переключает состояние.</li>
@@ -61,16 +65,10 @@ import java.util.UUID;
  *       Запрещены любые блоки, кроме любого льда. При запрете проигрывается тихий звук без сообщений.
  *       При добавлении жидкостей из бутылочки пустая стеклянная бутылочка остаётся у игрока.
  *       При добавлении жидкостей из ведра (молоко, вода) пустое ведро остаётся у игрока.</li>
- *   <li><b>Готовый напиток как материал:</b> Напиток остаётся внутри шейкера как материал,
- *       и в шейкер можно продолжать докладывать ингредиенты без предварительного извлечения.</li>
- *   <li><b>Извлечение предметов:</b> Твёрдые предметы из открытого шейкера извлекаются через
- *       Shift + ЛКМ напрямую в инвентарь игрока. Для забора бутилированной жидкости нужна пустая бутылочка
- *       в руке (ПКМ), для забора ведровой жидкости — пустое ведро (ПКМ).</li>
- *   <li><b>Взбивание с открытым шейкером:</b> С открытым шейкером нельзя смешивать напитки.
- *       Первые 4 взмаха идут вхолостую. Начиная с 6-го взмаха каждые 2 взмаха из шейкера вылетает
- *       или выливается 1 предмет: жидкости выливаются всплеском капель без выпадения предметом
- *       (звук Sound.ITEM_BOTTLE_FILL), а твёрдые предметы вылетают наружу со звуком Sound.ENTITY_ITEM_PICKUP.
- *       Смешивание рецепта происходит только при закрытом шейкере (16 непрерывных взмахов).</li>
+ *   <li><b>Напитки и добавки:</b> Напитки создаются из базовых ингредиентов без базовых эффектов.
+ *       Дополнительные ингредиенты в шейкере становятся добавками (положительными или отрицательными).
+ *       Отрицательные добавки при выпивании дают негативные эффекты (Тошнота / Отравление).
+ *       В инвентаре у напитков при зажатии Shift отображается список добавок (зеленым/красным).</li>
  * </ul>
  */
 public class Shaker implements Listener {
@@ -84,6 +82,9 @@ public class Shaker implements Listener {
     public static final String MODEL_CLOSE = "sheiker_close";
     public static final NamespacedKey MODEL_OPEN_KEY = new NamespacedKey("f8resurs", MODEL_OPEN);
     public static final NamespacedKey MODEL_CLOSE_KEY = new NamespacedKey("f8resurs", MODEL_CLOSE);
+
+    public static final NamespacedKey MODEL_MEAD_KEY = new NamespacedKey("f8resurs", "medovuha");
+    public static final NamespacedKey MODEL_DAIQUIRI_KEY = new NamespacedKey("f8resurs", "daikiri");
     public static final NamespacedKey MODEL_ICED_LATTE_KEY = new NamespacedKey("f8resurs", "iced_latte");
     public static final NamespacedKey MODEL_MATCHA_TEA_KEY = new NamespacedKey("f8resurs", "matcha-chai");
     public static final NamespacedKey MODEL_KEY = MODEL_OPEN_KEY;
@@ -94,6 +95,8 @@ public class Shaker implements Listener {
     public static final NamespacedKey OPEN_KEY = new NamespacedKey("adaptation", "shaker_open");
     public static final NamespacedKey DRINK_PDC_KEY = new NamespacedKey("adaptation", "shaker_drink_type");
     public static final NamespacedKey HOT_WATER_KEY = new NamespacedKey("adaptation", "hot_water_bottle");
+    public static final NamespacedKey ADDITIVES_KEY = new NamespacedKey("adaptation", "shaker_drink_additives");
+    public static final NamespacedKey BAD_ADDITIVES_COUNT_KEY = new NamespacedKey("adaptation", "shaker_bad_additives");
 
     public static final String RECIPE_MEAD = "mead";
     public static final String RECIPE_DAIQUIRI = "daiquiri";
@@ -104,9 +107,52 @@ public class Shaker implements Listener {
     private final Plugin plugin;
     private final Map<UUID, ShakeTracker> shakeTrackers = new HashMap<>();
     private final Map<UUID, Integer> lastInteractTick = new HashMap<>();
+    private final Map<UUID, Boolean> wasSneaking = new HashMap<>();
 
     public Shaker(Plugin plugin) {
         this.plugin = plugin;
+        if (plugin != null) {
+            Bukkit.getScheduler().runTaskTimer(plugin, this::checkShiftLores, 2L, 2L);
+        }
+    }
+
+    private void checkShiftLores() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            boolean sneaking = player.isSneaking();
+            Boolean prev = wasSneaking.get(player.getUniqueId());
+            if (prev == null || prev != sneaking) {
+                wasSneaking.put(player.getUniqueId(), sneaking);
+                updatePlayerDrinkLores(player, sneaking);
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onToggleSneak(PlayerToggleSneakEvent event) {
+        Player player = event.getPlayer();
+        wasSneaking.put(player.getUniqueId(), event.isSneaking());
+        updatePlayerDrinkLores(player, event.isSneaking());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            updatePlayerDrinkLores(player, player.isSneaking());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            updatePlayerDrinkLores(player, player.isSneaking());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onInventoryOpen(InventoryOpenEvent event) {
+        if (event.getPlayer() instanceof Player player) {
+            updatePlayerDrinkLores(player, player.isSneaking());
+        }
     }
 
     /**
@@ -218,7 +264,6 @@ public class Shaker implements Listener {
 
     /**
      * Обновить мета-данные шейкера с явным состоянием открытости.
-     * В лоре отображается чистый формат без скобочек вокруг цифр («Пустой 0/5», «Содержимое X/5:»).
      */
     public static void updateMeta(ItemStack item, List<ItemStack> contents, boolean open) {
         ItemMeta meta = item.getItemMeta();
@@ -320,6 +365,7 @@ public class Shaker implements Listener {
             return "Бутылочка воды";
         }
         return switch (mat) {
+            case HONEYCOMB -> "Медовые соты";
             case HONEY_BOTTLE -> "Бутылочка мёда";
             case SUGAR -> "Сахар";
             case SWEET_BERRIES -> "Сладкие ягоды";
@@ -463,47 +509,8 @@ public class Shaker implements Listener {
         return -1;
     }
 
-    /**
-     * Поиск индекса ведровой жидкости внутри списка предметов шейкера (с конца).
-     */
-    public static int findBucketLiquidIndex(List<ItemStack> contents) {
-        if (contents == null || contents.isEmpty()) return -1;
-        for (int i = contents.size() - 1; i >= 0; i--) {
-            if (isBucketLiquid(contents.get(i))) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * Поиск индекса бутилированной жидкости или готового напитка шейкера (с конца).
-     */
-    public static int findBottledLiquidOrDrinkIndex(List<ItemStack> contents) {
-        if (contents == null || contents.isEmpty()) return -1;
-        for (int i = contents.size() - 1; i >= 0; i--) {
-            ItemStack it = contents.get(i);
-            if (isDrink(it) || isBottledLiquid(it)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * Поиск индекса готового напитка шейкера (с конца).
-     */
-    public static int findDrinkIndex(List<ItemStack> contents) {
-        if (contents == null || contents.isEmpty()) return -1;
-        for (int i = contents.size() - 1; i >= 0; i--) {
-            if (isDrink(contents.get(i))) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
     public enum IngredientKind {
+        HONEYCOMB,
         HONEY_BOTTLE,
         WATER_BOTTLE,
         HOT_WATER_BOTTLE,
@@ -520,6 +527,7 @@ public class Shaker implements Listener {
         if (item == null) return IngredientKind.OTHER;
         if (isHotWaterBottle(item)) return IngredientKind.HOT_WATER_BOTTLE;
         Material mat = item.getType();
+        if (mat == Material.HONEYCOMB) return IngredientKind.HONEYCOMB;
         if (mat == Material.HONEY_BOTTLE) return IngredientKind.HONEY_BOTTLE;
         if (mat == Material.SUGAR) return IngredientKind.SUGAR;
         if (mat == Material.SWEET_BERRIES) return IngredientKind.SWEET_BERRIES;
@@ -539,77 +547,132 @@ public class Shaker implements Listener {
         return IngredientKind.OTHER;
     }
 
+    public record RecipeMatch(String recipe, List<ItemStack> additives) {}
+
+    private static boolean hasItem(List<ItemStack> list, IngredientKind kind) {
+        for (ItemStack item : list) {
+            if (classify(item) == kind) return true;
+        }
+        return false;
+    }
+
+    private static boolean removeItemFirst(List<ItemStack> list, IngredientKind kind) {
+        for (int i = 0; i < list.size(); i++) {
+            if (classify(list.get(i)) == kind) {
+                list.remove(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
-     * Сопоставление содержимого с рецептом.
+     * Определение совпадения базового рецепта и выделение добавок:
+     * - Медовуха: медовые соты + бутылочка горячей воды (положительные: сахар)
+     * - Дайкири: сладкие ягоды + сахар + обычная вода (положительные: лед, ягоды)
+     * - Айс-латте: какао-бобы + лед + молоко (положительные: бутылка меда, лед)
+     * - Матча-чай: зеленый краситель + бутылочка горячей воды (положительные: бутылка меда, молоко, лед)
+     */
+    public static RecipeMatch matchRecipeAndAdditives(List<ItemStack> contents) {
+        if (contents == null || contents.isEmpty()) {
+            return new RecipeMatch(null, Collections.emptyList());
+        }
+
+        // 1. Медовуха
+        if (hasItem(contents, IngredientKind.HONEYCOMB) && hasItem(contents, IngredientKind.HOT_WATER_BOTTLE)) {
+            List<ItemStack> additives = new ArrayList<>(contents);
+            removeItemFirst(additives, IngredientKind.HONEYCOMB);
+            removeItemFirst(additives, IngredientKind.HOT_WATER_BOTTLE);
+            return new RecipeMatch(RECIPE_MEAD, additives);
+        }
+
+        // 2. Матча чай
+        if (hasItem(contents, IngredientKind.GREEN_DYE) && hasItem(contents, IngredientKind.HOT_WATER_BOTTLE)) {
+            List<ItemStack> additives = new ArrayList<>(contents);
+            removeItemFirst(additives, IngredientKind.GREEN_DYE);
+            removeItemFirst(additives, IngredientKind.HOT_WATER_BOTTLE);
+            return new RecipeMatch(RECIPE_MATCHA_TEA, additives);
+        }
+
+        // 3. Дайкири
+        if (hasItem(contents, IngredientKind.SWEET_BERRIES) && hasItem(contents, IngredientKind.SUGAR) && hasItem(contents, IngredientKind.WATER_BOTTLE)) {
+            List<ItemStack> additives = new ArrayList<>(contents);
+            removeItemFirst(additives, IngredientKind.SWEET_BERRIES);
+            removeItemFirst(additives, IngredientKind.SUGAR);
+            removeItemFirst(additives, IngredientKind.WATER_BOTTLE);
+            return new RecipeMatch(RECIPE_DAIQUIRI, additives);
+        }
+
+        // 4. Айс-латте
+        if (hasItem(contents, IngredientKind.COCOA_BEANS) && hasItem(contents, IngredientKind.ICE) && hasItem(contents, IngredientKind.MILK_BUCKET)) {
+            List<ItemStack> additives = new ArrayList<>(contents);
+            removeItemFirst(additives, IngredientKind.COCOA_BEANS);
+            removeItemFirst(additives, IngredientKind.ICE);
+            removeItemFirst(additives, IngredientKind.MILK_BUCKET);
+            return new RecipeMatch(RECIPE_ICED_LATTE, additives);
+        }
+
+        return new RecipeMatch(RECIPE_MURK, Collections.emptyList());
+    }
+
+    /**
+     * Положительная ли добавка для данного напитка.
+     */
+    public static boolean isPositiveAdditive(String recipe, ItemStack item) {
+        if (item == null) return false;
+        IngredientKind kind = classify(item);
+        if (RECIPE_MEAD.equals(recipe)) {
+            // Медовуха: сахар
+            return kind == IngredientKind.SUGAR;
+        } else if (RECIPE_DAIQUIRI.equals(recipe)) {
+            // Дайкири: лед, ягоды
+            return kind == IngredientKind.ICE || kind == IngredientKind.SWEET_BERRIES;
+        } else if (RECIPE_ICED_LATTE.equals(recipe)) {
+            // Айс-латте: бутылка меда, лед
+            return kind == IngredientKind.HONEY_BOTTLE || kind == IngredientKind.ICE;
+        } else if (RECIPE_MATCHA_TEA.equals(recipe)) {
+            // Матча-чай: бутылочка меда, молоко, лед
+            return kind == IngredientKind.HONEY_BOTTLE || kind == IngredientKind.MILK_BUCKET || kind == IngredientKind.ICE;
+        }
+        return false;
+    }
+
+    /**
+     * Сопоставление содержимого с рецептом (для обратной совместимости и тестов).
      */
     public static String matchRecipe(List<ItemStack> contents) {
         if (contents == null || contents.isEmpty()) return null;
-        List<IngredientKind> kinds = new ArrayList<>(contents.size());
-        for (ItemStack item : contents) {
-            kinds.add(classify(item));
-        }
-        return matchRecipeFromKinds(kinds);
+        return matchRecipeAndAdditives(contents).recipe();
     }
 
     /**
      * Сопоставление классифицированных ингредиентов:
-     * - Медовуха (4): 1 мед, 2 сахара, 1 вода.
-     * - Дайкири (5): 1 сахар, 2 сладких ягоды, 1 вода, 1 лед.
-     * - Айс-латте (5): 1 какао-боб, 1 ведро молока, 1 горячая вода (или вода), 1-2 льда, мед.
-     * - Матча-чай (5): 1 зеленый краситель, 1 горячая вода, 1 молоко, 1 лед, 1 мед.
-     * - Муть: любые другие комбинации.
      */
     public static String matchRecipeFromKinds(List<IngredientKind> kinds) {
         if (kinds == null || kinds.isEmpty()) return null;
-
-        Map<IngredientKind, Integer> counts = new HashMap<>();
-        for (IngredientKind k : kinds) {
-            counts.put(k, counts.getOrDefault(k, 0) + 1);
-        }
-
-        // Медовуха: ровно 1 мед, 2 сахара, 1 вода (всего 4 предмета)
-        if (kinds.size() == 4
-                && counts.getOrDefault(IngredientKind.HONEY_BOTTLE, 0) == 1
-                && counts.getOrDefault(IngredientKind.SUGAR, 0) == 2
-                && counts.getOrDefault(IngredientKind.WATER_BOTTLE, 0) == 1) {
+        if (kinds.contains(IngredientKind.HONEYCOMB) && kinds.contains(IngredientKind.HOT_WATER_BOTTLE)) {
             return RECIPE_MEAD;
         }
-
-        // Дайкири: ровно 1 сахар, 2 сладких ягоды, 1 вода, 1 лед (всего 5 предметов)
-        if (kinds.size() == 5
-                && counts.getOrDefault(IngredientKind.SUGAR, 0) == 1
-                && counts.getOrDefault(IngredientKind.SWEET_BERRIES, 0) == 2
-                && counts.getOrDefault(IngredientKind.WATER_BOTTLE, 0) == 1
-                && counts.getOrDefault(IngredientKind.ICE, 0) == 1) {
-            return RECIPE_DAIQUIRI;
-        }
-
-        // Матча-чай: ровно 1 зеленый краситель, 1 горячая вода, 1 молоко, 1 лед, 1 мед (всего 5 предметов)
-        if (kinds.size() == 5
-                && counts.getOrDefault(IngredientKind.GREEN_DYE, 0) == 1
-                && counts.getOrDefault(IngredientKind.HOT_WATER_BOTTLE, 0) == 1
-                && counts.getOrDefault(IngredientKind.MILK_BUCKET, 0) == 1
-                && counts.getOrDefault(IngredientKind.ICE, 0) == 1
-                && counts.getOrDefault(IngredientKind.HONEY_BOTTLE, 0) == 1) {
+        if (kinds.contains(IngredientKind.GREEN_DYE) && kinds.contains(IngredientKind.HOT_WATER_BOTTLE)) {
             return RECIPE_MATCHA_TEA;
         }
-
-        // Айс-латте: ровно 1 какао-боб, 1 ведро молока, 2 льда, 1 мед (всего 5 предметов)
-        if (kinds.size() == 5
-                && counts.getOrDefault(IngredientKind.COCOA_BEANS, 0) == 1
-                && counts.getOrDefault(IngredientKind.MILK_BUCKET, 0) == 1
-                && counts.getOrDefault(IngredientKind.ICE, 0) == 2
-                && counts.getOrDefault(IngredientKind.HONEY_BOTTLE, 0) == 1) {
+        if (kinds.contains(IngredientKind.SWEET_BERRIES) && kinds.contains(IngredientKind.SUGAR) && kinds.contains(IngredientKind.WATER_BOTTLE)) {
+            return RECIPE_DAIQUIRI;
+        }
+        if (kinds.contains(IngredientKind.COCOA_BEANS) && kinds.contains(IngredientKind.ICE) && kinds.contains(IngredientKind.MILK_BUCKET)) {
             return RECIPE_ICED_LATTE;
         }
-
         return RECIPE_MURK;
+    }
+
+    public static ItemStack createDrinkItem(String recipe) {
+        return createDrinkItem(recipe, Collections.emptyList());
     }
 
     /**
      * Создать предмет готового напитка для шейкера.
      */
-    public static ItemStack createDrinkItem(String recipe) {
+    public static ItemStack createDrinkItem(String recipe, List<ItemStack> additives) {
         ItemStack potion = new ItemStack(Material.POTION);
         PotionMeta meta = (PotionMeta) potion.getItemMeta();
         if (meta == null) return potion;
@@ -617,36 +680,37 @@ public class Shaker implements Listener {
         meta.getPersistentDataContainer().set(DRINK_PDC_KEY, PersistentDataType.STRING, recipe);
         meta.setBasePotionType(PotionType.WATER);
 
+        int badAdditivesCount = 0;
+        if (additives != null && !additives.isEmpty()) {
+            meta.getPersistentDataContainer().set(ADDITIVES_KEY, PersistentDataType.BYTE_ARRAY, serializeItemList(additives));
+            for (ItemStack additive : additives) {
+                if (!isPositiveAdditive(recipe, additive)) {
+                    badAdditivesCount++;
+                }
+            }
+        }
+        meta.getPersistentDataContainer().set(BAD_ADDITIVES_COUNT_KEY, PersistentDataType.INTEGER, badAdditivesCount);
+
         if (RECIPE_MEAD.equals(recipe)) {
             meta.displayName(Component.text("Медовуха", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Медовуха", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
+            meta.setItemModel(MODEL_MEAD_KEY);
             meta.setColor(Color.fromRGB(0xEB, 0xAF, 0x28));
-            meta.addCustomEffect(new PotionEffect(PotionEffectType.REGENERATION, 30 * 20, 0), true);
-            meta.addCustomEffect(new PotionEffect(PotionEffectType.SATURATION, 10 * 20, 0), true);
-            potion.setItemMeta(meta);
         } else if (RECIPE_DAIQUIRI.equals(recipe)) {
             meta.displayName(Component.text("Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
+            meta.setItemModel(MODEL_DAIQUIRI_KEY);
             meta.setColor(Color.fromRGB(0xF0, 0x46, 0x6E));
-            meta.addCustomEffect(new PotionEffect(PotionEffectType.SPEED, 30 * 20, 0), true);
-            meta.addCustomEffect(new PotionEffect(PotionEffectType.REGENERATION, 10 * 20, 0), true);
-            potion.setItemMeta(meta);
         } else if (RECIPE_ICED_LATTE.equals(recipe)) {
             meta.displayName(Component.text("Айс-латте", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Айс-латте", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
-            meta.setColor(Color.fromRGB(0xE8, 0xC4, 0x99));
             meta.setItemModel(MODEL_ICED_LATTE_KEY);
-            meta.addCustomEffect(new PotionEffect(PotionEffectType.SPEED, 45 * 20, 0), true);
-            meta.addCustomEffect(new PotionEffect(PotionEffectType.HASTE, 45 * 20, 0), true);
-            potion.setItemMeta(meta);
+            meta.setColor(Color.fromRGB(0xE8, 0xC4, 0x99));
         } else if (RECIPE_MATCHA_TEA.equals(recipe)) {
             meta.displayName(Component.text("Матча-чай", NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Матча-чай", NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
-            meta.setColor(Color.fromRGB(0x78, 0xA8, 0x3C));
             meta.setItemModel(MODEL_MATCHA_TEA_KEY);
-            meta.addCustomEffect(new PotionEffect(PotionEffectType.REGENERATION, 40 * 20, 0), true);
-            meta.addCustomEffect(new PotionEffect(PotionEffectType.ABSORPTION, 60 * 20, 0), true);
-            potion.setItemMeta(meta);
+            meta.setColor(Color.fromRGB(0x78, 0xA8, 0x3C));
         } else {
             meta.displayName(Component.text("Муть", NamedTextColor.DARK_GREEN).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Муть", NamedTextColor.DARK_GREEN).decoration(TextDecoration.ITALIC, false));
@@ -654,9 +718,95 @@ public class Shaker implements Listener {
             meta.clearCustomEffects();
             meta.addCustomEffect(new PotionEffect(PotionEffectType.NAUSEA, 10 * 20, 0), true);
             meta.addCustomEffect(new PotionEffect(PotionEffectType.POISON, 5 * 20, 0), true);
-            potion.setItemMeta(meta);
         }
+
+        // Негативные эффекты от плохих добавок:
+        // 1 плохая добавка: Тошнота 1 на 10с
+        // 2 плохих добавки: Тошнота 2 на 10с + Отравление 1 на 10с
+        // 3+ плохих добавок: Тошнота 2 на 10с + Отравление 2 на 10с
+        if (!RECIPE_MURK.equals(recipe)) {
+            if (badAdditivesCount == 1) {
+                meta.addCustomEffect(new PotionEffect(PotionEffectType.NAUSEA, 10 * 20, 0), true);
+            } else if (badAdditivesCount == 2) {
+                meta.addCustomEffect(new PotionEffect(PotionEffectType.NAUSEA, 10 * 20, 1), true);
+                meta.addCustomEffect(new PotionEffect(PotionEffectType.POISON, 10 * 20, 0), true);
+            } else if (badAdditivesCount >= 3) {
+                meta.addCustomEffect(new PotionEffect(PotionEffectType.NAUSEA, 10 * 20, 1), true);
+                meta.addCustomEffect(new PotionEffect(PotionEffectType.POISON, 10 * 20, 1), true);
+            }
+        }
+
+        meta.lore(buildDrinkLore(recipe, additives, false));
+        potion.setItemMeta(meta);
         return potion;
+    }
+
+    /**
+     * Построение лора напитка с поддержкой [SHIFT] для просмотра добавок.
+     */
+    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives, boolean showShift) {
+        List<Component> lore = new ArrayList<>();
+        if (additives == null || additives.isEmpty()) {
+            return lore;
+        }
+
+        if (showShift) {
+            lore.add(Component.text("Добавки (" + additives.size() + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+            for (ItemStack additive : additives) {
+                boolean positive = isPositiveAdditive(recipe, additive);
+                TextColor color = positive ? NamedTextColor.GREEN : NamedTextColor.RED;
+                lore.add(Component.text("• " + getItemDisplayName(additive), color).decoration(TextDecoration.ITALIC, false));
+            }
+        }
+
+        lore.add(Component.text("[SHIFT] для просмотра добавок", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
+        return lore;
+    }
+
+    /**
+     * Получить список добавок из напитка.
+     */
+    public static List<ItemStack> getAdditives(ItemStack item) {
+        if (!isDrink(item)) return new ArrayList<>();
+        byte[] bytes = item.getItemMeta().getPersistentDataContainer().get(ADDITIVES_KEY, PersistentDataType.BYTE_ARRAY);
+        return deserializeItemList(bytes);
+    }
+
+    /**
+     * Обновить лор напитка у игрока при зажатии/отпускании Shift.
+     */
+    public static void updatePlayerDrinkLores(Player player, boolean sneaking) {
+        if (player == null || !player.isOnline()) return;
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.getSize(); i++) {
+            ItemStack item = inv.getItem(i);
+            if (isDrink(item)) {
+                updateDrinkLore(item, sneaking);
+            }
+        }
+        var top = player.getOpenInventory().getTopInventory();
+        if (top != null) {
+            for (int i = 0; i < top.getSize(); i++) {
+                ItemStack item = top.getItem(i);
+                if (isDrink(item)) {
+                    updateDrinkLore(item, sneaking);
+                }
+            }
+        }
+    }
+
+    public static void updateDrinkLore(ItemStack item, boolean sneaking) {
+        if (!isDrink(item)) return;
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return;
+        String recipe = meta.getPersistentDataContainer().get(DRINK_PDC_KEY, PersistentDataType.STRING);
+        if (recipe == null) return;
+        byte[] bytes = meta.getPersistentDataContainer().get(ADDITIVES_KEY, PersistentDataType.BYTE_ARRAY);
+        List<ItemStack> additives = deserializeItemList(bytes);
+        if (additives.isEmpty()) return;
+        List<Component> lore = buildDrinkLore(recipe, additives, sneaking);
+        meta.lore(lore);
+        item.setItemMeta(meta);
     }
 
     /**
@@ -910,7 +1060,7 @@ public class Shaker implements Listener {
             }
         }
 
-        // 2. Shift + ПКМ без предмета во второй руке — ОТКРЫТИЕ / ЗАКРЫТИЕ шейкера
+        // 2. Открытие / закрытие шейкера (Shift + ПКМ с пустой второй рукой)
         if (sneaking && !hasOtherItem) {
             event.setCancelled(true);
             event.setUseInteractedBlock(Event.Result.DENY);
@@ -921,11 +1071,15 @@ public class Shaker implements Listener {
             updateMeta(shaker, contents, newOpen);
             setHandItem(player, shakerHand, shaker);
 
-            player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_IRON, SoundCategory.PLAYERS, 0.7F, newOpen ? 1.3F : 0.9F);
+            if (newOpen) {
+                player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_IRON, SoundCategory.PLAYERS, 0.6F, 1.2F);
+            } else {
+                player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_IRON, SoundCategory.PLAYERS, 0.6F, 0.9F);
+            }
             return;
         }
 
-        // 3. Shift + ПКМ с предметом — добавление ингредиента в открытый шейкер
+        // 3. Добавление предмета в открытый шейкер (Shift + ПКМ предметом во второй руке)
         if (sneaking && hasOtherItem) {
             event.setCancelled(true);
             event.setUseInteractedBlock(Event.Result.DENY);
@@ -937,14 +1091,8 @@ public class Shaker implements Listener {
                 return;
             }
 
-            if (isShaker(otherItem)) {
-                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
-                return;
-            }
-
-            // Запрещены все блоки, кроме любого типа льда (тихий отказ)
             if (!isAllowedIngredient(otherItem)) {
-                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, SoundCategory.PLAYERS, 0.3F, 0.5F);
                 return;
             }
 
@@ -953,14 +1101,14 @@ public class Shaker implements Listener {
                 return;
             }
 
-            ItemStack inserted = otherItem.clone();
-            inserted.setAmount(1);
-            contents.add(inserted);
+            ItemStack toAdd = otherItem.clone();
+            toAdd.setAmount(1);
+            contents.add(toAdd);
 
-            boolean bucketLiquid = isBucketLiquid(otherItem);
-            boolean bottledLiquid = isBottledLiquid(otherItem);
+            boolean isBucket = isBucketLiquid(toAdd.getType());
+            boolean isBottle = isBottledLiquid(toAdd.getType());
 
-            if (bucketLiquid) {
+            if (isBucket) {
                 ItemStack emptyBucket = new ItemStack(Material.BUCKET);
                 if (otherItem.getAmount() > 1) {
                     otherItem.setAmount(otherItem.getAmount() - 1);
@@ -970,7 +1118,7 @@ public class Shaker implements Listener {
                     setHandItem(player, otherHand, emptyBucket);
                 }
                 player.playSound(player.getLocation(), Sound.ITEM_BUCKET_EMPTY, SoundCategory.PLAYERS, 0.7F, 1.0F);
-            } else if (bottledLiquid) {
+            } else if (isBottle) {
                 ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
                 if (otherItem.getAmount() > 1) {
                     otherItem.setAmount(otherItem.getAmount() - 1);
@@ -1018,10 +1166,6 @@ public class Shaker implements Listener {
 
     /**
      * Отслеживание взмахов камеры игрока вверх-вниз для смешивания.
-     * Если шейкер закрыт: требует 16 непрерывных взмахов для смешивания.
-     * Если шейкер открыт: смешивание невозможно — первые 4 взмаха идут вхолостую.
-     * Каждые 2 взмаха (начиная с 6-го) вылетает/выливается 1 предмет: жидкости выливаются
-     * всплеском капель без выпадения предметом (звук ITEM_BOTTLE_FILL), а твёрдые предметы вылетают наружу.
      */
     private static final class ShakeTracker {
         float strokeDelta = 0.0f;
@@ -1159,8 +1303,8 @@ public class Shaker implements Listener {
             return;
         }
 
-        String drink = matchRecipe(contents);
-        ItemStack drinkItem = createDrinkItem(drink);
+        RecipeMatch match = matchRecipeAndAdditives(contents);
+        ItemStack drinkItem = createDrinkItem(match.recipe(), match.additives());
 
         contents.clear();
         contents.add(drinkItem);
@@ -1195,12 +1339,13 @@ public class Shaker implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         shakeTrackers.remove(event.getPlayer().getUniqueId());
         lastInteractTick.remove(event.getPlayer().getUniqueId());
+        wasSneaking.remove(event.getPlayer().getUniqueId());
     }
 
-    private static void setHandItem(Player player, EquipmentSlot slot, ItemStack item) {
-        if (slot == EquipmentSlot.HAND) {
+    private static void setHandItem(Player player, EquipmentSlot hand, ItemStack item) {
+        if (hand == EquipmentSlot.HAND) {
             player.getInventory().setItemInMainHand(item);
-        } else if (slot == EquipmentSlot.OFF_HAND) {
+        } else {
             player.getInventory().setItemInOffHand(item);
         }
     }
@@ -1209,33 +1354,59 @@ public class Shaker implements Listener {
         if (item == null || item.getType() == Material.AIR) return;
         HashMap<Integer, ItemStack> leftover = player.getInventory().addItem(item);
         if (!leftover.isEmpty()) {
-            for (ItemStack rem : leftover.values()) {
-                player.getWorld().dropItemNaturally(player.getLocation(), rem);
+            for (ItemStack drop : leftover.values()) {
+                player.getWorld().dropItemNaturally(player.getLocation(), drop);
             }
         }
     }
 
-    /**
-     * Регистрация рецепта крафта шейкера из 3 слитков железа и переплавки бутылочки воды в горячую воду.
-     */
-    public void registerRecipe() {
+    private static int findDrinkIndex(List<ItemStack> contents) {
+        if (contents == null || contents.isEmpty()) return -1;
+        for (int i = 0; i < contents.size(); i++) {
+            if (isDrink(contents.get(i))) return i;
+        }
+        return -1;
+    }
+
+    private static int findBottledLiquidOrDrinkIndex(List<ItemStack> contents) {
+        if (contents == null || contents.isEmpty()) return -1;
+        for (int i = contents.size() - 1; i >= 0; i--) {
+            ItemStack it = contents.get(i);
+            if (isDrink(it) || isBottledLiquid(it.getType())) return i;
+        }
+        return -1;
+    }
+
+    private static int findBucketLiquidIndex(List<ItemStack> contents) {
+        if (contents == null || contents.isEmpty()) return -1;
+        for (int i = contents.size() - 1; i >= 0; i--) {
+            ItemStack it = contents.get(i);
+            if (isBucketLiquid(it.getType())) return i;
+        }
+        return -1;
+    }
+
+    public void registerRecipes() {
         NamespacedKey recipeKey = new NamespacedKey(plugin, "shaker");
-        Bukkit.removeRecipe(recipeKey);
+        if (Bukkit.getRecipe(recipeKey) != null) {
+            Bukkit.removeRecipe(recipeKey);
+        }
         ShapedRecipe recipe = new ShapedRecipe(recipeKey, create());
         recipe.shape("I I", "I I", " I ");
         recipe.setIngredient('I', Material.IRON_INGOT);
-        try {
-            Bukkit.addRecipe(recipe);
-        } catch (Exception ignored) {
-        }
+        Bukkit.addRecipe(recipe);
 
-        // Переплавка бутылочки воды в Бутылочку горячей воды
         NamespacedKey hotWaterKey = new NamespacedKey(plugin, "hot_water_smelt");
-        Bukkit.removeRecipe(hotWaterKey);
-        try {
-            FurnaceRecipe furnace = new FurnaceRecipe(hotWaterKey, createHotWaterBottle(), Material.POTION, 0.1F, 140);
-            Bukkit.addRecipe(furnace);
-        } catch (Exception ignored) {
+        if (Bukkit.getRecipe(hotWaterKey) != null) {
+            Bukkit.removeRecipe(hotWaterKey);
         }
+        FurnaceRecipe furnaceRecipe = new FurnaceRecipe(
+                hotWaterKey,
+                createHotWaterBottle(),
+                Material.POTION,
+                0.1F,
+                200
+        );
+        Bukkit.addRecipe(furnaceRecipe);
     }
 }

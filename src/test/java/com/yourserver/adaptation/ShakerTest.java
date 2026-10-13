@@ -1,6 +1,7 @@
 package com.yourserver.adaptation;
 
 import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -13,14 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Тесты функционала шейкера:
+ * Тесты функционала шейкера и новой системы напитков с добавками:
  * - Вместимость 5 слотов
- * - Идентификаторы моделей f8resurs:sheiker_open и f8resurs:sheiker_close
+ * - Идентификаторы моделей f8resurs:sheiker_open, f8resurs:sheiker_close, f8resurs:medovuha, f8resurs:daikiri, f8resurs:iced_latte, f8resurs:matcha-chai
  * - Определение любого типа льда
- * - Определение бутилированных жидкостей (бутылочка остаётся у игрока)
+ * - Определение бутилированных и ведровых жидкостей
  * - Требования взбалтывания: 16 взмахов, таймаут 7 тиков
- * - Сопоставление рецептов: Медовуха, Дайкири, Муть
- * - Пустая сериализация и десериализация
+ * - Сопоставление базовых рецептов и добавок
+ * - Положительные и отрицательные добавки
  */
 final class ShakerTest {
 
@@ -35,6 +36,14 @@ final class ShakerTest {
         assertEquals("sheiker_close", Shaker.MODEL_CLOSE);
         assertEquals("f8resurs:sheiker_open", Shaker.MODEL_OPEN_KEY.asString());
         assertEquals("f8resurs:sheiker_close", Shaker.MODEL_CLOSE_KEY.asString());
+    }
+
+    @Test
+    void моделиНапитков() {
+        assertEquals("f8resurs:medovuha", Shaker.MODEL_MEAD_KEY.asString());
+        assertEquals("f8resurs:daikiri", Shaker.MODEL_DAIQUIRI_KEY.asString());
+        assertEquals("f8resurs:iced_latte", Shaker.MODEL_ICED_LATTE_KEY.asString());
+        assertEquals("f8resurs:matcha-chai", Shaker.MODEL_MATCHA_TEA_KEY.asString());
     }
 
     @Test
@@ -72,76 +81,137 @@ final class ShakerTest {
 
     @Test
     void рецептМедовухиУспешноОпределяется() {
-        // Медовуха: 1 бутылочка меда, 2 сахара, 1 бутылочка воды (всего 4 предмета)
+        // Медовуха: соты + бутылочка горячей воды
         List<Shaker.IngredientKind> ingredients = List.of(
-                Shaker.IngredientKind.HONEY_BOTTLE,
-                Shaker.IngredientKind.SUGAR,
-                Shaker.IngredientKind.SUGAR,
-                Shaker.IngredientKind.WATER_BOTTLE
+                Shaker.IngredientKind.HONEYCOMB,
+                Shaker.IngredientKind.HOT_WATER_BOTTLE
         );
         assertEquals(Shaker.RECIPE_MEAD, Shaker.matchRecipeFromKinds(ingredients));
 
-        // Порядок добавления не имеет значения
-        List<Shaker.IngredientKind> shuffled = List.of(
-                Shaker.IngredientKind.SUGAR,
-                Shaker.IngredientKind.WATER_BOTTLE,
-                Shaker.IngredientKind.HONEY_BOTTLE,
+        // С добавкой сахара
+        List<Shaker.IngredientKind> withSugar = List.of(
+                Shaker.IngredientKind.HONEYCOMB,
+                Shaker.IngredientKind.HOT_WATER_BOTTLE,
                 Shaker.IngredientKind.SUGAR
         );
-        assertEquals(Shaker.RECIPE_MEAD, Shaker.matchRecipeFromKinds(shuffled));
+        assertEquals(Shaker.RECIPE_MEAD, Shaker.matchRecipeFromKinds(withSugar));
+    }
+
+    @Test
+    void добавкиМедовухи() {
+        ItemStack sugar = new ItemStack(Material.SUGAR);
+        ItemStack ice = new ItemStack(Material.ICE);
+        ItemStack berries = new ItemStack(Material.SWEET_BERRIES);
+
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MEAD, sugar));
+        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_MEAD, ice));
+        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_MEAD, berries));
     }
 
     @Test
     void рецептДайкириУспешноОпределяется() {
-        // Дайкири: 1 сахар, 2 сладких ягоды, 1 бутылочка воды, 1 блок любого льда (всего 5 предметов)
+        // Дайкири: сладкие ягоды + сахар + обычная вода
         List<Shaker.IngredientKind> ingredients = List.of(
+                Shaker.IngredientKind.SWEET_BERRIES,
                 Shaker.IngredientKind.SUGAR,
-                Shaker.IngredientKind.SWEET_BERRIES,
-                Shaker.IngredientKind.SWEET_BERRIES,
-                Shaker.IngredientKind.WATER_BOTTLE,
-                Shaker.IngredientKind.ICE
+                Shaker.IngredientKind.WATER_BOTTLE
         );
         assertEquals(Shaker.RECIPE_DAIQUIRI, Shaker.matchRecipeFromKinds(ingredients));
 
-        // Перемешанный порядок
-        List<Shaker.IngredientKind> shuffled = List.of(
-                Shaker.IngredientKind.ICE,
+        // С добавкой льда
+        List<Shaker.IngredientKind> withIce = List.of(
                 Shaker.IngredientKind.SWEET_BERRIES,
                 Shaker.IngredientKind.SUGAR,
-                Shaker.IngredientKind.SWEET_BERRIES,
-                Shaker.IngredientKind.WATER_BOTTLE
+                Shaker.IngredientKind.WATER_BOTTLE,
+                Shaker.IngredientKind.ICE
         );
-        assertEquals(Shaker.RECIPE_DAIQUIRI, Shaker.matchRecipeFromKinds(shuffled));
+        assertEquals(Shaker.RECIPE_DAIQUIRI, Shaker.matchRecipeFromKinds(withIce));
+    }
+
+    @Test
+    void добавкиДайкири() {
+        ItemStack ice = new ItemStack(Material.ICE);
+        ItemStack berries = new ItemStack(Material.SWEET_BERRIES);
+        ItemStack honey = new ItemStack(Material.HONEY_BOTTLE);
+
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_DAIQUIRI, ice));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_DAIQUIRI, berries));
+        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_DAIQUIRI, honey));
+    }
+
+    @Test
+    void рецептАйсЛаттеУспешноОпределяется() {
+        // Айс-латте: какао бобы + лед + ведро молока
+        List<Shaker.IngredientKind> ingredients = List.of(
+                Shaker.IngredientKind.COCOA_BEANS,
+                Shaker.IngredientKind.ICE,
+                Shaker.IngredientKind.MILK_BUCKET
+        );
+        assertEquals(Shaker.RECIPE_ICED_LATTE, Shaker.matchRecipeFromKinds(ingredients));
+
+        // С добавкой меда
+        List<Shaker.IngredientKind> withHoney = List.of(
+                Shaker.IngredientKind.COCOA_BEANS,
+                Shaker.IngredientKind.ICE,
+                Shaker.IngredientKind.MILK_BUCKET,
+                Shaker.IngredientKind.HONEY_BOTTLE
+        );
+        assertEquals(Shaker.RECIPE_ICED_LATTE, Shaker.matchRecipeFromKinds(withHoney));
+    }
+
+    @Test
+    void добавкиАйсЛатте() {
+        ItemStack honey = new ItemStack(Material.HONEY_BOTTLE);
+        ItemStack ice = new ItemStack(Material.ICE);
+        ItemStack greenDye = new ItemStack(Material.GREEN_DYE);
+
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_ICED_LATTE, honey));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_ICED_LATTE, ice));
+        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_ICED_LATTE, greenDye));
+    }
+
+    @Test
+    void рецептМатчаЧайУспешноОпределяется() {
+        // Матча-чай: зеленый краситель + горячая вода
+        List<Shaker.IngredientKind> ingredients = List.of(
+                Shaker.IngredientKind.GREEN_DYE,
+                Shaker.IngredientKind.HOT_WATER_BOTTLE
+        );
+        assertEquals(Shaker.RECIPE_MATCHA_TEA, Shaker.matchRecipeFromKinds(ingredients));
+
+        // С добавками: мед, молоко, лед
+        List<Shaker.IngredientKind> withAdditives = List.of(
+                Shaker.IngredientKind.GREEN_DYE,
+                Shaker.IngredientKind.HOT_WATER_BOTTLE,
+                Shaker.IngredientKind.HONEY_BOTTLE,
+                Shaker.IngredientKind.MILK_BUCKET,
+                Shaker.IngredientKind.ICE
+        );
+        assertEquals(Shaker.RECIPE_MATCHA_TEA, Shaker.matchRecipeFromKinds(withAdditives));
+    }
+
+    @Test
+    void добавкиМатчаЧай() {
+        ItemStack honey = new ItemStack(Material.HONEY_BOTTLE);
+        ItemStack milk = new ItemStack(Material.MILK_BUCKET);
+        ItemStack ice = new ItemStack(Material.ICE);
+        ItemStack sugar = new ItemStack(Material.SUGAR);
+
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, honey));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, milk));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, ice));
+        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, sugar));
     }
 
     @Test
     void неудачныйРецептДаетМуть() {
-        // Неполный состав для медовухи
-        assertEquals(Shaker.RECIPE_MURK, Shaker.matchRecipeFromKinds(List.of(
-                Shaker.IngredientKind.HONEY_BOTTLE,
-                Shaker.IngredientKind.SUGAR,
-                Shaker.IngredientKind.WATER_BOTTLE
-        )));
-
-        // Лишний предмет в медовухе
-        assertEquals(Shaker.RECIPE_MURK, Shaker.matchRecipeFromKinds(List.of(
-                Shaker.IngredientKind.HONEY_BOTTLE,
-                Shaker.IngredientKind.SUGAR,
-                Shaker.IngredientKind.SUGAR,
-                Shaker.IngredientKind.WATER_BOTTLE,
-                Shaker.IngredientKind.OTHER
-        )));
-
         // Произвольный предмет
         assertEquals(Shaker.RECIPE_MURK, Shaker.matchRecipeFromKinds(List.of(
                 Shaker.IngredientKind.OTHER
         )));
 
-        // 5 единиц сахара
+        // Только сахар
         assertEquals(Shaker.RECIPE_MURK, Shaker.matchRecipeFromKinds(List.of(
-                Shaker.IngredientKind.SUGAR,
-                Shaker.IngredientKind.SUGAR,
-                Shaker.IngredientKind.SUGAR,
                 Shaker.IngredientKind.SUGAR,
                 Shaker.IngredientKind.SUGAR
         )));
@@ -168,64 +238,6 @@ final class ShakerTest {
     }
 
     @Test
-    void рецептАйсЛаттеУспешноОпределяется() {
-        // Айс-латте: ровно 1 какао-боб, 1 ведро молока, 2 льда, 1 бутылка меда (всего 5 предметов)
-        List<Shaker.IngredientKind> ingredients = List.of(
-                Shaker.IngredientKind.COCOA_BEANS,
-                Shaker.IngredientKind.MILK_BUCKET,
-                Shaker.IngredientKind.ICE,
-                Shaker.IngredientKind.ICE,
-                Shaker.IngredientKind.HONEY_BOTTLE
-        );
-        assertEquals(Shaker.RECIPE_ICED_LATTE, Shaker.matchRecipeFromKinds(ingredients));
-
-        // Вариант с горячей водой больше не варит айс-латте (дает муть)
-        List<Shaker.IngredientKind> ingredientsHotWater = List.of(
-                Shaker.IngredientKind.COCOA_BEANS,
-                Shaker.IngredientKind.MILK_BUCKET,
-                Shaker.IngredientKind.HOT_WATER_BOTTLE,
-                Shaker.IngredientKind.ICE,
-                Shaker.IngredientKind.HONEY_BOTTLE
-        );
-        assertEquals(Shaker.RECIPE_MURK, Shaker.matchRecipeFromKinds(ingredientsHotWater));
-
-        // Перемешанный порядок
-        List<Shaker.IngredientKind> shuffled = List.of(
-                Shaker.IngredientKind.ICE,
-                Shaker.IngredientKind.HONEY_BOTTLE,
-                Shaker.IngredientKind.COCOA_BEANS,
-                Shaker.IngredientKind.ICE,
-                Shaker.IngredientKind.MILK_BUCKET
-        );
-        assertEquals(Shaker.RECIPE_ICED_LATTE, Shaker.matchRecipeFromKinds(shuffled));
-        assertEquals("f8resurs:iced_latte", Shaker.MODEL_ICED_LATTE_KEY.asString());
-    }
-
-    @Test
-    void рецептМатчаЧайУспешноОпределяется() {
-        // Матча-чай: 1 зеленый краситель, 1 горячая вода, 1 ведро молока, 1 лед, 1 мед
-        List<Shaker.IngredientKind> ingredients = List.of(
-                Shaker.IngredientKind.GREEN_DYE,
-                Shaker.IngredientKind.HOT_WATER_BOTTLE,
-                Shaker.IngredientKind.MILK_BUCKET,
-                Shaker.IngredientKind.ICE,
-                Shaker.IngredientKind.HONEY_BOTTLE
-        );
-        assertEquals(Shaker.RECIPE_MATCHA_TEA, Shaker.matchRecipeFromKinds(ingredients));
-
-        // Перемешанный порядок
-        List<Shaker.IngredientKind> shuffled = List.of(
-                Shaker.IngredientKind.HONEY_BOTTLE,
-                Shaker.IngredientKind.ICE,
-                Shaker.IngredientKind.GREEN_DYE,
-                Shaker.IngredientKind.MILK_BUCKET,
-                Shaker.IngredientKind.HOT_WATER_BOTTLE
-        );
-        assertEquals(Shaker.RECIPE_MATCHA_TEA, Shaker.matchRecipeFromKinds(shuffled));
-        assertEquals("f8resurs:matcha-chai", Shaker.MODEL_MATCHA_TEA_KEY.asString());
-    }
-
-    @Test
     void бутылочкаГорячейВодыИдентификаторы() {
         assertEquals("adaptation:hot_water_bottle", Shaker.HOT_WATER_KEY.asString());
     }
@@ -246,10 +258,10 @@ final class ShakerTest {
     @Test
     void запрещеныЛюбыеБлокиКромеЛюбогоЛьда() {
         // Разрешены любые виды льда
-        assertTrue(Shaker.isAllowedIngredient(Material.ICE));
-        assertTrue(Shaker.isAllowedIngredient(Material.PACKED_ICE));
-        assertTrue(Shaker.isAllowedIngredient(Material.BLUE_ICE));
-        assertTrue(Shaker.isAllowedIngredient(Material.FROSTED_ICE));
+        assertTrue(Shaker.isIce(Material.ICE));
+        assertTrue(Shaker.isIce(Material.PACKED_ICE));
+        assertTrue(Shaker.isIce(Material.BLUE_ICE));
+        assertTrue(Shaker.isIce(Material.FROSTED_ICE));
 
         // Разрешены не-блочные предметы (ингредиенты)
         assertTrue(Shaker.isAllowedIngredient(Material.SUGAR));
