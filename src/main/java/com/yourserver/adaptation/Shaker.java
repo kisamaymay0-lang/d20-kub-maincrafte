@@ -180,8 +180,8 @@ public class Shaker implements Listener {
         PotionMeta meta = (PotionMeta) item.getItemMeta();
         if (meta != null) {
             meta.setBasePotionType(PotionType.WATER);
-            meta.displayName(Component.text("Бутылочка горячей воды", NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Бутылочка горячей воды", NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
+            meta.displayName(null);
             meta.getPersistentDataContainer().set(HOT_WATER_KEY, PersistentDataType.BYTE, (byte) 1);
             item.setItemMeta(meta);
         }
@@ -279,8 +279,8 @@ public class Shaker implements Listener {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
 
-        meta.displayName(Component.text("Шейкер", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
         meta.itemName(Component.text("Шейкер", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
+        meta.displayName(null);
         meta.setItemModel(open ? MODEL_OPEN_KEY : MODEL_CLOSE_KEY);
 
         PersistentDataContainer pdc = meta.getPersistentDataContainer();
@@ -735,8 +735,8 @@ public class Shaker implements Listener {
         meta.getPersistentDataContainer().set(BAD_ADDITIVES_COUNT_KEY, PersistentDataType.INTEGER, badAdditivesCount);
 
         if (RECIPE_MEAD.equals(recipe)) {
-            meta.displayName(Component.text("Медовуха", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Медовуха", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
+            meta.displayName(null);
             meta.setItemModel(MODEL_MEAD_KEY);
             meta.setColor(Color.fromRGB(0xEB, 0xAF, 0x28));
             try {
@@ -747,23 +747,23 @@ public class Shaker implements Listener {
             } catch (Throwable ignored) {
             }
         } else if (RECIPE_DAIQUIRI.equals(recipe)) {
-            meta.displayName(Component.text("Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
+            meta.displayName(null);
             meta.setItemModel(MODEL_DAIQUIRI_KEY);
             meta.setColor(Color.fromRGB(0xF0, 0x46, 0x6E));
         } else if (RECIPE_ICED_LATTE.equals(recipe)) {
-            meta.displayName(Component.text("Айс-латте", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Айс-латте", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
+            meta.displayName(null);
             meta.setItemModel(MODEL_ICED_LATTE_KEY);
             meta.setColor(Color.fromRGB(0xE8, 0xC4, 0x99));
         } else if (RECIPE_MATCHA_TEA.equals(recipe)) {
-            meta.displayName(Component.text("Матча-чай", NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Матча-чай", NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
+            meta.displayName(null);
             meta.setItemModel(MODEL_MATCHA_TEA_KEY);
             meta.setColor(Color.fromRGB(0x78, 0xA8, 0x3C));
         } else {
-            meta.displayName(Component.text("Муть", NamedTextColor.DARK_GREEN).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Муть", NamedTextColor.DARK_GREEN).decoration(TextDecoration.ITALIC, false));
+            meta.displayName(null);
             meta.setColor(Color.fromRGB(0x4E, 0x93, 0x31));
             meta.clearCustomEffects();
             meta.addCustomEffect(new PotionEffect(PotionEffectType.NAUSEA, 10 * 20, 0), true);

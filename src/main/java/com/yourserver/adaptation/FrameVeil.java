@@ -58,6 +58,25 @@ final class FrameVeil implements Listener {
         }
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPutInFrame(PlayerInteractEntityEvent event) {
+        if (!(event.getRightClicked() instanceof ItemFrame frame)) return;
+        ItemStack held = event.getPlayer().getInventory().getItem(event.getHand());
+        if (Shaker.isDrink(held) || Shaker.isShaker(held) || Shaker.isHotWaterBottle(held)) {
+            org.bukkit.Bukkit.getScheduler().runTask(org.bukkit.plugin.java.JavaPlugin.getProvidingPlugin(FrameVeil.class), () -> {
+                ItemStack inFrame = frame.getItem();
+                if (inFrame != null && (Shaker.isDrink(inFrame) || Shaker.isShaker(inFrame) || Shaker.isHotWaterBottle(inFrame))) {
+                    var meta = inFrame.getItemMeta();
+                    if (meta != null && meta.hasDisplayName()) {
+                        meta.displayName(null);
+                        inFrame.setItemMeta(meta);
+                        frame.setItem(inFrame);
+                    }
+                }
+            });
+        }
+    }
+
     /** Точка частиц: чуть перед рамкой. */
     private static Location dropSpot(ItemFrame frame) {
         Location at = frame.getLocation();
