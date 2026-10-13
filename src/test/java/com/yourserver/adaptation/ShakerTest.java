@@ -1,7 +1,6 @@
 package com.yourserver.adaptation;
 
 import org.bukkit.Material;
-import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -99,13 +98,9 @@ final class ShakerTest {
 
     @Test
     void добавкиМедовухи() {
-        ItemStack sugar = new ItemStack(Material.SUGAR);
-        ItemStack ice = new ItemStack(Material.ICE);
-        ItemStack berries = new ItemStack(Material.SWEET_BERRIES);
-
-        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MEAD, sugar));
-        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_MEAD, ice));
-        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_MEAD, berries));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MEAD, Shaker.IngredientKind.SUGAR));
+        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_MEAD, Shaker.IngredientKind.ICE));
+        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_MEAD, Shaker.IngredientKind.SWEET_BERRIES));
     }
 
     @Test
@@ -130,13 +125,9 @@ final class ShakerTest {
 
     @Test
     void добавкиДайкири() {
-        ItemStack ice = new ItemStack(Material.ICE);
-        ItemStack berries = new ItemStack(Material.SWEET_BERRIES);
-        ItemStack honey = new ItemStack(Material.HONEY_BOTTLE);
-
-        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_DAIQUIRI, ice));
-        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_DAIQUIRI, berries));
-        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_DAIQUIRI, honey));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_DAIQUIRI, Shaker.IngredientKind.ICE));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_DAIQUIRI, Shaker.IngredientKind.SWEET_BERRIES));
+        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_DAIQUIRI, Shaker.IngredientKind.HONEY_BOTTLE));
     }
 
     @Test
@@ -161,13 +152,9 @@ final class ShakerTest {
 
     @Test
     void добавкиАйсЛатте() {
-        ItemStack honey = new ItemStack(Material.HONEY_BOTTLE);
-        ItemStack ice = new ItemStack(Material.ICE);
-        ItemStack greenDye = new ItemStack(Material.GREEN_DYE);
-
-        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_ICED_LATTE, honey));
-        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_ICED_LATTE, ice));
-        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_ICED_LATTE, greenDye));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_ICED_LATTE, Shaker.IngredientKind.HONEY_BOTTLE));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_ICED_LATTE, Shaker.IngredientKind.ICE));
+        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_ICED_LATTE, Shaker.IngredientKind.GREEN_DYE));
     }
 
     @Test
@@ -192,15 +179,10 @@ final class ShakerTest {
 
     @Test
     void добавкиМатчаЧай() {
-        ItemStack honey = new ItemStack(Material.HONEY_BOTTLE);
-        ItemStack milk = new ItemStack(Material.MILK_BUCKET);
-        ItemStack ice = new ItemStack(Material.ICE);
-        ItemStack sugar = new ItemStack(Material.SUGAR);
-
-        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, honey));
-        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, milk));
-        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, ice));
-        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, sugar));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, Shaker.IngredientKind.HONEY_BOTTLE));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, Shaker.IngredientKind.MILK_BUCKET));
+        assertTrue(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, Shaker.IngredientKind.ICE));
+        assertFalse(Shaker.isPositiveAdditive(Shaker.RECIPE_MATCHA_TEA, Shaker.IngredientKind.SUGAR));
     }
 
     @Test

@@ -618,9 +618,8 @@ public class Shaker implements Listener {
     /**
      * Положительная ли добавка для данного напитка.
      */
-    public static boolean isPositiveAdditive(String recipe, ItemStack item) {
-        if (item == null) return false;
-        IngredientKind kind = classify(item);
+    public static boolean isPositiveAdditive(String recipe, IngredientKind kind) {
+        if (kind == null) return false;
         if (RECIPE_MEAD.equals(recipe)) {
             // Медовуха: сахар
             return kind == IngredientKind.SUGAR;
@@ -635,6 +634,11 @@ public class Shaker implements Listener {
             return kind == IngredientKind.HONEY_BOTTLE || kind == IngredientKind.MILK_BUCKET || kind == IngredientKind.ICE;
         }
         return false;
+    }
+
+    public static boolean isPositiveAdditive(String recipe, ItemStack item) {
+        if (item == null) return false;
+        return isPositiveAdditive(recipe, classify(item));
     }
 
     /**
