@@ -53,6 +53,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private AncientJug ancientJug;
     private Apvsh apvsh;
     private Shaker shaker;
+    private BambooBarrel bambooBarrel;
     /** Сигарета из /f8: тикает шкалу тяги и дым, поэтому нужен доступ на выключении. */
     private Cigarette cigarette;
     /** Политые кораллы: список живёт в файле, поэтому нужен доступ на выключении. */
@@ -152,6 +153,9 @@ public void onEnable() {
     getServer().getPluginManager().registerEvents(shaker, this);
     shaker.registerRecipe();
 
+    // Бамбуковая бочка для брожения пиратского рома.
+    bambooBarrel = new BambooBarrel(this);
+    getServer().getPluginManager().registerEvents(bambooBarrel, this);
     // Миниигра особого предмета биома: вылавливается вместо обычной рыбы.
     specialCatch = new SpecialCatch(this, ancientJug, winterFishing);
     getServer().getPluginManager().registerEvents(specialCatch, this);
