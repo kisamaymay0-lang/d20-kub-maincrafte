@@ -277,4 +277,12 @@ final class ShakerTest {
         assertEquals("Ведро молока", Shaker.getRussianMaterialName(Material.MILK_BUCKET));
         assertEquals("Зелёный краситель", Shaker.getRussianMaterialName(Material.GREEN_DYE));
     }
+
+    @Test
+    void лорНапитковБезДобавокПустой() {
+        var lore = Shaker.buildDrinkLore(Shaker.RECIPE_MEAD, List.of(), false);
+        assertTrue(lore.isEmpty());
+        lore = Shaker.buildDrinkLore(Shaker.RECIPE_MEAD, null, true);
+        assertTrue(lore.isEmpty());
+    }
 }

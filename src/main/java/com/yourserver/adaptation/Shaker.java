@@ -1,6 +1,9 @@
 package com.yourserver.adaptation;
 
 import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.Consumable;
+import io.papermc.paper.datacomponent.item.consumable.ItemUseAnimation;
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
@@ -25,6 +28,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
@@ -68,7 +72,7 @@ import java.util.UUID;
  *   <li><b>Напитки и добавки:</b> Напитки создаются из базовых ингредиентов без базовых эффектов.
  *       Дополнительные ингредиенты в шейкере становятся добавками (положительными или отрицательными).
  *       Отрицательные добавки при выпивании дают негативные эффекты (Тошнота / Отравление).
- *       В описании готового напитка перечисляются все добавки (зеленым/красным).</li>
+ *       В инвентаре у напитков при зажатии Shift отображается список добавок (зеленым/красным).</li>
  * </ul>
  */
 public class Shaker implements Listener {
@@ -107,9 +111,52 @@ public class Shaker implements Listener {
     private final Plugin plugin;
     private final Map<UUID, ShakeTracker> shakeTrackers = new HashMap<>();
     private final Map<UUID, Integer> lastInteractTick = new HashMap<>();
+    private final Map<UUID, Boolean> wasSneaking = new HashMap<>();
 
     public Shaker(Plugin plugin) {
         this.plugin = plugin;
+        if (plugin != null) {
+            Bukkit.getScheduler().runTaskTimer(plugin, this::checkShiftLores, 1L, 1L);
+        }
+    }
+
+    private void checkShiftLores() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            boolean sneaking = player.isSneaking();
+            Boolean prev = wasSneaking.get(player.getUniqueId());
+            if (prev == null || prev != sneaking) {
+                wasSneaking.put(player.getUniqueId(), sneaking);
+                updatePlayerDrinkLores(player, sneaking);
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onToggleSneak(PlayerToggleSneakEvent event) {
+        Player player = event.getPlayer();
+        wasSneaking.put(player.getUniqueId(), event.isSneaking());
+        updatePlayerDrinkLores(player, event.isSneaking());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            updatePlayerDrinkLores(player, player.isSneaking());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            updatePlayerDrinkLores(player, player.isSneaking());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onInventoryOpen(InventoryOpenEvent event) {
+        if (event.getPlayer() instanceof Player player) {
+            updatePlayerDrinkLores(player, player.isSneaking());
+        }
     }
 
     /**
@@ -202,6 +249,11 @@ public class Shaker implements Listener {
         return contents.get(idx).getItemMeta().getPersistentDataContainer().get(DRINK_PDC_KEY, PersistentDataType.STRING);
     }
 
+    public static String getDrinkType(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return null;
+        return item.getItemMeta().getPersistentDataContainer().get(DRINK_PDC_KEY, PersistentDataType.STRING);
+    }
+
     /**
      * Получить список предметов внутри шейкера.
      */
@@ -221,6 +273,7 @@ public class Shaker implements Listener {
 
     /**
      * Обновить мета-данные шейкера с явным состоянием открытости.
+     * В описании выводится только "Содержимое (X/5):" и список предметов без лишних строк.
      */
     public static void updateMeta(ItemStack item, List<ItemStack> contents, boolean open) {
         ItemMeta meta = item.getItemMeta();
@@ -242,14 +295,14 @@ public class Shaker implements Listener {
 
         List<Component> lore = new ArrayList<>();
         int count = contents == null ? 0 : contents.size();
-        if (count > 0) {
-            lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        if (contents != null) {
             for (ItemStack ingredient : contents) {
                 lore.add(Component.text("• " + getItemDisplayName(ingredient), NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
             }
         }
 
-        meta.lore(lore.isEmpty() ? null : lore);
+        meta.lore(lore);
         item.setItemMeta(meta);
     }
 
@@ -686,6 +739,13 @@ public class Shaker implements Listener {
             meta.itemName(Component.text("Медовуха", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
             meta.setItemModel(MODEL_MEAD_KEY);
             meta.setColor(Color.fromRGB(0xEB, 0xAF, 0x28));
+            try {
+                potion.setData(DataComponentTypes.CONSUMABLE, Consumable.consumable()
+                        .animation(ItemUseAnimation.DRINK)
+                        .sound(Key.key("item.honey_bottle.drink"))
+                        .build());
+            } catch (Throwable ignored) {
+            }
         } else if (RECIPE_DAIQUIRI.equals(recipe)) {
             meta.displayName(Component.text("Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
             meta.itemName(Component.text("Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
@@ -726,31 +786,41 @@ public class Shaker implements Listener {
             }
         }
 
-        meta.lore(buildDrinkLore(recipe, additives));
+        meta.lore(buildDrinkLore(recipe, additives, false));
         potion.setItemMeta(meta);
         return potion;
     }
 
     /**
-     * Построение лора напитка со списком добавок.
+     * Построение лора напитка с поддержкой [SHIFT] для просмотра добавок.
+     * По умолчанию: [SHIFT] для просмотра добавок ([ и ] светло-серые, SHIFT белый).
+     * При зажатом SHIFT: после строчки с шифтом пишется список добавок (зеленым/красным).
      */
-    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives) {
+    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives, boolean showShift) {
         List<Component> lore = new ArrayList<>();
         if (additives == null || additives.isEmpty()) {
             return lore;
         }
 
-        lore.add(Component.text("Добавки (" + additives.size() + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-        for (ItemStack additive : additives) {
-            boolean positive = isPositiveAdditive(recipe, additive);
-            TextColor color = positive ? NamedTextColor.GREEN : NamedTextColor.RED;
-            lore.add(Component.text("• " + getItemDisplayName(additive), color).decoration(TextDecoration.ITALIC, false));
+        Component shiftLine = Component.text("[", NamedTextColor.GRAY)
+                .append(Component.text("SHIFT", NamedTextColor.WHITE))
+                .append(Component.text("] для просмотра добавок", NamedTextColor.GRAY))
+                .decoration(TextDecoration.ITALIC, false);
+        lore.add(shiftLine);
+
+        if (showShift) {
+            for (ItemStack additive : additives) {
+                boolean positive = isPositiveAdditive(recipe, additive);
+                TextColor color = positive ? NamedTextColor.GREEN : NamedTextColor.RED;
+                lore.add(Component.text("• " + getItemDisplayName(additive), color).decoration(TextDecoration.ITALIC, false));
+            }
         }
+
         return lore;
     }
 
-    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives, boolean showShift) {
-        return buildDrinkLore(recipe, additives);
+    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives) {
+        return buildDrinkLore(recipe, additives, false);
     }
 
     /**
@@ -762,16 +832,66 @@ public class Shaker implements Listener {
         return deserializeItemList(bytes);
     }
 
-    public static void updateDrinkLore(ItemStack item, boolean sneaking) {
-        if (!isDrink(item)) return;
+    /**
+     * Обновить лор напитков у игрока при зажатии/отпускании Shift во всех слотах.
+     */
+    public static void updatePlayerDrinkLores(Player player, boolean sneaking) {
+        if (player == null || !player.isOnline()) return;
+        boolean changed = false;
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.getSize(); i++) {
+            ItemStack item = inv.getItem(i);
+            if (isDrink(item)) {
+                if (updateDrinkLore(item, sneaking)) {
+                    inv.setItem(i, item);
+                    changed = true;
+                }
+            }
+        }
+        var openInv = player.getOpenInventory();
+        if (openInv != null) {
+            var top = openInv.getTopInventory();
+            if (top != null) {
+                for (int i = 0; i < top.getSize(); i++) {
+                    ItemStack item = top.getItem(i);
+                    if (isDrink(item)) {
+                        if (updateDrinkLore(item, sneaking)) {
+                            top.setItem(i, item);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            var cursor = player.getItemOnCursor();
+            if (isDrink(cursor)) {
+                if (updateDrinkLore(cursor, sneaking)) {
+                    player.setItemOnCursor(cursor);
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            player.updateInventory();
+        }
+    }
+
+    public static boolean updateDrinkLore(ItemStack item, boolean sneaking) {
+        if (!isDrink(item)) return false;
         ItemMeta meta = item.getItemMeta();
-        if (meta == null) return;
+        if (meta == null) return false;
         String recipe = meta.getPersistentDataContainer().get(DRINK_PDC_KEY, PersistentDataType.STRING);
-        if (recipe == null) return;
+        if (recipe == null) return false;
         byte[] bytes = meta.getPersistentDataContainer().get(ADDITIVES_KEY, PersistentDataType.BYTE_ARRAY);
         List<ItemStack> additives = deserializeItemList(bytes);
-        meta.lore(buildDrinkLore(recipe, additives));
+        if (additives.isEmpty()) return false;
+        List<Component> newLore = buildDrinkLore(recipe, additives, sneaking);
+        List<Component> oldLore = meta.lore();
+        if (oldLore != null && oldLore.equals(newLore)) {
+            return false;
+        }
+        meta.lore(newLore);
         item.setItemMeta(meta);
+        return true;
     }
 
     /**
@@ -1051,8 +1171,9 @@ public class Shaker implements Listener {
             event.setUseItemInHand(Event.Result.DENY);
             lastInteractTick.put(player.getUniqueId(), currentTick);
 
+            // Попытка добавить предмет в закрытый шейкер: звук нотного блока баса
             if (!open) {
-                player.playSound(player.getLocation(), Sound.BLOCK_CHEST_LOCKED, SoundCategory.PLAYERS, 0.5F, 1.2F);
+                player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, SoundCategory.PLAYERS, 0.3F, 0.5F);
                 return;
             }
 
@@ -1283,6 +1404,18 @@ public class Shaker implements Listener {
         player.playSound(player.getLocation(), Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.PLAYERS, 0.6F, 1.1F);
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlayerItemConsume(PlayerItemConsumeEvent event) {
+        ItemStack item = event.getItem();
+        if (isDrink(item)) {
+            String recipe = getDrinkType(item);
+            if (RECIPE_MEAD.equals(recipe)) {
+                Player player = event.getPlayer();
+                player.getWorld().playSound(player.getLocation(), Sound.ITEM_HONEY_BOTTLE_DRINK, SoundCategory.PLAYERS, 1.0F, 1.0F);
+            }
+        }
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onFurnaceSmelt(FurnaceSmeltEvent event) {
         if (event.getSource().getType() == Material.POTION) {
@@ -1304,6 +1437,7 @@ public class Shaker implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         shakeTrackers.remove(event.getPlayer().getUniqueId());
         lastInteractTick.remove(event.getPlayer().getUniqueId());
+        wasSneaking.remove(event.getPlayer().getUniqueId());
     }
 
     private static void setHandItem(Player player, EquipmentSlot hand, ItemStack item) {

@@ -1676,9 +1676,14 @@ public class AncientJug implements Listener {
         } else if (CUSTOM_KIND.equals(contents.kind) && contents.custom != null) {
             try {
                 ItemStack sample = ItemStack.deserializeBytes(contents.custom);
-                if (sample != null && sample.getItemMeta() instanceof PotionMeta meta) {
-                    for (PotionEffect effect : meta.getCustomEffects()) {
-                        player.addPotionEffect(effect);
+                if (sample != null) {
+                    if (Shaker.isDrink(sample) && Shaker.RECIPE_MEAD.equals(Shaker.getDrinkType(sample))) {
+                        player.playSound(player.getEyeLocation(), Sound.ITEM_HONEY_BOTTLE_DRINK, 1.0f, 1.0f);
+                    }
+                    if (sample.getItemMeta() instanceof PotionMeta meta) {
+                        for (PotionEffect effect : meta.getCustomEffects()) {
+                            player.addPotionEffect(effect);
+                        }
                     }
                 }
             } catch (Throwable ignored) {
