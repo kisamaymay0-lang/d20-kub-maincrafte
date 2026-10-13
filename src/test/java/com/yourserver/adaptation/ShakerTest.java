@@ -265,4 +265,16 @@ final class ShakerTest {
         assertFalse(Shaker.isAllowedIngredient((Material) null));
         assertFalse(Shaker.isAllowedIngredient(Material.AIR));
     }
+
+    @Test
+    void русскиеНазванияИнгредиентов() {
+        assertEquals("Медовые соты", Shaker.getRussianMaterialName(Material.HONEYCOMB));
+        assertEquals("Бутылочка мёда", Shaker.getRussianMaterialName(Material.HONEY_BOTTLE));
+        assertEquals("Сахар", Shaker.getRussianMaterialName(Material.SUGAR));
+        assertEquals("Сладкие ягоды", Shaker.getRussianMaterialName(Material.SWEET_BERRIES));
+        assertEquals("Лёд", Shaker.getRussianMaterialName(Material.ICE));
+        assertEquals("Какао-бобы", Shaker.getRussianMaterialName(Material.COCOA_BEANS));
+        assertEquals("Ведро молока", Shaker.getRussianMaterialName(Material.MILK_BUCKET));
+        assertEquals("Зелёный краситель", Shaker.getRussianMaterialName(Material.GREEN_DYE));
+    }
 }

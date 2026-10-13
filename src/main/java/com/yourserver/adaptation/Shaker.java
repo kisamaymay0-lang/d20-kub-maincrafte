@@ -68,7 +68,7 @@ import java.util.UUID;
  *   <li><b>Напитки и добавки:</b> Напитки создаются из базовых ингредиентов без базовых эффектов.
  *       Дополнительные ингредиенты в шейкере становятся добавками (положительными или отрицательными).
  *       Отрицательные добавки при выпивании дают негативные эффекты (Тошнота / Отравление).
- *       В инвентаре у напитков при зажатии Shift отображается список добавок (зеленым/красным).</li>
+ *       В описании готового напитка перечисляются все добавки (зеленым/красным).</li>
  * </ul>
  */
 public class Shaker implements Listener {
@@ -107,52 +107,9 @@ public class Shaker implements Listener {
     private final Plugin plugin;
     private final Map<UUID, ShakeTracker> shakeTrackers = new HashMap<>();
     private final Map<UUID, Integer> lastInteractTick = new HashMap<>();
-    private final Map<UUID, Boolean> wasSneaking = new HashMap<>();
 
     public Shaker(Plugin plugin) {
         this.plugin = plugin;
-        if (plugin != null) {
-            Bukkit.getScheduler().runTaskTimer(plugin, this::checkShiftLores, 2L, 2L);
-        }
-    }
-
-    private void checkShiftLores() {
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            boolean sneaking = player.isSneaking();
-            Boolean prev = wasSneaking.get(player.getUniqueId());
-            if (prev == null || prev != sneaking) {
-                wasSneaking.put(player.getUniqueId(), sneaking);
-                updatePlayerDrinkLores(player, sneaking);
-            }
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onToggleSneak(PlayerToggleSneakEvent event) {
-        Player player = event.getPlayer();
-        wasSneaking.put(player.getUniqueId(), event.isSneaking());
-        updatePlayerDrinkLores(player, event.isSneaking());
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (event.getWhoClicked() instanceof Player player) {
-            updatePlayerDrinkLores(player, player.isSneaking());
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onInventoryDrag(InventoryDragEvent event) {
-        if (event.getWhoClicked() instanceof Player player) {
-            updatePlayerDrinkLores(player, player.isSneaking());
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onInventoryOpen(InventoryOpenEvent event) {
-        if (event.getPlayer() instanceof Player player) {
-            updatePlayerDrinkLores(player, player.isSneaking());
-        }
     }
 
     /**
@@ -285,23 +242,14 @@ public class Shaker implements Listener {
 
         List<Component> lore = new ArrayList<>();
         int count = contents == null ? 0 : contents.size();
-        String state = open ? "(открыт)" : "(закрыт)";
-        if (count == 0) {
-            lore.add(Component.text("Пустой шейкер (0/" + MAX_SLOTS + ") " + state, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-        } else {
-            lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + ") " + state + ":", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        if (count > 0) {
+            lore.add(Component.text("Содержимое (" + count + "/" + MAX_SLOTS + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
             for (ItemStack ingredient : contents) {
-                lore.add(Component.text("• " + getItemDisplayName(ingredient), getItemColor(ingredient)).decoration(TextDecoration.ITALIC, false));
-            }
-            lore.add(Component.empty());
-            if (open) {
-                lore.add(Component.text("Закройте шейкер (Shift + ПКМ), чтобы смешать.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
-            } else {
-                lore.add(Component.text("Трясите камеру вверх-вниз для смешивания.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
+                lore.add(Component.text("• " + getItemDisplayName(ingredient), NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
             }
         }
 
-        meta.lore(lore);
+        meta.lore(lore.isEmpty() ? null : lore);
         item.setItemMeta(meta);
     }
 
@@ -347,16 +295,15 @@ public class Shaker implements Listener {
                 };
             }
         }
-        ItemMeta meta = item.getItemMeta();
-        if (meta != null) {
-            Component dn = meta.hasDisplayName() ? meta.displayName() : meta.itemName();
-            if (dn != null) {
-                return net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(dn);
+        if (item.hasItemMeta()) {
+            ItemMeta meta = item.getItemMeta();
+            if (meta.hasDisplayName()) {
+                return net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(meta.displayName());
             }
         }
         Material mat = item.getType();
         if (mat == Material.POTION) {
-            if (meta instanceof PotionMeta potionMeta) {
+            if (item.getItemMeta() instanceof PotionMeta potionMeta) {
                 PotionType baseType = potionMeta.getBasePotionType();
                 if (baseType == PotionType.WATER) {
                     return "Бутылочка воды";
@@ -364,6 +311,11 @@ public class Shaker implements Listener {
             }
             return "Бутылочка воды";
         }
+        return getRussianMaterialName(mat);
+    }
+
+    public static String getRussianMaterialName(Material mat) {
+        if (mat == null) return "Ничего";
         return switch (mat) {
             case HONEYCOMB -> "Медовые соты";
             case HONEY_BOTTLE -> "Бутылочка мёда";
@@ -380,6 +332,40 @@ public class Shaker implements Listener {
             case LAVA_BUCKET -> "Ведро лавы";
             case BUCKET -> "Ведро";
             case GREEN_DYE -> "Зелёный краситель";
+            case APPLE -> "Яблоко";
+            case GLOW_BERRIES -> "Светящиеся ягоды";
+            case COOKIE -> "Печенье";
+            case GOLDEN_APPLE -> "Золотое яблоко";
+            case ENCHANTED_GOLDEN_APPLE -> "Зачарованное золотое яблоко";
+            case MELON_SLICE -> "Ломтик арбуза";
+            case GLISTERING_MELON_SLICE -> "Сверкающий ломтик арбуза";
+            case CARROT -> "Морковь";
+            case GOLDEN_CARROT -> "Золотая морковь";
+            case POTATO -> "Картофель";
+            case BAKED_POTATO -> "Печёный картофель";
+            case POISONOUS_POTATO -> "Ядовитый картофель";
+            case BEETROOT -> "Свёкла";
+            case DRIED_KELP -> "Сушёная ламинария";
+            case BEEF -> "Сырая говядина";
+            case COOKED_BEEF -> "Стейк";
+            case PORKCHOP -> "Сырая свинина";
+            case COOKED_PORKCHOP -> "Жареная свинина";
+            case MUTTON -> "Сырая баранина";
+            case COOKED_MUTTON -> "Жареная баранина";
+            case CHICKEN -> "Сырая курятина";
+            case COOKED_CHICKEN -> "Жареная курятина";
+            case RABBIT -> "Сырая крольчатина";
+            case COOKED_RABBIT -> "Жареная крольчатина";
+            case COD -> "Сырая треска";
+            case COOKED_COD -> "Жареная треска";
+            case SALMON -> "Сырой лосось";
+            case COOKED_SALMON -> "Жареный лосось";
+            case TROPICAL_FISH -> "Тропическая рыба";
+            case PUFFERFISH -> "Иглобрюх";
+            case BREAD -> "Хлеб";
+            case EGG -> "Яйцо";
+            case WHEAT -> "Пшеница";
+            case SNOWBALL -> "Снежок";
             default -> formatMaterialName(mat);
         };
     }
@@ -650,7 +636,7 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Сопоставление классифицированных ингредиентов:
+     * Сопоставление классифицированных ингредиентов.
      */
     public static String matchRecipeFromKinds(List<IngredientKind> kinds) {
         if (kinds == null || kinds.isEmpty()) return null;
@@ -740,31 +726,31 @@ public class Shaker implements Listener {
             }
         }
 
-        meta.lore(buildDrinkLore(recipe, additives, false));
+        meta.lore(buildDrinkLore(recipe, additives));
         potion.setItemMeta(meta);
         return potion;
     }
 
     /**
-     * Построение лора напитка с поддержкой [SHIFT] для просмотра добавок.
+     * Построение лора напитка со списком добавок.
      */
-    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives, boolean showShift) {
+    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives) {
         List<Component> lore = new ArrayList<>();
         if (additives == null || additives.isEmpty()) {
             return lore;
         }
 
-        if (showShift) {
-            lore.add(Component.text("Добавки (" + additives.size() + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-            for (ItemStack additive : additives) {
-                boolean positive = isPositiveAdditive(recipe, additive);
-                TextColor color = positive ? NamedTextColor.GREEN : NamedTextColor.RED;
-                lore.add(Component.text("• " + getItemDisplayName(additive), color).decoration(TextDecoration.ITALIC, false));
-            }
+        lore.add(Component.text("Добавки (" + additives.size() + "):", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        for (ItemStack additive : additives) {
+            boolean positive = isPositiveAdditive(recipe, additive);
+            TextColor color = positive ? NamedTextColor.GREEN : NamedTextColor.RED;
+            lore.add(Component.text("• " + getItemDisplayName(additive), color).decoration(TextDecoration.ITALIC, false));
         }
-
-        lore.add(Component.text("[SHIFT] для просмотра добавок", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
         return lore;
+    }
+
+    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives, boolean showShift) {
+        return buildDrinkLore(recipe, additives);
     }
 
     /**
@@ -776,29 +762,6 @@ public class Shaker implements Listener {
         return deserializeItemList(bytes);
     }
 
-    /**
-     * Обновить лор напитка у игрока при зажатии/отпускании Shift.
-     */
-    public static void updatePlayerDrinkLores(Player player, boolean sneaking) {
-        if (player == null || !player.isOnline()) return;
-        var inv = player.getInventory();
-        for (int i = 0; i < inv.getSize(); i++) {
-            ItemStack item = inv.getItem(i);
-            if (isDrink(item)) {
-                updateDrinkLore(item, sneaking);
-            }
-        }
-        var top = player.getOpenInventory().getTopInventory();
-        if (top != null) {
-            for (int i = 0; i < top.getSize(); i++) {
-                ItemStack item = top.getItem(i);
-                if (isDrink(item)) {
-                    updateDrinkLore(item, sneaking);
-                }
-            }
-        }
-    }
-
     public static void updateDrinkLore(ItemStack item, boolean sneaking) {
         if (!isDrink(item)) return;
         ItemMeta meta = item.getItemMeta();
@@ -807,9 +770,7 @@ public class Shaker implements Listener {
         if (recipe == null) return;
         byte[] bytes = meta.getPersistentDataContainer().get(ADDITIVES_KEY, PersistentDataType.BYTE_ARRAY);
         List<ItemStack> additives = deserializeItemList(bytes);
-        if (additives.isEmpty()) return;
-        List<Component> lore = buildDrinkLore(recipe, additives, sneaking);
-        meta.lore(lore);
+        meta.lore(buildDrinkLore(recipe, additives));
         item.setItemMeta(meta);
     }
 
@@ -1343,7 +1304,6 @@ public class Shaker implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         shakeTrackers.remove(event.getPlayer().getUniqueId());
         lastInteractTick.remove(event.getPlayer().getUniqueId());
-        wasSneaking.remove(event.getPlayer().getUniqueId());
     }
 
     private static void setHandItem(Player player, EquipmentSlot hand, ItemStack item) {

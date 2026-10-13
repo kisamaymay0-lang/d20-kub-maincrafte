@@ -46,6 +46,7 @@ import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.event.player.PlayerHarvestBlockEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
@@ -457,6 +458,12 @@ public class AncientJug implements Listener {
             } catch (Throwable ignored) {
             }
             if (sample == null) return Component.text("Неизвестная жидкость");
+            if (sample.hasItemMeta()) {
+                ItemMeta meta = sample.getItemMeta();
+                Component dn = meta.hasDisplayName() ? meta.displayName() : meta.itemName();
+                if (dn != null) return dn.color(NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false);
+            }
+            return Component.text(Shaker.getItemDisplayName(sample), NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false);
         } else {
             PotionType type = parseType(potion);
             sample = new ItemStack(Material.POTION);
@@ -1023,6 +1030,12 @@ public class AncientJug implements Listener {
     }
 
     private Liquid classifyLiquid(ItemStack item) {
+        if (item == null || item.getType() == Material.AIR) return null;
+        if (Shaker.isDrink(item) || Shaker.isHotWaterBottle(item)) {
+            ItemStack one = item.clone();
+            one.setAmount(1);
+            return new Liquid(CUSTOM_KIND, null, one.serializeAsBytes(), 1, Material.GLASS_BOTTLE);
+        }
         if (item.getType() == Material.POTION && item.getItemMeta() instanceof PotionMeta meta) {
             PotionType type = meta.getBasePotionType();
             if (type == null) return null;
@@ -1660,8 +1673,17 @@ public class AncientJug implements Listener {
             player.removePotionEffect(PotionEffectType.POISON);
             player.setFoodLevel(Math.min(20, player.getFoodLevel() + 6));
             player.setSaturation(Math.min((float) player.getFoodLevel(), player.getSaturation() + 1.2f));
+        } else if (CUSTOM_KIND.equals(contents.kind) && contents.custom != null) {
+            try {
+                ItemStack sample = ItemStack.deserializeBytes(contents.custom);
+                if (sample != null && sample.getItemMeta() instanceof PotionMeta meta) {
+                    for (PotionEffect effect : meta.getCustomEffects()) {
+                        player.addPotionEffect(effect);
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
         }
-        // CUSTOM: эффекты сторонней жидкости неизвестны — просто выпивается.
     }
 
     // ===== ЭФФЕКТЫ ПЕРЕНОСКИ НАПОЛНЕННОГО КУВШИНА =====
@@ -1726,9 +1748,37 @@ public class AncientJug implements Listener {
         }
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlayerMoveHeadCheck(PlayerMoveEvent event) {
+        Location to = event.getTo();
+        if (to == null) return;
+        checkHeadJugDrop(event.getPlayer(), to.getPitch());
+    }
+
+    /**
+     * Если игрок надел кувшин на голову и поворачивает камеру слишком высоко (в небо)
+     * или слишком низко (в пол), кувшин соскальзывает и падает на землю
+     * со звуком наполнения бутылочки водой предметом.
+     */
+    public void checkHeadJugDrop(Player player, float pitch) {
+        if (player == null) return;
+        if (pitch <= -50.0f || pitch >= 50.0f) {
+            ItemStack helmet = player.getInventory().getHelmet();
+            if (isJug(helmet)) {
+                player.getInventory().setHelmet(null);
+                Location dropLoc = player.getLocation().add(0, 1.2, 0);
+                Item dropped = player.getWorld().dropItemNaturally(dropLoc, helmet);
+                Vector vel = player.getLocation().getDirection().multiply(0.15).setY(-0.05);
+                dropped.setVelocity(vel);
+                player.getWorld().playSound(player.getLocation(), Sound.ITEM_BOTTLE_FILL, 1.0f, 1.0f);
+            }
+        }
+    }
+
     /** Вес кувшина медленно утягивает игрока вниз во время полёта на элитрах. */
     private void applyFlightPull() {
         for (Player player : Bukkit.getOnlinePlayers()) {
+            checkHeadJugDrop(player, player.getLocation().getPitch());
             if (!player.isGliding() || !carriesFilledJug(player)) continue;
             Vector velocity = player.getVelocity();
             if (velocity.getY() > -1.35) player.setVelocity(velocity.subtract(new Vector(0, 0.02, 0)));
