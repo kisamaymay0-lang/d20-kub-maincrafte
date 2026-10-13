@@ -786,41 +786,32 @@ public class Shaker implements Listener {
             }
         }
 
-        meta.lore(buildDrinkLore(recipe, additives, false));
+        meta.lore(buildDrinkLore(recipe, additives));
         potion.setItemMeta(meta);
         return potion;
     }
 
     /**
-     * Построение лора напитка с поддержкой [SHIFT] для просмотра добавок.
-     * По умолчанию: [SHIFT] для просмотра добавок ([ и ] светло-серые, SHIFT белый).
-     * При зажатом SHIFT: после строчки с шифтом пишется список добавок (зеленым/красным).
+     * Построение лора напитка со строкой «Добавки:» и списком ингредиентов (зеленым/красным).
      */
-    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives, boolean showShift) {
+    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives) {
         List<Component> lore = new ArrayList<>();
         if (additives == null || additives.isEmpty()) {
             return lore;
         }
 
-        Component shiftLine = Component.text("[", NamedTextColor.GRAY)
-                .append(Component.text("SHIFT", NamedTextColor.WHITE))
-                .append(Component.text("] для просмотра добавок", NamedTextColor.GRAY))
-                .decoration(TextDecoration.ITALIC, false);
-        lore.add(shiftLine);
-
-        if (showShift) {
-            for (ItemStack additive : additives) {
-                boolean positive = isPositiveAdditive(recipe, additive);
-                TextColor color = positive ? NamedTextColor.GREEN : NamedTextColor.RED;
-                lore.add(Component.text("• " + getItemDisplayName(additive), color).decoration(TextDecoration.ITALIC, false));
-            }
+        lore.add(Component.text("Добавки:", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        for (ItemStack additive : additives) {
+            boolean positive = isPositiveAdditive(recipe, additive);
+            TextColor color = positive ? NamedTextColor.GREEN : NamedTextColor.RED;
+            lore.add(Component.text("• " + getItemDisplayName(additive), color).decoration(TextDecoration.ITALIC, false));
         }
 
         return lore;
     }
 
-    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives) {
-        return buildDrinkLore(recipe, additives, false);
+    public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives, boolean showShift) {
+        return buildDrinkLore(recipe, additives);
     }
 
     /**

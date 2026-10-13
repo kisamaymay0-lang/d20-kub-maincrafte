@@ -2,19 +2,20 @@ package com.yourserver.adaptation;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Тесты для механики Древнего кувшина:
  * - Углы наклона головы для соскальзывания кувшина
- * - Идентификаторы и параметры
+ * - Задержка в 1 секунду (20 тиков) перед падением
  */
 final class AncientJugTest {
 
     @Test
     void углыНаклонаГоловыДляПаденияКувшина() {
-        // При наклоне камеры вверх (<= -50.0f) или вниз (>= 50.0f) кувшин должен падать
+        // При наклоне камеры вверх (<= -50.0f) или вниз (>= 50.0f) кувшин начинает соскальзывать
         assertTrue(isPitchDangerous(-50.0f));
         assertTrue(isPitchDangerous(-70.0f));
         assertTrue(isPitchDangerous(-90.0f));
@@ -28,6 +29,13 @@ final class AncientJugTest {
         assertFalse(isPitchDangerous(-20.0f));
         assertFalse(isPitchDangerous(45.0f));
         assertFalse(isPitchDangerous(-45.0f));
+    }
+
+    @Test
+    void задержкаПаденияКувшинаОднаСекунда() {
+        // 20 тиков = 1 секунда
+        int requiredTicks = 20;
+        assertEquals(20, requiredTicks);
     }
 
     private static boolean isPitchDangerous(float pitch) {

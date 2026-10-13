@@ -1753,6 +1753,8 @@ public class AncientJug implements Listener {
         }
     }
 
+    private final Map<UUID, Integer> headTiltTicks = new HashMap<>();
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerMoveHeadCheck(PlayerMoveEvent event) {
         Location to = event.getTo();
@@ -1761,15 +1763,26 @@ public class AncientJug implements Listener {
     }
 
     /**
-     * Если игрок надел кувшин на голову и поворачивает камеру слишком высоко (в небо)
-     * или слишком низко (в пол), кувшин соскальзывает и падает на землю
+     * Если игрок надел кувшин на голову и продолжает смотреть слишком высоко (в небо)
+     * или слишком низко (в пол) в течение 1 секунды (20 тиков), кувшин соскальзывает и падает на землю
      * со звуком наполнения бутылочки водой предметом.
      */
     public void checkHeadJugDrop(Player player, float pitch) {
-        if (player == null) return;
+        if (player == null || !player.isOnline()) return;
+        ItemStack helmet = player.getInventory().getHelmet();
+        if (!isJug(helmet)) {
+            headTiltTicks.remove(player.getUniqueId());
+            return;
+        }
+
+        // Опасный угол наклона головы: выше -50° или ниже 50°
         if (pitch <= -50.0f || pitch >= 50.0f) {
-            ItemStack helmet = player.getInventory().getHelmet();
-            if (isJug(helmet)) {
+            int ticks = headTiltTicks.getOrDefault(player.getUniqueId(), 0) + 1;
+            headTiltTicks.put(player.getUniqueId(), ticks);
+
+            // Падение происходит через 1 секунду (20 тиков) непрерывного опасного угла
+            if (ticks >= 20) {
+                headTiltTicks.remove(player.getUniqueId());
                 player.getInventory().setHelmet(null);
                 Location dropLoc = player.getLocation().add(0, 1.2, 0);
                 Item dropped = player.getWorld().dropItemNaturally(dropLoc, helmet);
@@ -1777,6 +1790,8 @@ public class AncientJug implements Listener {
                 dropped.setVelocity(vel);
                 player.getWorld().playSound(player.getLocation(), Sound.ITEM_BOTTLE_FILL, 1.0f, 1.0f);
             }
+        } else {
+            headTiltTicks.remove(player.getUniqueId());
         }
     }
 
