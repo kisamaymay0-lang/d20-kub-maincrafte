@@ -130,6 +130,18 @@ public class F8Command implements CommandExecutor, Listener {
             return true;
         }
 
+        if (args.length > 0 && (args[0].equalsIgnoreCase("pirate_rum") || args[0].equalsIgnoreCase("rum"))) {
+            if (!sender.hasPermission("f8.admin")) {
+                sender.sendMessage("§cНедостаточно прав.");
+                return true;
+            }
+            if (sender instanceof Player player) {
+                giveItem(player, BambooBarrel.createPirateRum());
+                player.sendMessage("§aВы получили Пиратский ром.");
+            }
+            return true;
+        }
+
         if (!(sender instanceof Player player)) {
             sender.sendMessage("§7Использование: /f8 reload — перечитать config.yml");
             return true;
@@ -294,7 +306,7 @@ public class F8Command implements CommandExecutor, Listener {
             "icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich", "ancient_jug",
             "crab_claw", "cigarette", "cigarette_lit", "cigarette_small", "cigarette_small_lit",
             "cigarette_regular", "cigarette_regular_lit",
-            "rime_potion", "rime_potion_splash", "rime_potion_lingering", "shaker", "hot_water");
+            "rime_potion", "rime_potion_splash", "rime_potion_lingering", "shaker", "hot_water", "pirate_rum");
 
     private ItemStack catalogItem(String id) {
         return switch (id) {
@@ -324,6 +336,7 @@ public class F8Command implements CommandExecutor, Listener {
             case "cigarette_regular_lit" -> Cigarette.litRegular();
             case "shaker" -> Shaker.create();
             case "hot_water" -> Shaker.createHotWaterBottle();
+            case "pirate_rum" -> BambooBarrel.createPirateRum();
             default -> throw new IllegalArgumentException("Неизвестный предмет каталога");
         };
     }

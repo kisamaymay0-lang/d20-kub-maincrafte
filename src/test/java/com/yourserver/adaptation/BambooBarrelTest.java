@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * - Модель пиратского рома skull_poilo
  * - Время брожения (10 секунд = 200 тиков)
  * - Рецепт: 1 уголь, 1 тростник, 3 горячей воды
+ * - Проверка блоков мультиблочной структуры
+ * - Проверка логики состояния бочки и сброса ингредиентов
  */
 final class BambooBarrelTest {
 
@@ -28,6 +30,25 @@ final class BambooBarrelTest {
     }
 
     @Test
+    void проверкаБлоковМультиблока() {
+        // Стенки
+        assertTrue(BambooBarrel.isBarrelWall(Material.STRIPPED_BAMBOO_BLOCK));
+        assertTrue(BambooBarrel.isBarrelWall(Material.BAMBOO_BLOCK));
+        assertFalse(BambooBarrel.isBarrelWall(Material.OAK_PLANKS));
+
+        // Ступени
+        assertTrue(BambooBarrel.isBarrelStairs(Material.BAMBOO_STAIRS));
+        assertTrue(BambooBarrel.isBarrelStairs(Material.BAMBOO_MOSAIC_STAIRS));
+        assertFalse(BambooBarrel.isBarrelStairs(Material.OAK_STAIRS));
+
+        // Полость
+        assertTrue(BambooBarrel.isCavity(Material.AIR));
+        assertTrue(BambooBarrel.isCavity(Material.CAVE_AIR));
+        assertTrue(BambooBarrel.isCavity(Material.VOID_AIR));
+        assertFalse(BambooBarrel.isCavity(Material.WATER));
+    }
+
+    @Test
     void проверкаСостоянияБочки() {
         BambooBarrel.BarrelState state = new BambooBarrel.BarrelState();
         assertTrue(state.isEmpty());
@@ -40,5 +61,26 @@ final class BambooBarrelTest {
         // Рецепт: ровно 1 уголь, 1 сахарный тростник, 3 бутылки горячей воды
         boolean canBrew = state.coalCount >= 1 && state.caneCount >= 1 && state.hotWaterCount >= 3;
         assertTrue(canBrew);
+
+        // Начало брожения
+        state.coalCount = 0;
+        state.caneCount = 0;
+        state.hotWaterCount = 0;
+        state.brewing = true;
+        state.brewingTicks = BambooBarrel.BREWING_TIME_TICKS;
+        assertFalse(state.isEmpty());
+        assertTrue(state.brewing);
+        assertEquals(200, state.brewingTicks);
+
+        // Завершение брожения
+        state.brewing = false;
+        state.brewingTicks = 0;
+        state.ready = true;
+        assertFalse(state.isEmpty());
+        assertTrue(state.ready);
+
+        // Забор напитка
+        state.ready = false;
+        assertTrue(state.isEmpty());
     }
 }

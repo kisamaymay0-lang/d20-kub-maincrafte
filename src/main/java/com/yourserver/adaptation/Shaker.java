@@ -180,8 +180,9 @@ public class Shaker implements Listener {
         PotionMeta meta = (PotionMeta) item.getItemMeta();
         if (meta != null) {
             meta.setBasePotionType(PotionType.WATER);
-            meta.itemName(Component.text("Бутылочка горячей воды", NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
-            meta.displayName(null);
+            Component name = Component.text("Бутылочка горячей воды", NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false);
+            meta.itemName(name);
+            meta.displayName(name);
             meta.getPersistentDataContainer().set(HOT_WATER_KEY, PersistentDataType.BYTE, (byte) 1);
             item.setItemMeta(meta);
         }

@@ -11,7 +11,11 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
+import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.block.data.Bisected;
+import org.bukkit.block.data.type.Stairs;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -21,22 +25,32 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.potion.PotionType;
 
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Random;
 
 /**
- * Бамбуковая бочка для приготовления пиратского рома:
- * - В бочку добавляются: 1 уголь, 1 сахарный тростник, 3 бутылки горячей воды.
- * - Через 10 секунд бочка покрывается каплями воды.
- * - ПКМ с пустой бутылочкой забирает готовый напиток: «Пиратский ром» (f8resurs:skull_poilo).
+ * Бамбуковая бочка для приготовления «Пиратского рома» (3x3x3 мультблок по NBT-структуре bamboo-bo4ka):
+ * <ul>
+ *   <li><b>Структура 3x3x3:</b> Состоит из обтёсанных бамбуковых блоков (stripped_bamboo_block) и бамбуковых ступеней (bamboo_stairs) с полой сердцевиной (air).</li>
+ *   <li><b>Ориентация:</b> Поддерживается горизонтальное расположение вдоль оси X и вдоль оси Z.</li>
+ *   <li><b>Ингредиенты:</b> 1 Уголь/Древесный уголь, 1 Сахарный тростник, 3 Бутылочки горячей воды.</li>
+ *   <li><b>Брожение:</b> 10 секунд (200 тиков) с визуальными эффектами.</li>
+ *   <li><b>Готовность:</b> После завершения брожения бочка покрывается каплями воды (dripping_water / falling_water).</li>
+ *   <li><b>Забор рома:</b> ПКМ с пустой бутылочкой забирает «Пиратский ром» (модель f8resurs:skull_poilo).</li>
+ *   <li><b>Обратная связь:</b> Исключительно внутриигровая (звуки, партиклы, предметы) без лишнего чата.</li>
+ * </ul>
  */
 public class BambooBarrel implements Listener {
 
@@ -44,6 +58,7 @@ public class BambooBarrel implements Listener {
     public static final NamespacedKey PIRATE_RUM_KEY = new NamespacedKey("adaptation", "pirate_rum");
 
     public static final int BREWING_TIME_TICKS = 200; // 10 секунд
+    private static final Random RANDOM = new Random();
 
     private final Plugin plugin;
     private final Map<Location, BarrelState> barrels = new HashMap<>();
@@ -68,30 +83,158 @@ public class BambooBarrel implements Listener {
         }
     }
 
+    // ===== ПРОВЕРКА МУЛЬТИБЛОКА (3x3x3 NBT СТРУКТУРА) =====
+
+    public static boolean isBarrelWall(Material mat) {
+        return mat == Material.STRIPPED_BAMBOO_BLOCK || mat == Material.BAMBOO_BLOCK;
+    }
+
+    public static boolean isBarrelStairs(Material mat) {
+        return mat == Material.BAMBOO_STAIRS || mat == Material.BAMBOO_MOSAIC_STAIRS;
+    }
+
+    public static boolean isCavity(Material mat) {
+        return mat == Material.AIR || mat == Material.CAVE_AIR || mat == Material.VOID_AIR;
+    }
+
     public static boolean isBambooBarrelBlock(Block block) {
         if (block == null) return false;
         Material mat = block.getType();
-        return mat == Material.BARREL
-                || mat == Material.BAMBOO_BLOCK
-                || mat == Material.STRIPPED_BAMBOO_BLOCK
-                || mat == Material.BAMBOO_PLANKS
-                || mat == Material.BAMBOO_MOSAIC
-                || mat == Material.BAMBOO_SLAB
-                || mat == Material.BAMBOO_MOSAIC_SLAB
-                || mat == Material.BAMBOO_STAIRS
-                || mat == Material.BAMBOO_MOSAIC_STAIRS
-                || mat == Material.BAMBOO_FENCE
-                || mat == Material.BAMBOO_FENCE_GATE
-                || mat == Material.BAMBOO_TRAPDOOR;
+        return isBarrelWall(mat) || isBarrelStairs(mat) || mat == Material.BARREL;
     }
+
+    private static boolean checkStairs(Block block, BlockFace expectedFacing, Bisected.Half expectedHalf) {
+        if (block == null) return false;
+        if (!isBarrelStairs(block.getType())) return false;
+        if (block.getBlockData() instanceof Stairs stairs) {
+            if (expectedFacing != null && stairs.getFacing() != expectedFacing) {
+                return false;
+            }
+            if (expectedHalf != null && stairs.getHalf() != expectedHalf) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Проверка структуры, ориентированной вдоль оси X (длина 3 по X, сечение по Y-Z).
+     */
+    public static boolean matchesXAligned(World world, int cx, int cy, int cz) {
+        if (world == null) return false;
+
+        // dy = -1 (низ бочки)
+        for (int dx = -1; dx <= 1; dx++) {
+            if (!checkStairs(world.getBlockAt(cx + dx, cy - 1, cz - 1), BlockFace.SOUTH, Bisected.Half.TOP)) return false;
+            if (!isBarrelWall(world.getBlockAt(cx + dx, cy - 1, cz).getType())) return false;
+            if (!checkStairs(world.getBlockAt(cx + dx, cy - 1, cz + 1), BlockFace.NORTH, Bisected.Half.TOP)) return false;
+        }
+
+        // dy = 0 (средний слой)
+        for (int dx = -1; dx <= 1; dx++) {
+            if (!isBarrelWall(world.getBlockAt(cx + dx, cy, cz - 1).getType())) return false;
+            if (dx == 0) {
+                if (!isCavity(world.getBlockAt(cx, cy, cz).getType())) return false;
+            } else {
+                if (!isBarrelWall(world.getBlockAt(cx + dx, cy, cz).getType())) return false;
+            }
+            if (!isBarrelWall(world.getBlockAt(cx + dx, cy, cz + 1).getType())) return false;
+        }
+
+        // dy = +1 (верх бочки)
+        for (int dx = -1; dx <= 1; dx++) {
+            if (!checkStairs(world.getBlockAt(cx + dx, cy + 1, cz - 1), BlockFace.SOUTH, Bisected.Half.BOTTOM)) return false;
+            if (!isBarrelWall(world.getBlockAt(cx + dx, cy + 1, cz).getType())) return false;
+            if (!checkStairs(world.getBlockAt(cx + dx, cy + 1, cz + 1), BlockFace.NORTH, Bisected.Half.BOTTOM)) return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Проверка структуры, ориентированной вдоль оси Z (длина 3 по Z, сечение по X-Y).
+     */
+    public static boolean matchesZAligned(World world, int cx, int cy, int cz) {
+        if (world == null) return false;
+
+        // dy = -1 (низ бочки)
+        for (int dz = -1; dz <= 1; dz++) {
+            if (!checkStairs(world.getBlockAt(cx - 1, cy - 1, cz + dz), BlockFace.EAST, Bisected.Half.TOP)) return false;
+            if (!isBarrelWall(world.getBlockAt(cx, cy - 1, cz + dz).getType())) return false;
+            if (!checkStairs(world.getBlockAt(cx + 1, cy - 1, cz + dz), BlockFace.WEST, Bisected.Half.TOP)) return false;
+        }
+
+        // dy = 0 (средний слой)
+        for (int dz = -1; dz <= 1; dz++) {
+            if (!isBarrelWall(world.getBlockAt(cx - 1, cy, cz + dz).getType())) return false;
+            if (dz == 0) {
+                if (!isCavity(world.getBlockAt(cx, cy, cz).getType())) return false;
+            } else {
+                if (!isBarrelWall(world.getBlockAt(cx, cy, cz + dz).getType())) return false;
+            }
+            if (!isBarrelWall(world.getBlockAt(cx + 1, cy, cz + dz).getType())) return false;
+        }
+
+        // dy = +1 (верх бочки)
+        for (int dz = -1; dz <= 1; dz++) {
+            if (!checkStairs(world.getBlockAt(cx - 1, cy + 1, cz + dz), BlockFace.EAST, Bisected.Half.BOTTOM)) return false;
+            if (!isBarrelWall(world.getBlockAt(cx, cy + 1, cz + dz).getType())) return false;
+            if (!checkStairs(world.getBlockAt(cx + 1, cy + 1, cz + dz), BlockFace.WEST, Bisected.Half.BOTTOM)) return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Проверяет, является ли блок [cx, cy, cz] валидным центром 3x3x3 бочки.
+     */
+    public static boolean isValidBarrelCenter(World world, int cx, int cy, int cz) {
+        if (world == null) return false;
+        return matchesXAligned(world, cx, cy, cz) || matchesZAligned(world, cx, cy, cz);
+    }
+
+    /**
+     * По кликнутому блоку находит центр мультиблочной бамбуковой бочки (если он входит в её состав).
+     */
+    public static Location findBarrelCenter(Block clickedBlock) {
+        if (clickedBlock == null) return null;
+        World world = clickedBlock.getWorld();
+        if (world == null) return null;
+
+        // Если это одиночный ванильный блок BARREL, возвращаем его же локацию
+        if (clickedBlock.getType() == Material.BARREL) {
+            return clickedBlock.getLocation();
+        }
+
+        int bx = clickedBlock.getX();
+        int by = clickedBlock.getY();
+        int bz = clickedBlock.getZ();
+
+        for (int oy = -1; oy <= 1; oy++) {
+            for (int ox = -1; ox <= 1; ox++) {
+                for (int oz = -1; oz <= 1; oz++) {
+                    int cx = bx + ox;
+                    int cy = by + oy;
+                    int cz = bz + oz;
+                    if (isValidBarrelCenter(world, cx, cy, cz)) {
+                        return new Location(world, cx, cy, cz);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    // ===== СОЗДАНИЕ И ПРОВЕРКА ПИРАТСКОГО РОМА =====
 
     public static ItemStack createPirateRum() {
         ItemStack potion = new ItemStack(Material.POTION);
         PotionMeta meta = (PotionMeta) potion.getItemMeta();
         if (meta != null) {
             meta.setBasePotionType(PotionType.WATER);
-            meta.itemName(Component.text("Пиратский ром", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
-            meta.displayName(null);
+            Component name = Component.text("Пиратский ром", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false);
+            meta.itemName(name);
+            meta.displayName(name);
             meta.setItemModel(MODEL_PIRATE_RUM_KEY);
             meta.setColor(Color.fromRGB(0x8B, 0x3A, 0x14));
             meta.getPersistentDataContainer().set(PIRATE_RUM_KEY, PersistentDataType.BYTE, (byte) 1);
@@ -107,47 +250,70 @@ public class BambooBarrel implements Listener {
         return b != null && b == (byte) 1;
     }
 
+    // ===== ТИК И ВИЗУАЛЬНЫЕ ЭФФЕКТЫ =====
+
     private void tick() {
         Iterator<Map.Entry<Location, BarrelState>> it = barrels.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<Location, BarrelState> entry = it.next();
-            Location loc = entry.getKey();
+            Location centerLoc = entry.getKey();
             BarrelState state = entry.getValue();
 
-            if (loc.getWorld() == null || !loc.getWorld().isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) {
+            World world = centerLoc.getWorld();
+            if (world == null || !world.isChunkLoaded(centerLoc.getBlockX() >> 4, centerLoc.getBlockZ() >> 4)) {
                 continue;
             }
 
-            Block block = loc.getBlock();
-            if (!isBambooBarrelBlock(block)) {
+            int cx = centerLoc.getBlockX();
+            int cy = centerLoc.getBlockY();
+            int cz = centerLoc.getBlockZ();
+
+            // Проверка целостности бочки (мультиблок или одиночный блок)
+            boolean singleBarrel = world.getBlockAt(cx, cy, cz).getType() == Material.BARREL;
+            if (!singleBarrel && !isValidBarrelCenter(world, cx, cy, cz)) {
+                dropIngredients(world, centerLoc, state);
                 it.remove();
                 continue;
             }
 
-            Location center = loc.clone().add(0.5, 0.5, 0.5);
+            Location center = centerLoc.clone().add(0.5, 0.5, 0.5);
 
             if (state.brewing) {
                 state.brewingTicks -= 2;
-                loc.getWorld().spawnParticle(Particle.SPLASH, center.clone().add(0, 0.4, 0), 3, 0.2, 0.1, 0.2, 0.05);
+                world.spawnParticle(Particle.SPLASH, center.clone().add(0, 0.5, 0), 3, 0.25, 0.1, 0.25, 0.05);
+                if (RANDOM.nextFloat() < 0.3f) {
+                    world.spawnParticle(Particle.BUBBLE_POP, center.clone().add((RANDOM.nextFloat() - 0.5) * 0.6, 0.6, (RANDOM.nextFloat() - 0.5) * 0.6), 1, 0, 0.05, 0, 0.01);
+                }
 
                 if (state.brewingTicks <= 0) {
                     state.brewing = false;
                     state.ready = true;
-                    loc.getWorld().playSound(loc, Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.BLOCKS, 0.8F, 1.2F);
+                    world.playSound(centerLoc, Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.BLOCKS, 0.8F, 1.2F);
+                    world.playSound(centerLoc, Sound.BLOCK_CONDUIT_ACTIVATE, SoundCategory.BLOCKS, 0.5F, 1.5F);
                 }
             } else if (state.ready) {
                 // Покрывается каплями воды (капли стекают по бочке)
-                loc.getWorld().spawnParticle(Particle.DRIPPING_WATER, center.clone().add(0, 0.55, 0), 4, 0.35, 0.1, 0.35, 0.0);
-                loc.getWorld().spawnParticle(Particle.FALLING_WATER, center.clone().add(0, 0.3, 0), 2, 0.3, 0.2, 0.3, 0.0);
+                for (int i = 0; i < 3; i++) {
+                    double ox = (RANDOM.nextFloat() - 0.5) * 1.8;
+                    double oz = (RANDOM.nextFloat() - 0.5) * 1.8;
+                    double oy = (RANDOM.nextFloat() - 0.5) * 1.5;
+                    world.spawnParticle(Particle.DRIPPING_WATER, center.clone().add(ox, 0.6 + oy * 0.4, oz), 1, 0.05, 0.05, 0.05, 0.0);
+                    world.spawnParticle(Particle.FALLING_WATER, center.clone().add(ox, 0.3 + oy * 0.3, oz), 1, 0.05, 0.05, 0.05, 0.0);
+                }
             }
         }
     }
+
+    // ===== ВЗАИМОДЕЙСТВИЕ ИГРОКА =====
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onInteract(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         Block block = event.getClickedBlock();
         if (block == null || !isBambooBarrelBlock(block)) return;
+
+        Location centerLoc = findBarrelCenter(block);
+        if (centerLoc == null) return;
 
         Player player = event.getPlayer();
         EquipmentSlot hand = event.getHand();
@@ -157,8 +323,7 @@ public class BambooBarrel implements Listener {
                 ? player.getInventory().getItemInOffHand()
                 : player.getInventory().getItemInMainHand();
 
-        Location loc = block.getLocation();
-        BarrelState state = barrels.computeIfAbsent(loc, k -> new BarrelState());
+        BarrelState state = barrels.computeIfAbsent(centerLoc, k -> new BarrelState());
 
         // 1. Забор готового рома пустой бутылочкой
         if (state.ready) {
@@ -176,84 +341,165 @@ public class BambooBarrel implements Listener {
 
                 state.ready = false;
                 if (state.isEmpty()) {
-                    barrels.remove(loc);
+                    barrels.remove(centerLoc);
                 }
 
-                player.playSound(loc, Sound.ITEM_BOTTLE_FILL, SoundCategory.BLOCKS, 0.8F, 1.0F);
+                player.playSound(centerLoc, Sound.ITEM_BOTTLE_FILL, SoundCategory.BLOCKS, 0.8F, 1.0F);
                 return;
             }
+            return;
+        }
+
+        if (state.brewing) {
+            return;
         }
 
         if (held == null || held.getType() == Material.AIR) return;
 
-        // 2. Добавление угля
+        // 2. Добавление угля (требуется 1 шт.)
         if (held.getType() == Material.COAL || held.getType() == Material.CHARCOAL) {
-            event.setCancelled(true);
-            consumeOne(player, hand, held);
-            state.coalCount++;
-            player.playSound(loc, Sound.ITEM_BUNDLE_INSERT, SoundCategory.BLOCKS, 0.6F, 1.0F);
-            checkStartBrewing(loc, state);
-            return;
-        }
-
-        // 3. Добавление сахарного тростника
-        if (held.getType() == Material.SUGAR_CANE) {
-            event.setCancelled(true);
-            consumeOne(player, hand, held);
-            state.caneCount++;
-            player.playSound(loc, Sound.ITEM_BUNDLE_INSERT, SoundCategory.BLOCKS, 0.6F, 1.0F);
-            checkStartBrewing(loc, state);
-            return;
-        }
-
-        // 4. Добавление бутылочки горячей воды
-        if (Shaker.isHotWaterBottle(held)) {
-            event.setCancelled(true);
-            ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
-            if (held.getAmount() > 1) {
-                held.setAmount(held.getAmount() - 1);
-                setHandItem(player, hand, held);
-                giveOrDrop(player, emptyBottle);
-            } else {
-                setHandItem(player, hand, emptyBottle);
+            if (state.coalCount < 1) {
+                event.setCancelled(true);
+                consumeOne(player, hand, held);
+                state.coalCount++;
+                player.playSound(centerLoc, Sound.ITEM_BUNDLE_INSERT, SoundCategory.BLOCKS, 0.7F, 1.0F);
+                checkStartBrewing(centerLoc, state);
             }
-            state.hotWaterCount++;
-            player.playSound(loc, Sound.ITEM_BOTTLE_EMPTY, SoundCategory.BLOCKS, 0.7F, 1.0F);
-            checkStartBrewing(loc, state);
+            return;
+        }
+
+        // 3. Добавление сахарного тростника (требуется 1 шт.)
+        if (held.getType() == Material.SUGAR_CANE) {
+            if (state.caneCount < 1) {
+                event.setCancelled(true);
+                consumeOne(player, hand, held);
+                state.caneCount++;
+                player.playSound(centerLoc, Sound.ITEM_BUNDLE_INSERT, SoundCategory.BLOCKS, 0.7F, 1.0F);
+                checkStartBrewing(centerLoc, state);
+            }
+            return;
+        }
+
+        // 4. Добавление бутылочки горячей воды (требуется 3 шт.)
+        if (Shaker.isHotWaterBottle(held)) {
+            if (state.hotWaterCount < 3) {
+                event.setCancelled(true);
+                ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
+                if (held.getAmount() > 1) {
+                    held.setAmount(held.getAmount() - 1);
+                    setHandItem(player, hand, held);
+                    giveOrDrop(player, emptyBottle);
+                } else {
+                    setHandItem(player, hand, emptyBottle);
+                }
+                state.hotWaterCount++;
+                player.playSound(centerLoc, Sound.ITEM_BOTTLE_EMPTY, SoundCategory.BLOCKS, 0.7F, 1.0F);
+                checkStartBrewing(centerLoc, state);
+            }
             return;
         }
     }
 
-    private void checkStartBrewing(Location loc, BarrelState state) {
+    private void checkStartBrewing(Location centerLoc, BarrelState state) {
         if (!state.brewing && !state.ready) {
             if (state.coalCount >= 1 && state.caneCount >= 1 && state.hotWaterCount >= 3) {
-                state.coalCount -= 1;
-                state.caneCount -= 1;
-                state.hotWaterCount -= 3;
+                state.coalCount = 0;
+                state.caneCount = 0;
+                state.hotWaterCount = 0;
                 state.brewing = true;
                 state.brewingTicks = BREWING_TIME_TICKS;
 
-                loc.getWorld().playSound(loc, Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.BLOCKS, 0.7F, 1.0F);
+                World world = centerLoc.getWorld();
+                if (world != null) {
+                    world.playSound(centerLoc, Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.BLOCKS, 0.8F, 0.9F);
+                }
             }
         }
     }
 
+    // ===== УПОТРЕБЛЕНИЕ НАПИТКА =====
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlayerItemConsume(PlayerItemConsumeEvent event) {
+        ItemStack item = event.getItem();
+        if (isPirateRum(item)) {
+            Player player = event.getPlayer();
+            player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_BURP, SoundCategory.PLAYERS, 0.8F, 0.9F);
+            player.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, 20 * 15, 0));
+            player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 20 * 15, 0));
+            player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 20 * 6, 0));
+        }
+    }
+
+    // ===== РАЗРУШЕНИЕ БЛОКОВ И ДРОП ИНГРЕДИЕНТОВ =====
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
-        barrels.remove(event.getBlock().getLocation());
+        handleBlockDestroyed(event.getBlock());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onExplode(BlockExplodeEvent event) {
         for (Block b : event.blockList()) {
-            barrels.remove(b.getLocation());
+            handleBlockDestroyed(b);
         }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onEntityExplode(EntityExplodeEvent event) {
         for (Block b : event.blockList()) {
-            barrels.remove(b.getLocation());
+            handleBlockDestroyed(b);
+        }
+    }
+
+    private void handleBlockDestroyed(Block block) {
+        if (block == null) return;
+        World world = block.getWorld();
+        int bx = block.getX();
+        int by = block.getY();
+        int bz = block.getZ();
+
+        for (int oy = -1; oy <= 1; oy++) {
+            for (int ox = -1; ox <= 1; ox++) {
+                for (int oz = -1; oz <= 1; oz++) {
+                    Location center = new Location(world, bx + ox, by + oy, bz + oz);
+                    BarrelState state = barrels.remove(center);
+                    if (state != null) {
+                        dropIngredients(world, center, state);
+                    }
+                }
+            }
+        }
+    }
+
+    private void dropIngredients(World world, Location loc, BarrelState state) {
+        if (world == null || loc == null || state == null) return;
+        Location dropLoc = loc.clone().add(0.5, 0.5, 0.5);
+
+        if (state.ready) {
+            world.dropItemNaturally(dropLoc, createPirateRum());
+            return;
+        }
+
+        if (state.brewing) {
+            world.dropItemNaturally(dropLoc, new ItemStack(Material.COAL));
+            world.dropItemNaturally(dropLoc, new ItemStack(Material.SUGAR_CANE));
+            for (int i = 0; i < 3; i++) {
+                world.dropItemNaturally(dropLoc, Shaker.createHotWaterBottle());
+            }
+            return;
+        }
+
+        if (state.coalCount > 0) {
+            world.dropItemNaturally(dropLoc, new ItemStack(Material.COAL, state.coalCount));
+        }
+        if (state.caneCount > 0) {
+            world.dropItemNaturally(dropLoc, new ItemStack(Material.SUGAR_CANE, state.caneCount));
+        }
+        if (state.hotWaterCount > 0) {
+            for (int i = 0; i < state.hotWaterCount; i++) {
+                world.dropItemNaturally(dropLoc, Shaker.createHotWaterBottle());
+            }
         }
     }
 
