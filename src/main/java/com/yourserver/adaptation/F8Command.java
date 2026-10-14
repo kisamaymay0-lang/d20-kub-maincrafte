@@ -330,8 +330,7 @@ public class F8Command implements CommandExecutor, Listener {
             "icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich", "ancient_jug",
             "crab_claw", "cigarette", "cigarette_lit", "cigarette_small", "cigarette_small_lit",
             "cigarette_regular", "cigarette_regular_lit",
-            "rime_potion", "rime_potion_splash", "rime_potion_lingering", "shaker", "hot_water", "pirate_rum",
-            "low_sweetie_berry", "hard_sweetie_berry");
+            "rime_potion", "rime_potion_splash", "rime_potion_lingering", "shaker", "hot_water", "pirate_rum");
 
     private ItemStack catalogItem(String id) {
         return switch (id) {
@@ -362,8 +361,6 @@ public class F8Command implements CommandExecutor, Listener {
             case "shaker" -> Shaker.create();
             case "hot_water" -> Shaker.createHotWaterBottle();
             case "pirate_rum" -> BambooBarrel.createPirateRum();
-            case "low_sweetie_berry" -> SweetBerryBlock.createLowSweetieBerry();
-            case "hard_sweetie_berry" -> SweetBerryBlock.createHardSweetieBerry();
             default -> throw new IllegalArgumentException("Неизвестный предмет каталога");
         };
     }
@@ -375,10 +372,9 @@ public class F8Command implements CommandExecutor, Listener {
                 10, 11, 12, 13, 14, 15, 16,
                 19, 20, 21, 22, 23, 24, 25,
                 28, 29, 30, 31, 32, 33, 34,
-                37, 38, 39, 40, 41, 42, 43,
-                46, 47, 48, 50, 51, 52
+                37, 38, 39, 40, 41, 42, 43
         };
-        for (int i = 0; i < Math.min(ITEM_CATALOG.size(), slots.length); i++) {
+        for (int i = 0; i < ITEM_CATALOG.size(); i++) {
             String id = ITEM_CATALOG.get(i);
             inventory.setItem(slots[i], createTaggedItem(catalogItem(id), id));
         }

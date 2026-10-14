@@ -392,7 +392,7 @@ class CraftEngineBlocksTest {
         // выглядеть прежним — и понять это можно только в игре.
         assertTrue(Files.isRegularFile(SHIPPED_PACK), "Нет собранного ресурспака для сверки");
         try (ZipFile zip = new ZipFile(SHIPPED_PACK.toFile())) {
-            for (String name : List.of("ancient_jug", "ancient_jug_filled", "copper_note_block")) {
+            for (String name : List.of("ancient_jug", "ancient_jug_filled", "copper_note_block", "apvsh", "sweetie_bery_block")) {
                 ZipEntry entry = zip.getEntry("assets/f8resurs/models/block/" + name + ".json");
                 assertNotNull(entry, name + ": модели нет в ресурспаке");
                 byte[] expected;
