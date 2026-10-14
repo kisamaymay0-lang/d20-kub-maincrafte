@@ -360,12 +360,15 @@ public class CopperBlockListener implements Listener {
         }
     }
 
+    public static final NamespacedKey COPPER_MENU_FONT = new NamespacedKey("f8resurs", "profile_ui");
+    public static final Component COPPER_MENU_TITLE = Component.text("\uE120", NamedTextColor.WHITE).font(COPPER_MENU_FONT);
+
     private void openCopperMenu(Player player, Block block) {
         String key = getBlockKey(block);
         Inventory gui = openInventories.get(key);
         if (gui == null) {
             CopperHolder holder = new CopperHolder(block);
-            gui = Bukkit.createInventory(holder, 36, "§6Медный нотный блок");
+            gui = Bukkit.createInventory(holder, 36, COPPER_MENU_TITLE);
             holder.inventory = gui;
             ItemStack[] saved = sessionInventories.get(key);
             if (saved != null) {

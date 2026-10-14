@@ -103,7 +103,7 @@ public class BambooBarrel implements Listener {
     public static boolean isBambooBarrelBlock(Block block) {
         if (block == null) return false;
         Material mat = block.getType();
-        return isBarrelWall(mat) || isBarrelStairs(mat) || mat == Material.BARREL;
+        return isBarrelWall(mat) || isBarrelStairs(mat);
     }
 
     private static boolean checkStairs(Block block, BlockFace expectedFacing, Bisected.Half expectedHalf) {
@@ -193,6 +193,10 @@ public class BambooBarrel implements Listener {
      */
     public static boolean isValidBarrelCenter(World world, int cx, int cy, int cz) {
         if (world == null) return false;
+        // Внутри бочки обязательно должно быть пусто
+        if (!isCavity(world.getBlockAt(cx, cy, cz).getType())) {
+            return false;
+        }
         return matchesXAligned(world, cx, cy, cz) || matchesZAligned(world, cx, cy, cz);
     }
 
@@ -203,11 +207,6 @@ public class BambooBarrel implements Listener {
         if (clickedBlock == null) return null;
         World world = clickedBlock.getWorld();
         if (world == null) return null;
-
-        // Если это одиночный ванильный блок BARREL, возвращаем его же локацию
-        if (clickedBlock.getType() == Material.BARREL) {
-            return clickedBlock.getLocation();
-        }
 
         int bx = clickedBlock.getX();
         int by = clickedBlock.getY();
@@ -271,9 +270,8 @@ public class BambooBarrel implements Listener {
             int cy = centerLoc.getBlockY();
             int cz = centerLoc.getBlockZ();
 
-            // Проверка целостности бочки (мультиблок или одиночный блок)
-            boolean singleBarrel = world.getBlockAt(cx, cy, cz).getType() == Material.BARREL;
-            if (!singleBarrel && !isValidBarrelCenter(world, cx, cy, cz)) {
+            // Проверка целостности бочки (мультиблок 3x3x3 с пустой полостью внутри)
+            if (!isValidBarrelCenter(world, cx, cy, cz)) {
                 dropIngredients(world, centerLoc, state);
                 it.remove();
                 continue;

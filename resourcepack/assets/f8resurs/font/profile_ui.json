@@ -134,6 +134,15 @@
       "chars": [
         "\ue10f"
       ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:gui/copper_note.png",
+      "height": 166,
+      "ascent": 14,
+      "chars": [
+        "\ue120"
+      ]
     }
   ]
 }

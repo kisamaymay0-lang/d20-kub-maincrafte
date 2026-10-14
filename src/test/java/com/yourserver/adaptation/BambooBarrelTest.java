@@ -41,11 +41,17 @@ final class BambooBarrelTest {
         assertTrue(BambooBarrel.isBarrelStairs(Material.BAMBOO_MOSAIC_STAIRS));
         assertFalse(BambooBarrel.isBarrelStairs(Material.OAK_STAIRS));
 
-        // Полость
+        // Полость строго пустая
         assertTrue(BambooBarrel.isCavity(Material.AIR));
         assertTrue(BambooBarrel.isCavity(Material.CAVE_AIR));
         assertTrue(BambooBarrel.isCavity(Material.VOID_AIR));
         assertFalse(BambooBarrel.isCavity(Material.WATER));
+        assertFalse(BambooBarrel.isCavity(Material.STONE));
+        assertFalse(BambooBarrel.isCavity(Material.BARREL));
+
+        // Проверка допустимых блоков структуры бочки
+        assertFalse(BambooBarrel.isBambooBarrelBlock(null));
+        assertFalse(BambooBarrel.isBarrelWall(Material.BARREL));
     }
 
     @Test
