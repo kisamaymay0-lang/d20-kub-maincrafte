@@ -1,0 +1,31 @@
+{
+  "providers": [
+    {
+      "type": "space",
+      "advances": {
+        "\uf801": -1,
+        "\uf802": -2,
+        "\uf803": -3,
+        "\uf804": -4,
+        "\uf805": -5,
+        "\uf806": -6,
+        "\uf807": -7,
+        "\uf808": -8,
+        "\uf809": -16,
+        "\uf80a": -32,
+        "\uf80b": -64,
+        "\uf80c": -128,
+        "\uf80d": -256
+      }
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:gui/copper_note.png",
+      "height": 166,
+      "ascent": 13,
+      "chars": [
+        "\ue120"
+      ]
+    }
+  ]
+}
