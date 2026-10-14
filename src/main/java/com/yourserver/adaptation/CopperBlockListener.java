@@ -360,7 +360,8 @@ public class CopperBlockListener implements Listener {
         }
     }
 
-    public static final Component COPPER_MENU_TITLE = Component.text("Медный нотный блок");
+    public static final NamespacedKey COPPER_MENU_FONT = new NamespacedKey("f8resurs", "profile_ui");
+    public static final Component COPPER_MENU_TITLE = Component.text("\uF808\uE120", NamedTextColor.WHITE).font(COPPER_MENU_FONT);
 
     private void openCopperMenu(Player player, Block block) {
         String key = getBlockKey(block);
