@@ -63,9 +63,9 @@ class CraftEngineBlocksTest {
     /** Ключи внутри settings.sounds (BlockSounds.fromConfig). */
     private static final Set<String> SOUND_KEYS = Set.of("break", "step", "place", "hit", "fall");
 
-    /** Четыре блока, которые плагин ждёт от CraftEngine. */
+    /** Пять блоков, которые плагин ждёт от CraftEngine. */
     private static final Set<String> WANTED_IDS =
-            Set.of(CraftEngineJug.EMPTY_ID, CraftEngineJug.FILLED_ID, CraftEngineCopper.ID, CraftEngineApvsh.ID);
+            Set.of(CraftEngineJug.EMPTY_ID, CraftEngineJug.FILLED_ID, CraftEngineCopper.ID, CraftEngineApvsh.ID, CraftEngineSweetBerry.ID);
 
     private static Path repoRoot() {
         Path current = Path.of("").toAbsolutePath();
@@ -114,6 +114,7 @@ class CraftEngineBlocksTest {
         assertEquals("f8resurs:ancient_jug", CraftEngineJug.keyName(0));
         assertEquals("f8resurs:copper_note_block", CraftEngineCopper.ID);
         assertEquals("f8resurs:apvsh", CraftEngineApvsh.ID);
+        assertEquals("f8resurs:sweetie_bery_block", CraftEngineSweetBerry.ID);
     }
 
     @Test
@@ -379,7 +380,7 @@ class CraftEngineBlocksTest {
         try (var files = Files.list(CONFIGS)) {
             names = files.map(path -> path.getFileName().toString()).sorted().toList();
         }
-        assertEquals(List.of("ancient_jug.yml", "apvsh.yml", "copper_note_block.yml"), names,
+        assertEquals(List.of("ancient_jug.yml", "apvsh.yml", "copper_note_block.yml", "sweetie_bery_block.yml"), names,
                 "в папке только конфиги блоков: pack.yml у вас свой, а копии моделей "
                         + "берутся из вашего ресурспака");
     }
@@ -426,5 +427,9 @@ class CraftEngineBlocksTest {
         assertFalse(CraftEngineApvsh.isApvshId(CraftEngineCopper.ID));
         assertFalse(CraftEngineApvsh.isApvshId(null));
         assertFalse(CraftEngineCopper.isCopperId(CraftEngineApvsh.ID));
+        assertTrue(CraftEngineSweetBerry.isSweetBerryId(CraftEngineSweetBerry.ID));
+        assertFalse(CraftEngineSweetBerry.isSweetBerryId(CraftEngineCopper.ID));
+        assertFalse(CraftEngineSweetBerry.isSweetBerryId(null));
+        assertFalse(CraftEngineCopper.isCopperId(CraftEngineSweetBerry.ID));
     }
 }

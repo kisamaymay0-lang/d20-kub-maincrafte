@@ -52,6 +52,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
     private Apvsh apvsh;
+    private SweetBerryBlock sweetBerryBlock;
     private Shaker shaker;
     private BambooBarrel bambooBarrel;
     /** Сигарета из /f8: тикает шкалу тяги и дым, поэтому нужен доступ на выключении. */
@@ -144,6 +145,10 @@ public void onEnable() {
     // АПВШ — аппарат для создания и наполнения сигарет и другого.
     apvsh = new Apvsh(this, dataWriter);
     getServer().getPluginManager().registerEvents(apvsh, this);
+
+    // Блок сладких ягод.
+    sweetBerryBlock = new SweetBerryBlock(this, dataWriter);
+    getServer().getPluginManager().registerEvents(sweetBerryBlock, this);
 
     // Сигарета: слушает клики сама, поэтому registerEvents внутри конструктора.
     cigarette = new Cigarette(this);
@@ -261,6 +266,9 @@ public void onEnable() {
         }
         if (apvsh != null) {
             apvsh.disable();
+        }
+        if (sweetBerryBlock != null) {
+            sweetBerryBlock.disable();
         }
         if (cigarette != null) {
             cigarette.disable();
@@ -1445,6 +1453,10 @@ public void onEnable() {
 
     public Apvsh getApvsh() {
         return apvsh;
+    }
+
+    public SweetBerryBlock getSweetBerryBlock() {
+        return sweetBerryBlock;
     }
 
     public Shaker getShaker() {

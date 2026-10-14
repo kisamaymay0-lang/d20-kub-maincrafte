@@ -9,7 +9,8 @@
 | `f8resurs:copper_note_block` | медный нотный блок | `f8resurs:block/copper_note_block` | [`copper_note_block.yml`](craftengine-blocks/copper_note_block.yml) |
 | `f8resurs:ancient_jug` | пустой Древний кувшин | `f8resurs:block/ancient_jug` | [`ancient_jug.yml`](craftengine-blocks/ancient_jug.yml) |
 | `f8resurs:ancient_jug_filled` | налитый Древний кувшин | `f8resurs:block/ancient_jug_filled` | [`ancient_jug.yml`](craftengine-blocks/ancient_jug.yml) |
-| `f8resurs:apvsh` | АПВШ (аппарат для сигарет) | `f8resurs:block/copper_note_block` | [`apvsh.yml`](craftengine-blocks/apvsh.yml) |
+| `f8resurs:apvsh` | АПВШ (аппарат для сигарет) | `f8resurs:block/apvsh` | [`apvsh.yml`](craftengine-blocks/apvsh.yml) |
+| `f8resurs:sweetie_bery_block` | блок сладких ягод | `f8resurs:block/sweetie_bery_block` | [`sweetie_bery_block.yml`](craftengine-blocks/sweetie_bery_block.yml) |
 
 Все три модели уже лежат в ресурспаке f8resurs — том, который вы перенесли в
 CraftEngine. Отдельных моделей к конфигам не нужно: `state.model.path` только

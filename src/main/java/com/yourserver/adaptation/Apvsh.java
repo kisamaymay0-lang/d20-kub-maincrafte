@@ -198,7 +198,7 @@ public final class Apvsh implements Listener {
                     Component.text("Аппарат для создания и наполнения сигарет", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
                     Component.text("Поставьте и нажмите ПКМ, чтобы открыть меню", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)
             ));
-            meta.setItemModel(new NamespacedKey("f8resurs", "copper_note_block"));
+            meta.setItemModel(new NamespacedKey("f8resurs", "apvsh"));
             meta.getPersistentDataContainer().set(apvshBlockKey, PersistentDataType.BYTE, (byte) 1);
             item.setItemMeta(meta);
         }

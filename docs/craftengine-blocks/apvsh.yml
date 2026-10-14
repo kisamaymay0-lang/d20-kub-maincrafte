@@ -8,9 +8,9 @@
 #   namespace: f8resurs
 # Дальше — /ce reload all.
 #
-# Модель и текстура блока: copper_note_block.json (f8resurs:block/copper_note_block),
+# Модель и текстура блока: apvsh.json (f8resurs:block/apvsh),
 # она уже есть в ресурспаке f8resurs.
-# state.auto_state: solid — модель copper_note_block это обычный cube_all,
+# state.auto_state: solid — модель apvsh это обычный cube_all,
 # глухой куб, проводит редстоун для срабатывания от сигнала.
 
 blocks:
@@ -19,7 +19,7 @@ blocks:
     state:
       auto_state: solid
       model:
-        path: "f8resurs:block/copper_note_block"
+        path: "f8resurs:block/apvsh"
     settings:
       hardness: 0.8
       resistance: 0.8
