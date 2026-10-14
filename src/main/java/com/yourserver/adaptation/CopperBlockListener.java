@@ -361,7 +361,7 @@ public class CopperBlockListener implements Listener {
     }
 
     public static final NamespacedKey COPPER_MENU_FONT = new NamespacedKey("f8resurs", "profile_ui");
-    public static final Component COPPER_MENU_TITLE = Component.text("\uE120", NamedTextColor.WHITE).font(COPPER_MENU_FONT);
+    public static final Component COPPER_MENU_TITLE = Component.text("\uF808\uE120", NamedTextColor.WHITE).font(COPPER_MENU_FONT);
 
     private void openCopperMenu(Player player, Block block) {
         String key = getBlockKey(block);
@@ -377,16 +377,6 @@ public class CopperBlockListener implements Listener {
                         gui.setItem(i, saved[i].clone());
                     }
                 }
-            }
-
-            ItemStack separator = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
-            ItemMeta meta = separator.getItemMeta();
-            if (meta != null) {
-                meta.setDisplayName(" ");
-                separator.setItemMeta(meta);
-            }
-            for (int slot : blockedSlots) {
-                gui.setItem(slot, separator);
             }
             openInventories.put(key, gui);
         }
