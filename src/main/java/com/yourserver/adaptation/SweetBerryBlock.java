@@ -63,6 +63,8 @@ public class SweetBerryBlock implements Listener {
 
     public static final int REQUIRED_BERRIES = 12;
     public static final int REQUIRED_STAMPS = 8;
+    public static final int CRUSHED_BERRIES_DROP = 4;
+    public static final long CRUSH_DELAY_TICKS = 10L; // 0.5 секунды (10 тиков)
 
     private static final NamespacedKey LOW_BERRY_KEY = new NamespacedKey("f8resurs", "low_sweetie_berry");
     private static final NamespacedKey HARD_BERRY_KEY = new NamespacedKey("f8resurs", "hard_sweetie_berry");
@@ -73,6 +75,7 @@ public class SweetBerryBlock implements Listener {
     private final BatchedYamlFile storage;
 
     private final Map<String, StampData> stampsMap = new ConcurrentHashMap<>();
+    private final Set<String> breakingBlocks = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Long> sneakDebounce = new HashMap<>();
     private final Map<UUID, Long> fallDebounce = new HashMap<>();
 
@@ -108,10 +111,14 @@ public class SweetBerryBlock implements Listener {
     // ===== ПРЕДМЕТЫ =====
 
     public static ItemStack createLowSweetieBerry() {
-        ItemStack item = new ItemStack(Material.SWEET_BERRIES);
+        return createLowSweetieBerry(1);
+    }
+
+    public static ItemStack createLowSweetieBerry(int amount) {
+        ItemStack item = new ItemStack(Material.SWEET_BERRIES, amount);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.itemName(Component.text("Помятые сладкие ягоды", NamedTextColor.RED)
+            meta.itemName(Component.text("Помятые сладкие ягоды", NamedTextColor.WHITE)
                     .decoration(TextDecoration.ITALIC, false));
             meta.setItemModel(new NamespacedKey("f8resurs", "low_sweetie_berry"));
             meta.getPersistentDataContainer().set(LOW_BERRY_KEY, PersistentDataType.BYTE, (byte) 1);
@@ -121,10 +128,14 @@ public class SweetBerryBlock implements Listener {
     }
 
     public static ItemStack createHardSweetieBerry() {
-        ItemStack item = new ItemStack(Material.SWEET_BERRIES);
+        return createHardSweetieBerry(1);
+    }
+
+    public static ItemStack createHardSweetieBerry(int amount) {
+        ItemStack item = new ItemStack(Material.SWEET_BERRIES, amount);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.itemName(Component.text("Продавленные сладкие ягоды", NamedTextColor.DARK_RED)
+            meta.itemName(Component.text("Продавленные сладкие ягоды", NamedTextColor.WHITE)
                     .decoration(TextDecoration.ITALIC, false));
             meta.setItemModel(new NamespacedKey("f8resurs", "hard_sweetie_berry"));
             meta.getPersistentDataContainer().set(HARD_BERRY_KEY, PersistentDataType.BYTE, (byte) 1);
@@ -257,6 +268,9 @@ public class SweetBerryBlock implements Listener {
             return;
         }
 
+        String key = blockKey(block);
+        breakingBlocks.remove(key);
+
         event.setDropItems(false);
         removeSweetBerryBlock(block);
 
@@ -309,6 +323,10 @@ public class SweetBerryBlock implements Listener {
 
     public void handleWeakStamp(Player player, Block block) {
         String key = blockKey(block);
+        if (breakingBlocks.contains(key)) {
+            return;
+        }
+
         StampData data = stampsMap.computeIfAbsent(key, k -> new StampData(0, 0));
         data.weakStamps++;
         saveBlockStamp(key, data);
@@ -319,12 +337,17 @@ public class SweetBerryBlock implements Listener {
         world.spawnParticle(Particle.HAPPY_VILLAGER, top, 8, 0.25, 0.05, 0.25, 0.05);
         world.playSound(top, Sound.BLOCK_SWEET_BERRY_BUSH_PICK_BERRIES, SoundCategory.BLOCKS, 0.9f, 1.2f);
 
-        if (data.weakStamps >= REQUIRED_STAMPS) {
-            removeSweetBerryBlock(block);
-            block.setType(Material.AIR);
-            world.playSound(top, Sound.BLOCK_SWEET_BERRY_BUSH_BREAK, SoundCategory.BLOCKS, 1.0f, 0.8f);
-            world.spawnParticle(Particle.HAPPY_VILLAGER, top, 16, 0.3, 0.2, 0.3, 0.08);
-            world.dropItemNaturally(top, createLowSweetieBerry());
+        if (data.weakStamps >= REQUIRED_STAMPS && breakingBlocks.add(key)) {
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (!breakingBlocks.remove(key)) {
+                    return;
+                }
+                removeSweetBerryBlock(block);
+                block.setType(Material.AIR);
+                world.playSound(top, Sound.BLOCK_SWEET_BERRY_BUSH_BREAK, SoundCategory.BLOCKS, 1.0f, 0.8f);
+                world.spawnParticle(Particle.HAPPY_VILLAGER, top, 16, 0.3, 0.2, 0.3, 0.08);
+                world.dropItemNaturally(top, createLowSweetieBerry(CRUSHED_BERRIES_DROP));
+            }, CRUSH_DELAY_TICKS);
         }
     }
 
@@ -369,6 +392,10 @@ public class SweetBerryBlock implements Listener {
 
     public void handleStrongStamp(Player player, Block block) {
         String key = blockKey(block);
+        if (breakingBlocks.contains(key)) {
+            return;
+        }
+
         StampData data = stampsMap.computeIfAbsent(key, k -> new StampData(0, 0));
         data.strongStamps++;
         saveBlockStamp(key, data);
@@ -379,12 +406,17 @@ public class SweetBerryBlock implements Listener {
         world.spawnParticle(Particle.HAPPY_VILLAGER, top, 14, 0.3, 0.1, 0.3, 0.08);
         world.playSound(top, Sound.BLOCK_SWEET_BERRY_BUSH_BREAK, SoundCategory.BLOCKS, 0.9f, 1.4f);
 
-        if (data.strongStamps >= REQUIRED_STAMPS) {
-            removeSweetBerryBlock(block);
-            block.setType(Material.AIR);
-            world.playSound(top, Sound.BLOCK_SWEET_BERRY_BUSH_BREAK, SoundCategory.BLOCKS, 1.0f, 0.7f);
-            world.spawnParticle(Particle.HAPPY_VILLAGER, top, 20, 0.35, 0.3, 0.35, 0.1);
-            world.dropItemNaturally(top, createHardSweetieBerry());
+        if (data.strongStamps >= REQUIRED_STAMPS && breakingBlocks.add(key)) {
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (!breakingBlocks.remove(key)) {
+                    return;
+                }
+                removeSweetBerryBlock(block);
+                block.setType(Material.AIR);
+                world.playSound(top, Sound.BLOCK_SWEET_BERRY_BUSH_BREAK, SoundCategory.BLOCKS, 1.0f, 0.7f);
+                world.spawnParticle(Particle.HAPPY_VILLAGER, top, 20, 0.35, 0.3, 0.35, 0.1);
+                world.dropItemNaturally(top, createHardSweetieBerry(CRUSHED_BERRIES_DROP));
+            }, CRUSH_DELAY_TICKS);
         }
     }
 
@@ -458,6 +490,7 @@ public class SweetBerryBlock implements Listener {
     public void disable() {
         storage.flush();
         stampsMap.clear();
+        breakingBlocks.clear();
         sneakDebounce.clear();
         fallDebounce.clear();
     }

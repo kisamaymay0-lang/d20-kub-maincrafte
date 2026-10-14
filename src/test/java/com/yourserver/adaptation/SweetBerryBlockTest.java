@@ -40,6 +40,8 @@ final class SweetBerryBlockTest {
     void sweetBerryRequirementsAreCorrect() {
         assertEquals(12, SweetBerryBlock.REQUIRED_BERRIES, "Для создания блока требуется 12 ягод");
         assertEquals(8, SweetBerryBlock.REQUIRED_STAMPS, "Для разрушения от топтания требуется 8 топов");
+        assertEquals(4, SweetBerryBlock.CRUSHED_BERRIES_DROP, "С одного блока выпадает 4 помятых или продавленных ягоды");
+        assertEquals(10L, SweetBerryBlock.CRUSH_DELAY_TICKS, "Задержка превращения 0.5с (10 тиков)");
     }
 
     @Test
