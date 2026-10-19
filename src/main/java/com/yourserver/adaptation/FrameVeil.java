@@ -58,6 +58,7 @@ final class FrameVeil implements Listener {
         }
     }
 
+<<<<<<< HEAD
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPutInFrame(PlayerInteractEntityEvent event) {
         if (!(event.getRightClicked() instanceof ItemFrame frame)) return;
@@ -77,6 +78,8 @@ final class FrameVeil implements Listener {
         }
     }
 
+=======
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
     /** Точка частиц: чуть перед рамкой. */
     private static Location dropSpot(ItemFrame frame) {
         Location at = frame.getLocation();

@@ -2,6 +2,10 @@ package com.yourserver.adaptation;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+<<<<<<< HEAD
+=======
+import net.kyori.adventure.text.format.TextColor;
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
@@ -35,13 +39,24 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.potion.PotionType;
 
+<<<<<<< HEAD
 import java.util.HashMap;
 import java.util.Iterator;
+=======
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
 import java.util.Map;
 import java.util.Random;
 
 /**
+<<<<<<< HEAD
  * Бамбуковая бочка для приготовления «Пиратского рома» (3x3x3 мультблок по NBT-структуре bamboo-bo4ka):
+=======
+ * Бамбуковая бочка для приготовления и выдержки «Пиратского рома» (3x3x3 мультблок по NBT-структуре bamboo-bo4ka):
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
  * <ul>
  *   <li><b>Структура 3x3x3:</b> Состоит из обтёсанных бамбуковых блоков (stripped_bamboo_block) и бамбуковых ступеней (bamboo_stairs) с полой сердцевиной (air).</li>
  *   <li><b>Ориентация:</b> Поддерживается горизонтальное расположение вдоль оси X и вдоль оси Z.</li>
@@ -50,7 +65,11 @@ import java.util.Random;
  *   <li><b>Извлечение:</b> На Shift + ПКМ можно забирать ингредиенты из бочки (для сбора жидкости нужна пустая стеклянная бутылочка).</li>
  *   <li><b>Брожение:</b> 10 секунд (200 тиков) с визуальными эффектами.</li>
  *   <li><b>Готовность:</b> После завершения брожения вся 3x3 поверхность бочки покрывается стекающими каплями воды (dripping_water / falling_water).</li>
+<<<<<<< HEAD
  *   <li><b>Забор рома:</b> ПКМ с пустой бутылочкой забирает «Пиратский ром» (модель f8resurs:skull_poilo).</li>
+=======
+ *   <li><b>Выдержка и качества:</b> 1 игровой день (24000 тиков) = 1 год выдержки. 5 ступеней качества, штрафы от переливаний, 3 глотка (хранилища).</li>
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
  *   <li><b>Разрушение бочки:</b> Твёрдые ресурсы выпадают в центре, а жидкость разливается и не выпадает.</li>
  *   <li><b>Обратная связь:</b> Исключительно внутриигровая (звуки, партиклы, предметы) без лишнего чата.</li>
  * </ul>
@@ -59,8 +78,17 @@ public class BambooBarrel implements Listener {
 
     public static final NamespacedKey MODEL_PIRATE_RUM_KEY = new NamespacedKey("f8resurs", "skull_poilo");
     public static final NamespacedKey PIRATE_RUM_KEY = new NamespacedKey("adaptation", "pirate_rum");
+<<<<<<< HEAD
 
     public static final int BREWING_TIME_TICKS = 200; // 10 секунд
+=======
+    public static final NamespacedKey RUM_YEARS_KEY = new NamespacedKey("adaptation", "pirate_rum_years");
+    public static final NamespacedKey RUM_TRANSFERS_KEY = new NamespacedKey("adaptation", "pirate_rum_transfers");
+    public static final NamespacedKey RUM_CHARGES_KEY = new NamespacedKey("adaptation", "pirate_rum_charges");
+
+    public static final int BREWING_TIME_TICKS = 200; // 10 секунд
+    public static final long TICKS_PER_YEAR = 24000L; // 1 день майнкрафта = 1 год
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
     private static final Random RANDOM = new Random();
 
     private final Plugin plugin;
@@ -73,6 +101,34 @@ public class BambooBarrel implements Listener {
         }
     }
 
+<<<<<<< HEAD
+=======
+    public enum QualityTier {
+        TERRIBLE(1),
+        STRANGE(2),
+        GOOD(3),
+        PERFECT(4),
+        FLAWLESS(5);
+
+        private final int tier;
+
+        QualityTier(int tier) {
+            this.tier = tier;
+        }
+
+        public int tier() {
+            return tier;
+        }
+
+        public static QualityTier fromTier(int tier) {
+            for (QualityTier q : values()) {
+                if (q.tier == tier) return q;
+            }
+            return STRANGE;
+        }
+    }
+
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
     public static final class BarrelState {
         public int coalCount = 0;
         public int caneCount = 0;
@@ -80,12 +136,118 @@ public class BambooBarrel implements Listener {
         public boolean brewing = false;
         public int brewingTicks = 0;
         public boolean ready = false;
+<<<<<<< HEAD
+=======
+        public long ageTicks = 0L;
+        public int transfers = 0;
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
 
         public boolean isEmpty() {
             return coalCount == 0 && caneCount == 0 && hotWaterCount == 0 && !brewing && !ready;
         }
     }
 
+<<<<<<< HEAD
+=======
+    // ===== КАЧЕСТВА И ОФОРМЛЕНИЕ ПИРАТСКОГО РОМА =====
+
+    public static QualityTier getBaseQuality(int years) {
+        if (years <= 1) return QualityTier.TERRIBLE;
+        if (years <= 3) return QualityTier.STRANGE;
+        if (years <= 5) return QualityTier.GOOD;
+        if (years <= 9) return QualityTier.PERFECT;
+        if (years == 10) return QualityTier.FLAWLESS;
+        if (years <= 13) return QualityTier.GOOD;
+        return QualityTier.STRANGE;
+    }
+
+    public static QualityTier getQuality(int years, int transfers) {
+        QualityTier base = getBaseQuality(years);
+        int baseTier = base.tier();
+        int finalTier = baseTier;
+
+        if (transfers >= 2 && transfers <= 3) {
+            finalTier = Math.max(2, baseTier - 1);
+            if (baseTier == 1) finalTier = 1;
+        } else if (transfers >= 4 && transfers <= 5) {
+            finalTier = Math.max(2, baseTier - 2);
+            if (baseTier == 1) finalTier = 1;
+        } else if (transfers >= 6) {
+            finalTier = Math.min(baseTier, 2);
+        }
+
+        return QualityTier.fromTier(finalTier);
+    }
+
+    public static Component gradientText(String text, TextColor from, TextColor to) {
+        Component comp = Component.empty();
+        int len = text.length();
+        for (int i = 0; i < len; i++) {
+            float ratio = len > 1 ? (float) i / (len - 1) : 0f;
+            int r = Math.round(from.red() + ratio * (to.red() - from.red()));
+            int g = Math.round(from.green() + ratio * (to.green() - from.green()));
+            int b = Math.round(from.blue() + ratio * (to.blue() - from.blue()));
+            comp = comp.append(Component.text(String.valueOf(text.charAt(i)), TextColor.color(r, g, b)));
+        }
+        return comp;
+    }
+
+    public static Component formatQualityName(QualityTier quality) {
+        return switch (quality) {
+            case TERRIBLE -> Component.text("Ужасное! ☠", NamedTextColor.RED).decoration(TextDecoration.ITALIC, false);
+            case STRANGE -> Component.text("Странное...", TextColor.color(0xFF, 0xA5, 0x00)).decoration(TextDecoration.ITALIC, false);
+            case GOOD -> Component.text("Хорошее ☺", NamedTextColor.YELLOW).decorate(TextDecoration.BOLD).decoration(TextDecoration.ITALIC, false);
+            case PERFECT -> Component.text("Идеальное! ☀", NamedTextColor.GREEN).decorate(TextDecoration.BOLD, TextDecoration.UNDERLINED).decoration(TextDecoration.ITALIC, false);
+            case FLAWLESS -> gradientText("БЕЗУПРЕЧНОЕ!!1", TextColor.color(0xFF, 0xFF, 0xFF), TextColor.color(0xFF, 0xFF, 0x55))
+                    .decorate(TextDecoration.BOLD, TextDecoration.UNDERLINED).decoration(TextDecoration.ITALIC, false);
+        };
+    }
+
+    public static TextColor getQualityColor(QualityTier quality) {
+        return switch (quality) {
+            case TERRIBLE -> NamedTextColor.RED;
+            case STRANGE -> TextColor.color(0xFF, 0xA5, 0x00);
+            case GOOD -> NamedTextColor.YELLOW;
+            case PERFECT -> NamedTextColor.GREEN;
+            case FLAWLESS -> NamedTextColor.YELLOW;
+        };
+    }
+
+    public static String getQualityDescription(QualityTier quality, int years) {
+        return switch (quality) {
+            case TERRIBLE -> "Молодой сивушный спирт. Обжигает горло.";
+            case STRANGE -> years >= 14 ? "Уже не ром, а жидкость со вкусом старой доски." : "Вкус еще только формируется...";
+            case GOOD -> years >= 11 ? "Передержали. Ром становится горьким и древесным" : "Добротный пиратский ром, пик для будней на корабле!";
+            case PERFECT -> "Ром идеален, вкус приятно чешет горло.";
+            case FLAWLESS -> "Теперь ты можешь называть себя настоящим пиратом!";
+        };
+    }
+
+    public static List<Component> buildRumLore(int years, int transfers) {
+        QualityTier quality = getQuality(years, transfers);
+        TextColor qColor = getQualityColor(quality);
+
+        List<Component> lore = new ArrayList<>(6);
+        // 1 строка: светло-серый разделитель
+        lore.add(Component.text("----------------------", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        // 2 строка: слово "Качество: " белым, само качество со стилем
+        lore.add(Component.text("Качество: ", NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false)
+                .append(formatQualityName(quality)));
+        // 3 строка: светло-серый разделитель
+        lore.add(Component.text("----------------------", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        // 4 строка: "Лет:" темно-серым, цифра цветом качества
+        lore.add(Component.text("Лет: ", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)
+                .append(Component.text(years, qColor).decoration(TextDecoration.ITALIC, false)));
+        // 5 строка: "Переливаний:" темно-серым, цифра темно-серым
+        lore.add(Component.text("Переливаний: ", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)
+                .append(Component.text(transfers, NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
+        // 6 строка: описание качества
+        lore.add(Component.text(getQualityDescription(quality, years), NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+
+        return lore;
+    }
+
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
     // ===== ПРОВЕРКА МУЛЬТИБЛОКА (3x3x3 NBT СТРУКТУРА) =====
 
     public static boolean isBarrelWall(Material mat) {
@@ -120,9 +282,12 @@ public class BambooBarrel implements Listener {
         return true;
     }
 
+<<<<<<< HEAD
     /**
      * Проверка структуры, ориентированной вдоль оси X (длина 3 по X, сечение по Y-Z).
      */
+=======
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
     public static boolean matchesXAligned(World world, int cx, int cy, int cz) {
         if (world == null) return false;
 
@@ -154,9 +319,12 @@ public class BambooBarrel implements Listener {
         return true;
     }
 
+<<<<<<< HEAD
     /**
      * Проверка структуры, ориентированной вдоль оси Z (длина 3 по Z, сечение по X-Y).
      */
+=======
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
     public static boolean matchesZAligned(World world, int cx, int cy, int cz) {
         if (world == null) return false;
 
@@ -173,7 +341,11 @@ public class BambooBarrel implements Listener {
             if (dz == 0) {
                 if (!isCavity(world.getBlockAt(cx, cy, cz).getType())) return false;
             } else {
+<<<<<<< HEAD
                 if (!isBarrelWall(world.getBlockAt(cx, cy, cz + dz).getType())) return false;
+=======
+                if (!isBarrelWall(world.getBlockAt(cx + dz, cy, cz + dz).getType())) return false;
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
             }
             if (!isBarrelWall(world.getBlockAt(cx + 1, cy, cz + dz).getType())) return false;
         }
@@ -188,21 +360,29 @@ public class BambooBarrel implements Listener {
         return true;
     }
 
+<<<<<<< HEAD
     /**
      * Проверяет, является ли блок [cx, cy, cz] валидным центром 3x3x3 бочки.
      */
     public static boolean isValidBarrelCenter(World world, int cx, int cy, int cz) {
         if (world == null) return false;
         // Внутри бочки обязательно должно быть пусто
+=======
+    public static boolean isValidBarrelCenter(World world, int cx, int cy, int cz) {
+        if (world == null) return false;
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
         if (!isCavity(world.getBlockAt(cx, cy, cz).getType())) {
             return false;
         }
         return matchesXAligned(world, cx, cy, cz) || matchesZAligned(world, cx, cy, cz);
     }
 
+<<<<<<< HEAD
     /**
      * По кликнутому блоку находит центр мультиблочной бамбуковой бочки (если он входит в её состав).
      */
+=======
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
     public static Location findBarrelCenter(Block clickedBlock) {
         if (clickedBlock == null) return null;
         World world = clickedBlock.getWorld();
@@ -230,17 +410,36 @@ public class BambooBarrel implements Listener {
     // ===== СОЗДАНИЕ И ПРОВЕРКА ПИРАТСКОГО РОМА =====
 
     public static ItemStack createPirateRum() {
+<<<<<<< HEAD
+=======
+        return createPirateRum(0, 1, 3);
+    }
+
+    public static ItemStack createPirateRum(int years, int transfers, int charges) {
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
         ItemStack potion = new ItemStack(Material.POTION);
         PotionMeta meta = (PotionMeta) potion.getItemMeta();
         if (meta != null) {
             meta.setBasePotionType(PotionType.WATER);
             Component name = Component.text("Пиратский ром", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false);
             meta.itemName(name);
+<<<<<<< HEAD
             meta.displayName(name);
             meta.setItemModel(MODEL_PIRATE_RUM_KEY);
             meta.setColor(Color.fromRGB(0x8B, 0x3A, 0x14));
             meta.getPersistentDataContainer().set(PIRATE_RUM_KEY, PersistentDataType.BYTE, (byte) 1);
             meta.getPersistentDataContainer().set(Shaker.DRINK_PDC_KEY, PersistentDataType.STRING, "pirate_rum");
+=======
+            meta.displayName(null);
+            meta.setItemModel(MODEL_PIRATE_RUM_KEY);
+            meta.setColor(Color.fromRGB(0x8B, 0x3A, 0x14));
+            meta.getPersistentDataContainer().set(PIRATE_RUM_KEY, PersistentDataType.BYTE, (byte) 1);
+            meta.getPersistentDataContainer().set(RUM_YEARS_KEY, PersistentDataType.INTEGER, years);
+            meta.getPersistentDataContainer().set(RUM_TRANSFERS_KEY, PersistentDataType.INTEGER, transfers);
+            meta.getPersistentDataContainer().set(RUM_CHARGES_KEY, PersistentDataType.INTEGER, Math.max(1, Math.min(3, charges)));
+            meta.getPersistentDataContainer().set(Shaker.DRINK_PDC_KEY, PersistentDataType.STRING, "pirate_rum");
+            meta.lore(buildRumLore(years, transfers));
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
             potion.setItemMeta(meta);
         }
         return potion;
@@ -252,6 +451,27 @@ public class BambooBarrel implements Listener {
         return b != null && b == (byte) 1;
     }
 
+<<<<<<< HEAD
+=======
+    public static int getRumYears(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return 0;
+        Integer y = item.getItemMeta().getPersistentDataContainer().get(RUM_YEARS_KEY, PersistentDataType.INTEGER);
+        return y != null ? y : 0;
+    }
+
+    public static int getRumTransfers(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return 1;
+        Integer t = item.getItemMeta().getPersistentDataContainer().get(RUM_TRANSFERS_KEY, PersistentDataType.INTEGER);
+        return t != null ? t : 1;
+    }
+
+    public static int getRumCharges(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return 3;
+        Integer c = item.getItemMeta().getPersistentDataContainer().get(RUM_CHARGES_KEY, PersistentDataType.INTEGER);
+        return c != null ? c : 3;
+    }
+
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
     // ===== ТИК И ВИЗУАЛЬНЫЕ ЭФФЕКТЫ (ПО ВСЕЙ СТРУКТУРЕ 3x3) =====
 
     private void tick() {
@@ -295,10 +515,20 @@ public class BambooBarrel implements Listener {
                 if (state.brewingTicks <= 0) {
                     state.brewing = false;
                     state.ready = true;
+<<<<<<< HEAD
+=======
+                    state.ageTicks = 0L;
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
                     world.playSound(centerLoc, Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.BLOCKS, 0.8F, 1.2F);
                     world.playSound(centerLoc, Sound.BLOCK_CONDUIT_ACTIVATE, SoundCategory.BLOCKS, 0.5F, 1.5F);
                 }
             } else if (state.ready) {
+<<<<<<< HEAD
+=======
+                // Настаивание рома: время выдержки тикает
+                state.ageTicks += 2L;
+
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
                 // Покрывается каплями воды по всей внешней поверхности структуры 3x3
                 for (int i = 0; i < 6; i++) {
                     double px = (cx - 1.0) + RANDOM.nextDouble() * 3.0;
@@ -340,7 +570,11 @@ public class BambooBarrel implements Listener {
 
         BarrelState state = barrels.computeIfAbsent(centerLoc, k -> new BarrelState());
 
+<<<<<<< HEAD
         // 1. Shift + ПКМ: Забор предметов из бочки
+=======
+        // 1. Shift + ПКМ: Забор предметов/ингредиентов из бочки
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
         if (player.isSneaking()) {
             if (!state.brewing && !state.ready) {
                 // Забор жидкости: требуется пустая бутылочка
@@ -394,12 +628,60 @@ public class BambooBarrel implements Listener {
             return;
         }
 
+<<<<<<< HEAD
         // 2. Забор готового рома пустой бутылочкой (обычный ПКМ)
+=======
+        // 2. Наливание готового пиратского рома обратно в бочку для дальнейшей выдержки
+        if (isPirateRum(held)) {
+            if (state.isEmpty()) {
+                int charges = getRumCharges(held);
+                // Если меньше полного хранилища (3 глотка), вылить нельзя
+                if (charges < 3) {
+                    return;
+                }
+
+                event.setCancelled(true);
+                int years = getRumYears(held);
+                int transfers = getRumTransfers(held);
+
+                ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
+                if (held.getAmount() > 1) {
+                    held.setAmount(held.getAmount() - 1);
+                    setHandItem(player, hand, held);
+                    giveOrDrop(player, emptyBottle);
+                } else {
+                    setHandItem(player, hand, emptyBottle);
+                }
+
+                state.ready = true;
+                state.brewing = false;
+                state.coalCount = 0;
+                state.caneCount = 0;
+                state.hotWaterCount = 0;
+                state.ageTicks = (long) years * TICKS_PER_YEAR;
+                state.transfers = transfers;
+
+                spawnAddParticles(world, block, centerLoc);
+                player.playSound(centerLoc, Sound.ITEM_BOTTLE_EMPTY, SoundCategory.BLOCKS, 0.8F, 1.0F);
+                return;
+            }
+            return;
+        }
+
+        // 3. Забор готового рома пустой бутылочкой (обычный ПКМ)
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
         if (state.ready) {
             if (held != null && held.getType() == Material.GLASS_BOTTLE) {
                 event.setCancelled(true);
 
+<<<<<<< HEAD
                 ItemStack rum = createPirateRum();
+=======
+                int years = (int) (state.ageTicks / TICKS_PER_YEAR);
+                int transfers = state.transfers + 1;
+                ItemStack rum = createPirateRum(years, transfers, 3);
+
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
                 if (held.getAmount() > 1) {
                     held.setAmount(held.getAmount() - 1);
                     setHandItem(player, hand, held);
@@ -409,6 +691,11 @@ public class BambooBarrel implements Listener {
                 }
 
                 state.ready = false;
+<<<<<<< HEAD
+=======
+                state.ageTicks = 0L;
+                state.transfers = 0;
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
                 if (state.isEmpty()) {
                     barrels.remove(centerLoc);
                 }
@@ -425,7 +712,11 @@ public class BambooBarrel implements Listener {
 
         if (held == null || held.getType() == Material.AIR) return;
 
+<<<<<<< HEAD
         // 3. Добавление угля (требуется 1 шт.)
+=======
+        // 4. Добавление угля (требуется 1 шт.)
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
         if (held.getType() == Material.COAL || held.getType() == Material.CHARCOAL) {
             if (state.coalCount < 1) {
                 event.setCancelled(true);
@@ -438,7 +729,11 @@ public class BambooBarrel implements Listener {
             return;
         }
 
+<<<<<<< HEAD
         // 4. Добавление сахарного тростника (требуется 1 шт.)
+=======
+        // 5. Добавление сахарного тростника (требуется 1 шт.)
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
         if (held.getType() == Material.SUGAR_CANE) {
             if (state.caneCount < 1) {
                 event.setCancelled(true);
@@ -451,7 +746,11 @@ public class BambooBarrel implements Listener {
             return;
         }
 
+<<<<<<< HEAD
         // 5. Добавление бутылочки горячей воды (требуется 3 шт.)
+=======
+        // 6. Добавление бутылочки горячей воды (требуется 3 шт.)
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
         if (Shaker.isHotWaterBottle(held)) {
             if (state.hotWaterCount < 3) {
                 event.setCancelled(true);
@@ -488,6 +787,11 @@ public class BambooBarrel implements Listener {
                 state.hotWaterCount = 0;
                 state.brewing = true;
                 state.brewingTicks = BREWING_TIME_TICKS;
+<<<<<<< HEAD
+=======
+                state.ageTicks = 0L;
+                state.transfers = 0;
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
 
                 World world = centerLoc.getWorld();
                 if (world != null) {
@@ -497,9 +801,15 @@ public class BambooBarrel implements Listener {
         }
     }
 
+<<<<<<< HEAD
     // ===== УПОТРЕБЛЕНИЕ НАПИТКА =====
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+=======
+    // ===== УПОТРЕБЛЕНИЕ НАПИТКА (3 ГЛОТКА / ХРАНИЛИЩА) =====
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
     public void onPlayerItemConsume(PlayerItemConsumeEvent event) {
         ItemStack item = event.getItem();
         if (isPirateRum(item)) {
@@ -508,6 +818,20 @@ public class BambooBarrel implements Listener {
             player.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, 20 * 15, 0));
             player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 20 * 15, 0));
             player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 20 * 6, 0));
+<<<<<<< HEAD
+=======
+
+            int charges = getRumCharges(item);
+            int years = getRumYears(item);
+            int transfers = getRumTransfers(item);
+
+            if (charges > 1) {
+                ItemStack remainingRum = createPirateRum(years, transfers, charges - 1);
+                event.setReplacementItem(remainingRum);
+            } else {
+                event.setReplacementItem(new ItemStack(Material.GLASS_BOTTLE));
+            }
+>>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
         }
     }
 
