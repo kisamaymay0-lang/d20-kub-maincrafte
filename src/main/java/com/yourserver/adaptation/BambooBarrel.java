@@ -692,11 +692,15 @@ public class BambooBarrel implements Listener {
 
     // ===== УПОТРЕБЛЕНИЕ НАПИТКА (3 ГЛОТКА / ХРАНИЛИЩА) =====
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerItemConsume(PlayerItemConsumeEvent event) {
         ItemStack item = event.getItem();
         if (isPirateRum(item)) {
             Player player = event.getPlayer();
+            EquipmentSlot hand = event.getHand();
+            if (hand == null) hand = EquipmentSlot.HAND;
+            EquipmentSlot finalHand = hand;
+
             player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_BURP, SoundCategory.PLAYERS, 0.8F, 0.9F);
             player.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, 20 * 15, 0));
             player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 20 * 15, 0));
@@ -706,11 +710,26 @@ public class BambooBarrel implements Listener {
             int years = getRumYears(item);
             int transfers = getRumTransfers(item);
 
-            if (charges > 1) {
+            if (charges > 1 && plugin != null) {
                 ItemStack remainingRum = createPirateRum(years, transfers, charges - 1);
-                event.setReplacementItem(remainingRum);
-            } else {
-                event.setReplacementItem(new ItemStack(Material.GLASS_BOTTLE));
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    ItemStack inHand = finalHand == EquipmentSlot.OFF_HAND
+                            ? player.getInventory().getItemInOffHand()
+                            : player.getInventory().getItemInMainHand();
+                    if (inHand != null && inHand.getType() == Material.GLASS_BOTTLE) {
+                        if (inHand.getAmount() > 1) {
+                            inHand.setAmount(inHand.getAmount() - 1);
+                            if (finalHand == EquipmentSlot.OFF_HAND) player.getInventory().setItemInOffHand(inHand);
+                            else player.getInventory().setItemInMainHand(inHand);
+                            giveOrDrop(player, remainingRum);
+                        } else {
+                            if (finalHand == EquipmentSlot.OFF_HAND) player.getInventory().setItemInOffHand(remainingRum);
+                            else player.getInventory().setItemInMainHand(remainingRum);
+                        }
+                    } else {
+                        giveOrDrop(player, remainingRum);
+                    }
+                });
             }
         }
     }
