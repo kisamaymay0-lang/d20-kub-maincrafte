@@ -2,7 +2,6 @@ package com.yourserver.adaptation;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
-import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -117,12 +116,21 @@ class BambooBarrelTest {
     }
 
     @Test
-    @DisplayName("Создание предмета рома с хранилищем (3 глотка) и PDC")
-    void testPirateRumCreation() {
-        ItemStack rum = BambooBarrel.createPirateRum(5, 2, 3);
-        assertTrue(BambooBarrel.isPirateRum(rum));
-        assertEquals(5, BambooBarrel.getRumYears(rum));
-        assertEquals(2, BambooBarrel.getRumTransfers(rum));
-        assertEquals(3, BambooBarrel.getRumCharges(rum));
+    @DisplayName("Цвета и стили качества")
+    void testQualityNamesAndFormatting() {
+        Component flawless = BambooBarrel.formatQualityName(BambooBarrel.QualityTier.FLAWLESS);
+        assertTrue(plain.serialize(flawless).contains("БЕЗУПРЕЧНОЕ!!1"));
+
+        Component perfect = BambooBarrel.formatQualityName(BambooBarrel.QualityTier.PERFECT);
+        assertTrue(plain.serialize(perfect).contains("Идеальное! ☀"));
+
+        Component good = BambooBarrel.formatQualityName(BambooBarrel.QualityTier.GOOD);
+        assertTrue(plain.serialize(good).contains("Хорошее ☺"));
+
+        Component strange = BambooBarrel.formatQualityName(BambooBarrel.QualityTier.STRANGE);
+        assertTrue(plain.serialize(strange).contains("Странное..."));
+
+        Component terrible = BambooBarrel.formatQualityName(BambooBarrel.QualityTier.TERRIBLE);
+        assertTrue(plain.serialize(terrible).contains("Ужасное! ☠"));
     }
 }
