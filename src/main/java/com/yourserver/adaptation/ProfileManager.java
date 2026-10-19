@@ -718,22 +718,29 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 pack = null;
             }
             Menu menu = new Menu(viewer.getUniqueId(), owner, screen, page, chosen, pack);
-            String title = switch (screen) {
-                case PROFILE -> "Профиль • " + data.name();
-                case COLLECTION -> "Выбрать медаль";
-                case PLACE -> "Разместить медаль";
-                case PREFIX -> "Выбрать префикс";
-                case PREFIX_CASE -> "Вскрытие кейса префиксов";
-                case CUSTOMIZE -> "Настроить";
-                case COSMETIC -> "Выбрать косметику";
-                case COSMETIC_CASE -> "Вскрытие кейса косметики";
-                case PACKS -> "Префиксы";
-                case PACK -> {
-                    PrefixPackCatalog.Pack shown = menu.pack == null ? null : packs.get(menu.pack);
-                    yield shown == null ? "Пак префиксов" : shown.name();
-                }
-            };
-            menu.inventory = Bukkit.createInventory(menu, 27, Component.text(title, NamedTextColor.DARK_GRAY));
+            Component titleComponent;
+            if (screen == Screen.PROFILE) {
+                // Основное меню профиля: кастомная фоновая текстура profile-menu1.png
+                titleComponent = Component.text("\uF808\uE121", NamedTextColor.WHITE).font(ProfileIcons.FONT);
+            } else {
+                String title = switch (screen) {
+                    case PROFILE -> "Профиль • " + data.name();
+                    case COLLECTION -> "Выбрать медаль";
+                    case PLACE -> "Разместить медаль";
+                    case PREFIX -> "Выбрать префикс";
+                    case PREFIX_CASE -> "Вскрытие кейса префиксов";
+                    case CUSTOMIZE -> "Настроить";
+                    case COSMETIC -> "Выбрать косметику";
+                    case COSMETIC_CASE -> "Вскрытие кейса косметики";
+                    case PACKS -> "Префиксы";
+                    case PACK -> {
+                        PrefixPackCatalog.Pack shown = menu.pack == null ? null : packs.get(menu.pack);
+                        yield shown == null ? "Пак префиксов" : shown.name();
+                    }
+                };
+                titleComponent = Component.text(title, NamedTextColor.DARK_GRAY);
+            }
+            menu.inventory = Bukkit.createInventory(menu, 27, titleComponent);
             populate(menu, data);
             Menu previous = menus.put(viewer.getUniqueId(), menu);
             if (viewer.openInventory(menu.inventory) == null) {
