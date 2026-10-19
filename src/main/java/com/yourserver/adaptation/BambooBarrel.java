@@ -32,8 +32,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
 import org.bukkit.potion.PotionType;
 
 import java.util.ArrayList;
@@ -49,11 +47,12 @@ import java.util.Random;
  *   <li><b>Структура 3x3x3:</b> Состоит из обтёсанных бамбуковых блоков (stripped_bamboo_block) и бамбуковых ступеней (bamboo_stairs) с полой сердцевиной (air).</li>
  *   <li><b>Ориентация:</b> Поддерживается горизонтальное расположение вдоль оси X и вдоль оси Z.</li>
  *   <li><b>Ингредиенты:</b> 1 Уголь/Древесный уголь, 1 Сахарный тростник, 3 Бутылочки горячей воды.</li>
+ *   <li><b>Вместимость:</b> Вмещает до 9 бутылок алкоголя (готового рома) для выдержки.</li>
  *   <li><b>Добавление:</b> При добавлении предметов из бочки вылетают частицы WAX_OFF.</li>
  *   <li><b>Извлечение:</b> На Shift + ПКМ можно забирать ингредиенты из бочки (для сбора жидкости нужна пустая стеклянная бутылочка).</li>
- *   <li><b>Брожение:</b> 10 секунд (200 тиков) с визуальными эффектами.</li>
+ *   <li><b>Брожение:</b> 10 секунд (200 тиков) с визуальными эффектами, варит 3 бутылки рома.</li>
  *   <li><b>Готовность:</b> После завершения брожения вся 3x3 поверхность бочки покрывается стекающими каплями воды (dripping_water / falling_water).</li>
- *   <li><b>Выдержка и качества:</b> 1 игровой день (24000 тиков) = 1 год выдержки. 5 ступеней качества, штрафы от переливаний, 3 глотка (хранилища).</li>
+ *   <li><b>Выдержка и качества:</b> Количество тиков для 1 года настраивается в config.yml (по умолчанию 24000 = 1 майнкрафт-день). 5 ступеней качества, штрафы от переливаний, 3 глотка (хранилища).</li>
  *   <li><b>Разрушение бочки:</b> Твёрдые ресурсы выпадают в центре, а жидкость разливается и не выпадает.</li>
  *   <li><b>Обратная связь:</b> Исключительно внутриигровая (звуки, партиклы, предметы) без лишнего чата.</li>
  * </ul>
@@ -67,7 +66,10 @@ public class BambooBarrel implements Listener {
     public static final NamespacedKey RUM_CHARGES_KEY = new NamespacedKey("adaptation", "pirate_rum_charges");
 
     public static final int BREWING_TIME_TICKS = 200; // 10 секунд
-    public static final long TICKS_PER_YEAR = 24000L; // 1 день майнкрафта = 1 год
+    public static final int MAX_BOTTLES = 9;          // Вместимость бочки: до 9 бутылок рома
+    public static final long DEFAULT_TICKS_PER_YEAR = 24000L; // 1 день майнкрафта = 1 год
+    private static long ticksPerYear = DEFAULT_TICKS_PER_YEAR;
+
     private static final Random RANDOM = new Random();
 
     private final Plugin plugin;
@@ -75,9 +77,25 @@ public class BambooBarrel implements Listener {
 
     public BambooBarrel(Plugin plugin) {
         this.plugin = plugin;
+        reloadSettings();
         if (plugin != null) {
             Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 2L, 2L);
         }
+    }
+
+    public void reloadSettings() {
+        if (plugin != null) {
+            long configured = plugin.getConfig().getLong("bamboo_barrel.ticks_per_year", DEFAULT_TICKS_PER_YEAR);
+            ticksPerYear = configured > 0L ? configured : DEFAULT_TICKS_PER_YEAR;
+        }
+    }
+
+    public static long getTicksPerYear() {
+        return ticksPerYear;
+    }
+
+    public static void setTicksPerYear(long ticks) {
+        ticksPerYear = ticks > 0L ? ticks : DEFAULT_TICKS_PER_YEAR;
     }
 
     public enum QualityTier {
@@ -112,11 +130,12 @@ public class BambooBarrel implements Listener {
         public boolean brewing = false;
         public int brewingTicks = 0;
         public boolean ready = false;
+        public int bottlesCount = 0;
         public long ageTicks = 0L;
         public int transfers = 0;
 
         public boolean isEmpty() {
-            return coalCount == 0 && caneCount == 0 && hotWaterCount == 0 && !brewing && !ready;
+            return coalCount == 0 && caneCount == 0 && hotWaterCount == 0 && !brewing && !ready && bottlesCount == 0;
         }
     }
 
@@ -359,7 +378,7 @@ public class BambooBarrel implements Listener {
             meta.setBasePotionType(PotionType.WATER);
             Component name = Component.text("Пиратский ром", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false);
             meta.itemName(name);
-            meta.displayName(null);
+            meta.displayName(name);
             meta.setItemModel(MODEL_PIRATE_RUM_KEY);
             meta.setColor(Color.fromRGB(0x8B, 0x3A, 0x14));
             meta.getPersistentDataContainer().set(PIRATE_RUM_KEY, PersistentDataType.BYTE, (byte) 1);
@@ -440,6 +459,7 @@ public class BambooBarrel implements Listener {
                 if (state.brewingTicks <= 0) {
                     state.brewing = false;
                     state.ready = true;
+                    state.bottlesCount = Math.min(MAX_BOTTLES, state.bottlesCount + 3);
                     state.ageTicks = 0L;
                     world.playSound(centerLoc, Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.BLOCKS, 0.8F, 1.2F);
                     world.playSound(centerLoc, Sound.BLOCK_CONDUIT_ACTIVATE, SoundCategory.BLOCKS, 0.5F, 1.5F);
@@ -543,15 +563,15 @@ public class BambooBarrel implements Listener {
             return;
         }
 
-        // 2. Наливание готового пиратского рома обратно в бочку для дальнейшей выдержки
+        // 2. Наливание готового пиратского рома обратно в бочку (до 9 бутылок)
         if (isPirateRum(held)) {
-            if (state.isEmpty()) {
-                int charges = getRumCharges(held);
-                // Если меньше полного хранилища (3 глотка), вылить нельзя
-                if (charges < 3) {
-                    return;
-                }
+            int charges = getRumCharges(held);
+            // Если меньше полного хранилища (3 глотка), вылить нельзя
+            if (charges < 3) {
+                return;
+            }
 
+            if (state.isEmpty() || (state.ready && state.bottlesCount < MAX_BOTTLES)) {
                 event.setCancelled(true);
                 int years = getRumYears(held);
                 int transfers = getRumTransfers(held);
@@ -565,13 +585,18 @@ public class BambooBarrel implements Listener {
                     setHandItem(player, hand, emptyBottle);
                 }
 
-                state.ready = true;
-                state.brewing = false;
-                state.coalCount = 0;
-                state.caneCount = 0;
-                state.hotWaterCount = 0;
-                state.ageTicks = (long) years * TICKS_PER_YEAR;
-                state.transfers = transfers;
+                if (state.isEmpty()) {
+                    state.ready = true;
+                    state.brewing = false;
+                    state.coalCount = 0;
+                    state.caneCount = 0;
+                    state.hotWaterCount = 0;
+                    state.bottlesCount = 1;
+                    state.ageTicks = (long) years * getTicksPerYear();
+                    state.transfers = transfers;
+                } else {
+                    state.bottlesCount++;
+                }
 
                 spawnAddParticles(world, block, centerLoc);
                 player.playSound(centerLoc, Sound.ITEM_BOTTLE_EMPTY, SoundCategory.BLOCKS, 0.8F, 1.0F);
@@ -581,11 +606,11 @@ public class BambooBarrel implements Listener {
         }
 
         // 3. Забор готового рома пустой бутылочкой (обычный ПКМ)
-        if (state.ready) {
+        if (state.ready && state.bottlesCount > 0) {
             if (held != null && held.getType() == Material.GLASS_BOTTLE) {
                 event.setCancelled(true);
 
-                int years = (int) (state.ageTicks / TICKS_PER_YEAR);
+                int years = (int) (state.ageTicks / getTicksPerYear());
                 int transfers = state.transfers + 1;
                 ItemStack rum = createPirateRum(years, transfers, 3);
 
@@ -597,11 +622,14 @@ public class BambooBarrel implements Listener {
                     setHandItem(player, hand, rum);
                 }
 
-                state.ready = false;
-                state.ageTicks = 0L;
-                state.transfers = 0;
-                if (state.isEmpty()) {
-                    barrels.remove(centerLoc);
+                state.bottlesCount--;
+                if (state.bottlesCount <= 0) {
+                    state.ready = false;
+                    state.ageTicks = 0L;
+                    state.transfers = 0;
+                    if (state.isEmpty()) {
+                        barrels.remove(centerLoc);
+                    }
                 }
 
                 player.playSound(centerLoc, Sound.ITEM_BOTTLE_FILL, SoundCategory.BLOCKS, 0.8F, 1.0F);
@@ -702,9 +730,6 @@ public class BambooBarrel implements Listener {
             EquipmentSlot finalHand = hand;
 
             player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_BURP, SoundCategory.PLAYERS, 0.8F, 0.9F);
-            player.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, 20 * 15, 0));
-            player.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 20 * 15, 0));
-            player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 20 * 6, 0));
 
             int charges = getRumCharges(item);
             int years = getRumYears(item);

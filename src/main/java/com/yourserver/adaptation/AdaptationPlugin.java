@@ -297,6 +297,9 @@ public void onEnable() {
         if (winterFishing != null) {
             winterFishing.reloadSettings();
         }
+        if (bambooBarrel != null) {
+            bambooBarrel.reloadSettings();
+        }
         String prefixes = profileManager == null ? "" : profileManager.reloadPrefixes();
         if (prefixes.isBlank()) return specialCatch == null ? "" : specialCatch.describe();
         if (specialCatch == null || specialCatch.describe().isBlank()) return prefixes;

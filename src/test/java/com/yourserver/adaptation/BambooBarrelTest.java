@@ -133,4 +133,18 @@ class BambooBarrelTest {
         Component terrible = BambooBarrel.formatQualityName(BambooBarrel.QualityTier.TERRIBLE);
         assertTrue(plain.serialize(terrible).contains("Ужасное! ☠"));
     }
+
+    @Test
+    @DisplayName("Настройка времени 1 года выдержки и вместимость бочки")
+    void testConfiguredTicksPerYearAndCapacity() {
+        assertEquals(24000L, BambooBarrel.DEFAULT_TICKS_PER_YEAR);
+        assertEquals(9, BambooBarrel.MAX_BOTTLES);
+
+        BambooBarrel.setTicksPerYear(12000L);
+        assertEquals(12000L, BambooBarrel.getTicksPerYear());
+
+        // Восстанавливаем дефолтное значение
+        BambooBarrel.setTicksPerYear(BambooBarrel.DEFAULT_TICKS_PER_YEAR);
+        assertEquals(24000L, BambooBarrel.getTicksPerYear());
+    }
 }
