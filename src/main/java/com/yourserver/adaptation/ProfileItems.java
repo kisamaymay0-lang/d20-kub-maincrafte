@@ -88,6 +88,44 @@ final class ProfileItems {
                 text(owner ? "Префикс и косметика на голове" : "Настраивать можно только свой профиль", NamedTextColor.DARK_GRAY)));
     }
 
+    /** Невидимая кнопка для фонового GUI. Не перекрывает текстуру меню своим спрайтом. */
+    static ItemStack invisibleItem(Component display, List<Component> lore) {
+        ItemStack item = new ItemStack(Material.STRUCTURE_VOID);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.displayName(display);
+            meta.lore(lore);
+            meta.setItemModel(new NamespacedKey("f8resurs", "empty"));
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    ItemStack invisibleCosmeticButton(boolean owner) {
+        return invisibleItem(medals.title("Настроить косметику", ProfileMedal.Metal.GOLD), List.of(
+                text(owner ? "Префикс и косметика на голове" : "Настраивать можно только свой профиль", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack invisibleSettingsButton(int placed, boolean owner) {
+        return invisibleItem(medals.title("Настроить медали", ProfileMedal.Metal.GOLD), List.of(
+                text(owner ? "Разместить или снять медали" : "Медали владельца профиля", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack invisibleVoteButton(ProfileData.Vote vote, boolean active, int count, boolean owner) {
+        boolean like = vote == ProfileData.Vote.LIKE;
+        TextColor color = like ? NamedTextColor.GREEN : NamedTextColor.RED;
+        String name = like ? "Лайк (" + count + ")" : "Дизлайк (" + count + ")";
+        List<Component> lore = new ArrayList<>();
+        if (owner) {
+            lore.add(text("Владелец профиля не может голосовать за себя", NamedTextColor.DARK_GRAY));
+        } else if (active) {
+            lore.add(text("Вы уже проголосовали. Нажмите, чтобы снять голос", NamedTextColor.DARK_GRAY));
+        } else {
+            lore.add(text("Нажмите, чтобы проголосовать", NamedTextColor.DARK_GRAY));
+        }
+        return invisibleItem(text(name, color), lore);
+    }
+
     /** Кнопка «Мои префиксы»: список уже собранных префиксов, чтобы надеть любой. */
     ItemStack myPrefixesButton(int owned) {
         return named(Material.CHEST, medals.title("Мои префиксы", ProfileMedal.Metal.COPPER), List.of(

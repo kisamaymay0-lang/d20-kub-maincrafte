@@ -165,8 +165,8 @@
     {
       "type": "bitmap",
       "file": "f8resurs:gui/profile-menu1.png",
-      "height": 166,
-      "ascent": 13,
+      "height": 222,
+      "ascent": 14,
       "chars": [
         "\ue121"
       ]

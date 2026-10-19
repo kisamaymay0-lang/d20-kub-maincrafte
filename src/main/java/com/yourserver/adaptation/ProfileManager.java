@@ -740,7 +740,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 };
                 titleComponent = Component.text(title, NamedTextColor.DARK_GRAY);
             }
-            menu.inventory = Bukkit.createInventory(menu, 27, titleComponent);
+            int size = (screen == Screen.PROFILE || screen == Screen.PLACE) ? 54 : 27;
+            menu.inventory = Bukkit.createInventory(menu, size, titleComponent);
             populate(menu, data);
             Menu previous = menus.put(viewer.getUniqueId(), menu);
             if (viewer.openInventory(menu.inventory) == null) {
@@ -756,11 +757,19 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private void populate(Menu menu, ProfileData data) {
         Inventory inventory = menu.inventory;
         inventory.clear();
-        var filler = ProfileItems.filler();
-        for (int i = 0; i < 27; i++) if (ProfileText.medalSlot(i) >= 0) inventory.setItem(i, filler);
         menu.medalsBySlot.clear();
         menu.prefixesBySlot.clear();
         menu.cosmeticsBySlot.clear();
+        if (menu.screen == Screen.PROFILE) {
+            populateProfileScreen(menu, data);
+            return;
+        }
+        if (menu.screen == Screen.PLACE) {
+            populatePlaceScreen(menu, data);
+            return;
+        }
+        var filler = ProfileItems.filler();
+        for (int i = 0; i < 27; i++) if (ProfileText.medalSlot(i) >= 0) inventory.setItem(i, filler);
         populateDetails(menu, data);
         if (menu.screen == Screen.CUSTOMIZE) {
             // Второй ряд: пока только две кнопки — префикс и косметика.
@@ -836,9 +845,99 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         for (int i = 0; i < 18; i++) {
             ProfileMedal medal = data.medals().get(data.medalAt(i));
             int slot = ProfileText.inventorySlot(i);
-            if (menu.screen == Screen.PLACE) inventory.setItem(slot, items.destination(medal));
-            else if (medal != null) inventory.setItem(slot, items.medal(medal, List.of()));
+            if (medal != null) inventory.setItem(slot, items.medal(medal, List.of()));
         }
+    }
+
+    private void populateProfileScreen(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        inventory.clear();
+        boolean owner = menu.viewer.equals(menu.owner);
+
+        // 1 строка: витрина медалей (индексы 0..8). На пустом слоте — пусто (null).
+        for (int i = 0; i < 9; i++) {
+            UUID medalId = data.medalAt(i);
+            ProfileMedal medal = medalId == null ? null : data.medals().get(medalId);
+            if (medal != null) {
+                inventory.setItem(i, items.medal(medal, List.of("Нажмите, чтобы переместить", "Shift + клик — снять с профиля")));
+            }
+        }
+
+        // 2 строка: пустые слоты (9..17)
+
+        // 3 строка: [1] [1] [2] [2] [3] [4] [4] [5] [5]  (слоты 18..26)
+        // 4 строка: [1] [1] [2] [2]  -  [4] [4] [5] [5]  (слоты 27..35)
+        ItemStack cosmeticBtn = items.invisibleCosmeticButton(owner);
+        ItemStack dislikeBtn = items.invisibleVoteButton(ProfileData.Vote.DISLIKE, data.voteBy(menu.viewer) == ProfileData.Vote.DISLIKE, data.dislikes(), owner);
+        ItemStack likeBtn = items.invisibleVoteButton(ProfileData.Vote.LIKE, data.voteBy(menu.viewer) == ProfileData.Vote.LIKE, data.likes(), owner);
+        ItemStack settingsBtn = items.invisibleSettingsButton(data.medals().size(), owner);
+
+        // [1] Настройка косметики
+        inventory.setItem(18, cosmeticBtn);
+        inventory.setItem(19, cosmeticBtn);
+        inventory.setItem(27, cosmeticBtn);
+        inventory.setItem(28, cosmeticBtn);
+
+        // [2] Кнопка дизлайка
+        inventory.setItem(20, dislikeBtn);
+        inventory.setItem(21, dislikeBtn);
+        inventory.setItem(29, dislikeBtn);
+        inventory.setItem(30, dislikeBtn);
+
+        // [3] Голова игрока (единственный предмет с видимой картинкой)
+        PrefixCatalog.Prefix equipped = prefixes.get(data.equippedPrefix());
+        inventory.setItem(22, items.head(data, data.name(), owner, equipped));
+
+        // [4] Кнопка лайка
+        inventory.setItem(23, likeBtn);
+        inventory.setItem(24, likeBtn);
+        inventory.setItem(32, likeBtn);
+        inventory.setItem(33, likeBtn);
+
+        // [5] Кнопка настройки медалей
+        inventory.setItem(25, settingsBtn);
+        inventory.setItem(26, settingsBtn);
+        inventory.setItem(34, settingsBtn);
+        inventory.setItem(35, settingsBtn);
+
+        // 5 строка: пустые слоты (36..44)
+
+        // 6 строка: витрина медалей (индексы 9..17, слоты 45..53). На пустом слоте — пусто (null).
+        for (int i = 9; i < 18; i++) {
+            UUID medalId = data.medalAt(i);
+            ProfileMedal medal = medalId == null ? null : data.medals().get(medalId);
+            int slot = ProfileText.profileInventorySlot(i);
+            if (medal != null) {
+                inventory.setItem(slot, items.medal(medal, List.of("Нажмите, чтобы переместить", "Shift + клик — снять с профиля")));
+            }
+        }
+    }
+
+    private void populatePlaceScreen(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        inventory.clear();
+        for (int i = 0; i < 18; i++) {
+            ProfileMedal medal = data.medals().get(data.medalAt(i));
+            int slot = ProfileText.profileInventorySlot(i);
+            inventory.setItem(slot, items.destination(medal));
+        }
+        inventory.setItem(22, items.head(data, "Отмена.", true, null));
+    }
+
+    private static boolean isCosmeticSlot(int slot) {
+        return slot == 18 || slot == 19 || slot == 27 || slot == 28;
+    }
+
+    private static boolean isDislikeSlot(int slot) {
+        return slot == 20 || slot == 21 || slot == 29 || slot == 30;
+    }
+
+    private static boolean isLikeSlot(int slot) {
+        return slot == 23 || slot == 24 || slot == 32 || slot == 33;
+    }
+
+    private static boolean isMedalSettingsSlot(int slot) {
+        return slot == 25 || slot == 26 || slot == 34 || slot == 35;
     }
 
     /**
@@ -980,7 +1079,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             if (!menu.owner.equals(owner)) continue;
             Player viewer = Bukkit.getPlayer(menu.viewer);
             if (viewer != null && viewer.getOpenInventory().getTopInventory() == menu.inventory) {
-                populateDetails(menu, profile(owner, owner.toString()));
+                populate(menu, profile(owner, owner.toString()));
             }
         }
     }
@@ -1020,31 +1119,59 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         ProfileData data = profile(menu.owner, menu.owner.toString());
         boolean own = player.getUniqueId().equals(data.owner);
         if (menu.screen == Screen.PROFILE) {
-            if (slot == 12 || slot == 14) {
-                ProfileData.Vote vote = slot == 12 ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE;
+            if (isLikeSlot(slot) || isDislikeSlot(slot)) {
+                ProfileData.Vote vote = isLikeSlot(slot) ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE;
                 if (!own && subjects.vote(data, player.getUniqueId(), vote)) {
                     storage.changed(data.owner); refreshDetails(data.owner); clickSound(player);
                     announceVote(data.owner, player, vote);
                 }
-            } else if (slot == 13) {
+            } else if (slot == 22) {
                 // Описание: в чужом профиле раньше молча ничего не происходило.
                 if (!own) { player.sendMessage(ProfileItems.text("Описание можно менять только в своём профиле.", NamedTextColor.RED)); return; }
                 if (voice.active(player.getUniqueId())) { voice.chat(player, ""); return; }
                 player.closeInventory();
                 editing.put(player.getUniqueId(), new Editing());
                 player.sendMessage(voice.prompt());
-            } else if (slot == 17) {
+            } else if (isMedalSettingsSlot(slot)) {
                 // Медали: то же самое — чужой профиль отвечает сообщением, а не молчанием.
                 if (!own) { player.sendMessage(ProfileItems.text("Медали можно расставлять только в своём профиле.", NamedTextColor.RED)); return; }
                 clickSound(player); open(player, data.owner, Screen.COLLECTION, 0, null);
-            } else if (slot == 9) {
+            } else if (isCosmeticSlot(slot)) {
                 clickSound(player);
                 if (own) open(player, data.owner, Screen.CUSTOMIZE, 0, null);
                 else player.sendMessage(ProfileItems.text("Настраивать можно только свой профиль.", NamedTextColor.RED));
+            } else {
+                int medalIndex = ProfileText.profileMedalSlot(slot);
+                if (medalIndex >= 0) {
+                    UUID placedMedal = data.medalAt(medalIndex);
+                    if (placedMedal != null && own) {
+                        clickSound(player);
+                        if (shift) {
+                            data.unplace(player.getUniqueId(), placedMedal);
+                            storage.changed(data.owner);
+                            refresh(data.owner);
+                        } else {
+                            open(player, data.owner, Screen.PLACE, 0, placedMedal);
+                        }
+                    } else if (own) {
+                        clickSound(player);
+                        open(player, data.owner, Screen.COLLECTION, 0, null);
+                    }
+                }
             }
             return;
         }
         if (!own) return;
+        if (menu.screen == Screen.PLACE) {
+            int destination = ProfileText.profileMedalSlot(slot);
+            if (destination >= 0 && data.medals().containsKey(menu.chosen)) {
+                if (data.place(player.getUniqueId(), menu.chosen, destination)) storage.changed(data.owner);
+                clickSound(player); open(player, data.owner, Screen.PROFILE, 0, null); refresh(data.owner);
+            } else if (slot == 22) {
+                clickSound(player); open(player, data.owner, Screen.COLLECTION, 0, null);
+            }
+            return;
+        }
         if (menu.screen == Screen.CUSTOMIZE) {
             if (slot == CUSTOMIZE_PREFIX_SLOT) { clickSound(player); open(player, data.owner, Screen.PACKS, 0, null); return; }
             if (slot == CUSTOMIZE_COSMETIC_SLOT) { clickSound(player); open(player, data.owner, Screen.COSMETIC, 0, null); return; }
