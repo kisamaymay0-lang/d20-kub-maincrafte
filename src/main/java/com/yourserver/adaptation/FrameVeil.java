@@ -58,28 +58,6 @@ final class FrameVeil implements Listener {
         }
     }
 
-<<<<<<< HEAD
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onPutInFrame(PlayerInteractEntityEvent event) {
-        if (!(event.getRightClicked() instanceof ItemFrame frame)) return;
-        ItemStack held = event.getPlayer().getInventory().getItem(event.getHand());
-        if (Shaker.isDrink(held) || Shaker.isShaker(held) || Shaker.isHotWaterBottle(held)) {
-            org.bukkit.Bukkit.getScheduler().runTask(org.bukkit.plugin.java.JavaPlugin.getProvidingPlugin(FrameVeil.class), () -> {
-                ItemStack inFrame = frame.getItem();
-                if (inFrame != null && (Shaker.isDrink(inFrame) || Shaker.isShaker(inFrame) || Shaker.isHotWaterBottle(inFrame))) {
-                    var meta = inFrame.getItemMeta();
-                    if (meta != null && meta.hasDisplayName()) {
-                        meta.displayName(null);
-                        inFrame.setItemMeta(meta);
-                        frame.setItem(inFrame);
-                    }
-                }
-            });
-        }
-    }
-
-=======
->>>>>>> d95ee00 (feat(rum): add pirate rum qualities, barrel aging, decanting penalties, 3 charges and fix item frame name reset)
     /** Точка частиц: чуть перед рамкой. */
     private static Location dropSpot(ItemFrame frame) {
         Location at = frame.getLocation();
