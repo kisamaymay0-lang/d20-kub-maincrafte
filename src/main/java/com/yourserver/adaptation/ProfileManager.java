@@ -855,16 +855,23 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         inventory.clear();
         boolean owner = menu.viewer.equals(menu.owner);
 
-        // 1 строка: витрина медалей (индексы 0..8). На пустом слоте — пусто (null).
+        ItemStack empty = ProfileItems.emptySlot();
+
+        // 1 строка: витрина медалей (индексы 0..8). На пустом слоте — модель empty.json.
         for (int i = 0; i < 9; i++) {
             UUID medalId = data.medalAt(i);
             ProfileMedal medal = medalId == null ? null : data.medals().get(medalId);
             if (medal != null) {
                 inventory.setItem(i, items.medal(medal, List.of("Нажмите, чтобы переместить", "Shift + клик — снять с профиля")));
+            } else {
+                inventory.setItem(i, empty);
             }
         }
 
-        // 2 строка: пустые слоты (9..17)
+        // 2 строка: пустые слоты (9..17) с моделью empty.json
+        for (int i = 9; i < 18; i++) {
+            inventory.setItem(i, empty);
+        }
 
         // 3 строка: [1] [1] [2] [2] [3] [4] [4] [5] [5]  (слоты 18..26)
         // 4 строка: [1] [1] [2] [2]  -  [4] [4] [5] [5]  (слоты 27..35)
@@ -901,15 +908,23 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         inventory.setItem(34, settingsBtn);
         inventory.setItem(35, settingsBtn);
 
-        // 5 строка: пустые слоты (36..44)
+        // 4 строка слот 31: пустой слот с моделью empty.json
+        inventory.setItem(31, empty);
 
-        // 6 строка: витрина медалей (индексы 9..17, слоты 45..53). На пустом слоте — пусто (null).
+        // 5 строка: пустые слоты (36..44) с моделью empty.json
+        for (int i = 36; i < 45; i++) {
+            inventory.setItem(i, empty);
+        }
+
+        // 6 строка: витрина медалей (индексы 9..17, слоты 45..53). На пустом слоте — модель empty.json.
         for (int i = 9; i < 18; i++) {
             UUID medalId = data.medalAt(i);
             ProfileMedal medal = medalId == null ? null : data.medals().get(medalId);
             int slot = ProfileText.profileInventorySlot(i);
             if (medal != null) {
                 inventory.setItem(slot, items.medal(medal, List.of("Нажмите, чтобы переместить", "Shift + клик — снять с профиля")));
+            } else {
+                inventory.setItem(slot, empty);
             }
         }
     }

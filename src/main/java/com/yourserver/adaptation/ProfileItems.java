@@ -88,6 +88,18 @@ final class ProfileItems {
                 text(owner ? "Префикс и косметика на голове" : "Настраивать можно только свой профиль", NamedTextColor.DARK_GRAY)));
     }
 
+    /** Пустой слот с моделью empty.json из ресурспака (невидимый предмет без текста/подсказки). */
+    static ItemStack emptySlot() {
+        ItemStack item = new ItemStack(Material.STRUCTURE_VOID);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.displayName(Component.empty());
+            meta.setItemModel(new NamespacedKey("f8resurs", "empty"));
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
     /** Невидимая кнопка для фонового GUI. Не перекрывает текстуру меню своим спрайтом. */
     static ItemStack invisibleItem(Component display, List<Component> lore) {
         ItemStack item = new ItemStack(Material.STRUCTURE_VOID);
