@@ -9,13 +9,13 @@
 #
 # Модель и текстура блока: sweetie_bery_block.json (f8resurs:block/sweetie_bery_block),
 # настроена как полублок (плита / slab).
-# state.auto_state: mushroom_stem — визуальный носитель без глухого перекрытия соседних граней.
+# state.auto_state: cactus — визуальный носитель из группы cactus.
 
 blocks:
 
   f8resurs:sweetie_bery_block:
     state:
-      auto_state: mushroom_stem
+      auto_state: cactus
       model:
         path: "f8resurs:block/sweetie_bery_block"
     settings:
