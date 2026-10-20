@@ -1005,12 +1005,12 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         ItemStack c2 = allCosmetics.size() > 1 ? items.randomCosmeticShowcase(allCosmetics.get(1)) : empty;
         ItemStack c3 = allCosmetics.size() > 2 ? items.randomCosmeticShowcase(allCosmetics.get(2)) : empty;
 
-        inventory.setItem(15, p1);
-        inventory.setItem(16, p2);
-        inventory.setItem(24, p3);
-        inventory.setItem(25, c1);
-        inventory.setItem(33, c2);
-        inventory.setItem(34, c3);
+        inventory.setItem(15, c1);
+        inventory.setItem(16, c2);
+        inventory.setItem(24, c3);
+        inventory.setItem(25, p1);
+        inventory.setItem(33, p2);
+        inventory.setItem(34, p3);
     }
 
     private static boolean isCosmeticSlot(int slot) {

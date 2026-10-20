@@ -1,6 +1,8 @@
 {
-  "parent": "minecraft:block/cube_all",
+  "parent": "minecraft:block/slab",
   "textures": {
-    "all": "f8resurs:block/sweetie_bery_block"
+    "bottom": "f8resurs:block/sweetie_bery_block",
+    "top": "f8resurs:block/sweetie_bery_block",
+    "side": "f8resurs:block/sweetie_bery_block"
   }
 }

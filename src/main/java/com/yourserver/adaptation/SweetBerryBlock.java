@@ -201,7 +201,7 @@ public class SweetBerryBlock implements Listener {
         if (CraftEngineSweetBerry.ready()) {
             CraftEngineSweetBerry.place(block);
         } else {
-            block.setType(Material.MUSHROOM_STEM);
+            block.setType(Material.PETRIFIED_OAK_SLAB);
         }
         String key = blockKey(block);
         StampData data = new StampData(0, 0);
