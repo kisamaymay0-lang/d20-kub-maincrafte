@@ -138,6 +138,57 @@ final class ProfileItems {
         return invisibleItem(text(name, color), lore);
     }
 
+    ItemStack backButton() {
+        return invisibleItem(text("Обратно", NamedTextColor.GOLD), List.of(
+                text("Вернуться в профиль", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack prefixesButton() {
+        return invisibleItem(text("Префиксы", NamedTextColor.WHITE), List.of(
+                text("Выбор и открытие префиксов", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack cosmeticButton() {
+        return invisibleItem(text("Косметика", NamedTextColor.WHITE), List.of(
+                text("Выбор и открытие косметики", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack everythingElseButton() {
+        return invisibleItem(text("Все остальное", NamedTextColor.WHITE), List.of());
+    }
+
+    ItemStack inventoryButton() {
+        return invisibleItem(text("Инвентарь", NamedTextColor.WHITE), List.of());
+    }
+
+    ItemStack totalSpinsItem(int totalSpins, int prefixSpins, int cosmeticSpins) {
+        int modelNum = Math.min(5, Math.max(0, totalSpins));
+        ItemStack item = new ItemStack(Material.STRUCTURE_VOID);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.displayName(text("Доступно круток: " + totalSpins, NamedTextColor.WHITE));
+            meta.lore(List.of(
+                    text("Префиксы: " + prefixSpins, NamedTextColor.GRAY),
+                    text("Косметика: " + cosmeticSpins, NamedTextColor.GRAY)
+            ));
+            meta.setItemModel(new NamespacedKey("f8resurs", "prof_menu" + modelNum));
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    ItemStack randomPrefixShowcase(PrefixCatalog.Prefix prefix) {
+        if (prefix == null) return emptySlot();
+        return invisibleItem(Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(text(prefix.name(), prefix.color())),
+                List.of(text("Случайный префикс из каталога", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack randomCosmeticShowcase(CosmeticCatalog.Cosmetic cosmetic) {
+        if (cosmetic == null) return emptySlot();
+        return invisibleItem(text(cosmetic.name(), cosmetic.color()),
+                List.of(text("Случайная косметика из каталога", NamedTextColor.DARK_GRAY)));
+    }
+
     /** Кнопка «Мои префиксы»: список уже собранных префиксов, чтобы надеть любой. */
     ItemStack myPrefixesButton(int owned) {
         return named(Material.CHEST, medals.title("Мои префиксы", ProfileMedal.Metal.COPPER), List.of(

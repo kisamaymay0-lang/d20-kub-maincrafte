@@ -170,6 +170,15 @@
       "chars": [
         "\ue121"
       ]
+    },
+    {
+      "type": "bitmap",
+      "file": "f8resurs:gui/profile-menu3.png",
+      "height": 222,
+      "ascent": 14,
+      "chars": [
+        "\ue123"
+      ]
     }
   ]
 }

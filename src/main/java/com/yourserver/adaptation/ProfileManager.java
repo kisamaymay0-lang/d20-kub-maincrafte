@@ -723,6 +723,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             if (screen == Screen.PROFILE) {
                 // Основное меню профиля: кастомная фоновая текстура profile-menu1.png
                 titleComponent = Component.text("\uF808\uE121", NamedTextColor.WHITE).font(ProfileIcons.FONT);
+            } else if (screen == Screen.CUSTOMIZE) {
+                // Меню кастомизации и косметики: кастомная фоновая текстура profile-menu3.png
+                titleComponent = Component.text("\uF808\uE123", NamedTextColor.WHITE).font(ProfileIcons.FONT);
             } else {
                 String title = switch (screen) {
                     case PROFILE -> "Профиль • " + data.name();
@@ -741,7 +744,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 };
                 titleComponent = Component.text(title, NamedTextColor.DARK_GRAY);
             }
-            int size = (screen == Screen.PROFILE || screen == Screen.PLACE) ? 54 : 27;
+            int size = (screen == Screen.PROFILE || screen == Screen.PLACE || screen == Screen.CUSTOMIZE) ? 54 : 27;
             menu.inventory = Bukkit.createInventory(menu, size, titleComponent);
             populate(menu, data);
             Menu previous = menus.put(viewer.getUniqueId(), menu);
@@ -769,17 +772,16 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             populatePlaceScreen(menu, data);
             return;
         }
+        if (menu.screen == Screen.CUSTOMIZE) {
+            populateCustomizeScreen(menu, data);
+            return;
+        }
         var filler = ProfileItems.filler();
         for (int i = 0; i < 27; i++) if (ProfileText.medalSlot(i) >= 0) inventory.setItem(i, filler);
         populateDetails(menu, data);
-        if (menu.screen == Screen.CUSTOMIZE) {
-            // Второй ряд: пока только две кнопки — префикс и косметика.
-            PrefixCatalog.Prefix prefix = prefixes.get(data.equippedPrefix());
-            menu.inventory.setItem(CUSTOMIZE_PREFIX_SLOT, items.prefixButton(prefix != null ? prefix : randomPrefix(), true));
-            menu.inventory.setItem(CUSTOMIZE_COSMETIC_SLOT, items.cosmeticMenuButton(true));
-            menu.inventory.setItem(CUSTOMIZE_MY_PREFIXES_SLOT, items.myPrefixesButton(data.ownedPrefixes().size()));
-            return;
-        }
+        for (int i = 0; i < 27; i++) if (ProfileText.medalSlot(i) >= 0) inventory.setItem(i, filler);
+        populateDetails(menu, data);
+>>>>>>> 8abe9e3 (feat(profile): rework customize screen to profile-menu3 6-row layout with 3 random prefixes/cosmetics, spin counters and fix slot click range)
         if (menu.screen == Screen.COSMETIC) {
             List<CosmeticCatalog.Cosmetic> all = cosmetics.list();
             int pages = Math.max(1, (all.size() + 17) / 18);
@@ -940,6 +942,81 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         inventory.setItem(22, items.head(data, "Отмена.", true, null));
     }
 
+    private void populateCustomizeScreen(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        inventory.clear();
+        boolean owner = menu.viewer.equals(menu.owner);
+
+        ItemStack empty = ProfileItems.emptySlot();
+        for (int i = 0; i < 54; i++) {
+            inventory.setItem(i, empty);
+        }
+
+        // [1] Кнопка «Обратно» золотым цветом (слот 9)
+        inventory.setItem(9, items.backButton());
+
+        // [2] Кнопка «Префиксы» белым цветом (слоты 11, 12, 20, 21)
+        ItemStack prefBtn = items.prefixesButton();
+        inventory.setItem(11, prefBtn);
+        inventory.setItem(12, prefBtn);
+        inventory.setItem(20, prefBtn);
+        inventory.setItem(21, prefBtn);
+
+        // [3] Кнопка «Косметика» белым цветом (слоты 13, 14, 22, 23)
+        ItemStack cosmBtn = items.cosmeticButton();
+        inventory.setItem(13, cosmBtn);
+        inventory.setItem(14, cosmBtn);
+        inventory.setItem(22, cosmBtn);
+        inventory.setItem(23, cosmBtn);
+
+        // [5] Голова игрока с основного профиля (слот 18)
+        PrefixCatalog.Prefix equipped = prefixes.get(data.equippedPrefix());
+        inventory.setItem(18, items.head(data, data.name(), owner, equipped));
+
+        // [6] «Все остальное» белым цветом (слоты 29, 30, 38, 39)
+        ItemStack everythingElse = items.everythingElseButton();
+        inventory.setItem(29, everythingElse);
+        inventory.setItem(30, everythingElse);
+        inventory.setItem(38, everythingElse);
+        inventory.setItem(39, everythingElse);
+
+        // [7] «Инвентарь» белым цветом (слоты 31, 32, 40, 41)
+        ItemStack invBtn = items.inventoryButton();
+        inventory.setItem(31, invBtn);
+        inventory.setItem(32, invBtn);
+        inventory.setItem(40, invBtn);
+        inventory.setItem(41, invBtn);
+
+        // [8] Сумма всех круток (слот 43)
+        int totalSpins = data.prefixCases() + data.cosmeticCases();
+        for (List<Long> list : data.packCasesSnapshot().values()) {
+            if (list != null) totalSpins += list.size();
+        }
+        inventory.setItem(43, items.totalSpinsItem(totalSpins, data.prefixCases(), data.cosmeticCases()));
+
+        // [4] 3 случайных неповторяющихся префикса и 3 случайных косметики (слоты 15, 16, 24, 25, 33, 34)
+        List<PrefixCatalog.Prefix> allPrefixes = new ArrayList<>(prefixes.list());
+        Collections.shuffle(allPrefixes);
+        List<CosmeticCatalog.Cosmetic> allCosmetics = new ArrayList<>(cosmetics.list());
+        Collections.shuffle(allCosmetics);
+
+        ItemStack p1 = allPrefixes.size() > 0 ? items.randomPrefixShowcase(allPrefixes.get(0)) : empty;
+        ItemStack p2 = allPrefixes.size() > 1 ? items.randomPrefixShowcase(allPrefixes.get(1)) : empty;
+        ItemStack p3 = allPrefixes.size() > 2 ? items.randomPrefixShowcase(allPrefixes.get(2)) : empty;
+
+        ItemStack c1 = allCosmetics.size() > 0 ? items.randomCosmeticShowcase(allCosmetics.get(0)) : empty;
+        ItemStack c2 = allCosmetics.size() > 1 ? items.randomCosmeticShowcase(allCosmetics.get(1)) : empty;
+        ItemStack c3 = allCosmetics.size() > 2 ? items.randomCosmeticShowcase(allCosmetics.get(2)) : empty;
+
+        inventory.setItem(15, p1);
+        inventory.setItem(16, p2);
+        inventory.setItem(24, p3);
+        inventory.setItem(25, c1);
+        inventory.setItem(33, c2);
+        inventory.setItem(34, c3);
+    }
+
+>>>>>>> 8abe9e3 (feat(profile): rework customize screen to profile-menu3 6-row layout with 3 random prefixes/cosmetics, spin counters and fix slot click range)
     private static boolean isCosmeticSlot(int slot) {
         return slot == 18 || slot == 19 || slot == 27 || slot == 28;
     }
@@ -1118,7 +1195,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         event.setCancelled(true); // Включая shift/цифры/двойной/creative: иконки не забираются из GUI.
         if (!(event.getWhoClicked() instanceof Player player) || !menu.viewer.equals(player.getUniqueId())) return;
         int slot = event.getRawSlot();
-        if (slot < 0 || slot >= 27 || !event.getClick().isMouseClick() || !queued.add(player.getUniqueId())) return;
+        if (slot < 0 || slot >= menu.inventory.getSize() || !event.getClick().isMouseClick() || !queued.add(player.getUniqueId())) return;
         boolean shift = event.isShiftClick();
         Bukkit.getScheduler().runTask(plugin, () -> {
             queued.remove(player.getUniqueId());
@@ -1189,9 +1266,49 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             return;
         }
         if (menu.screen == Screen.CUSTOMIZE) {
-            if (slot == CUSTOMIZE_PREFIX_SLOT) { clickSound(player); open(player, data.owner, Screen.PACKS, 0, null); return; }
-            if (slot == CUSTOMIZE_COSMETIC_SLOT) { clickSound(player); open(player, data.owner, Screen.COSMETIC, 0, null); return; }
-            if (slot == CUSTOMIZE_MY_PREFIXES_SLOT) { clickSound(player); open(player, data.owner, Screen.PREFIX, 0, null); return; }
+            if (slot == 9) {
+                // [1] Обратно в профиль
+                clickSound(player);
+                open(player, data.owner, Screen.PROFILE, 0, null);
+                return;
+            }
+            if (slot == 11 || slot == 12 || slot == 20 || slot == 21) {
+                // [2] Префиксы
+                clickSound(player);
+                open(player, data.owner, Screen.PACKS, 0, null);
+                return;
+            }
+            if (slot == 13 || slot == 14 || slot == 22 || slot == 23) {
+                // [3] Косметика
+                clickSound(player);
+                open(player, data.owner, Screen.COSMETIC, 0, null);
+                return;
+            }
+            if (slot == 29 || slot == 30 || slot == 38 || slot == 39) {
+                // [6] Все остальное (заглушка)
+                clickSound(player);
+                return;
+            }
+            if (slot == 31 || slot == 32 || slot == 40 || slot == 41) {
+                // [7] Инвентарь (заглушка)
+                clickSound(player);
+                return;
+            }
+            if (slot == 43) {
+                // [8] Крутки
+                clickSound(player);
+                return;
+            }
+            if (slot == 18) {
+                // [5] Голова игрока
+                clickSound(player);
+                return;
+            }
+            if (slot == 15 || slot == 16 || slot == 24 || slot == 25 || slot == 33 || slot == 34) {
+                // [4] Случайные префиксы/косметика
+                clickSound(player);
+                return;
+            }
             return;
         }
         if (menu.screen == Screen.PACKS) {
