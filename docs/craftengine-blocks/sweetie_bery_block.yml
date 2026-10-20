@@ -1,4 +1,4 @@
-# Блок сладких ягод — кастомный блок CraftEngine (полублок / плита).
+# Блок сладких ягод — кастомный блок CraftEngine.
 #
 # Куда положить: в ВАШ пак, который уже стоит в CraftEngine —
 #   plugins/CraftEngine/resources/<имя вашего пака>/configuration/blocks/sweetie_bery_block.yml
@@ -9,12 +9,13 @@
 #
 # Модель и текстура блока: sweetie_bery_block.json (f8resurs:block/sweetie_bery_block),
 # настроена как полублок (плита / slab).
+# state.auto_state: mushroom_stem — визуальный носитель без глухого перекрытия соседних граней.
 
 blocks:
 
   f8resurs:sweetie_bery_block:
     state:
-      auto_state: petrified_oak_slab
+      auto_state: mushroom_stem
       model:
         path: "f8resurs:block/sweetie_bery_block"
     settings:

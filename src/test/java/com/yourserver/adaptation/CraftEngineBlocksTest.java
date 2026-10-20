@@ -47,7 +47,7 @@ class CraftEngineBlocksTest {
             "waterlogged_non_tintable_leaves", "leaves", "waterlogged_leaves", "lower_tripwire",
             "higher_tripwire", "tripwire", "sapling", "pressure_plate", "cactus", "sugar_cane",
             "weeping_vines", "weeping_vine", "twisting_vines", "twisting_vine",
-            "cave_vines", "cave_vine", "kelp", "chorus", "petrified_oak_slab", "slab");
+            "cave_vines", "cave_vine", "kelp", "chorus");
 
     /** Ключи settings, которые разбирает BlockSettingsModifiers. */
     private static final Set<String> SETTINGS_KEYS = Set.of(
