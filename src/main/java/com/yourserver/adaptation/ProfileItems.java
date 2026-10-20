@@ -79,11 +79,134 @@ final class ProfileItems {
                 icon == null ? null : icon.file());
     }
 
+    /**
+     * Кнопка «Настроить косметику» в профиле: обычная незерская звезда (без модели
+     * из ресурспака) — она ведёт в меню, где лежат префикс и косметика.
+     */
+    ItemStack cosmeticMenuButton(boolean owner) {
+        return named(Material.NETHER_STAR, medals.title("Настроить косметику", ProfileMedal.Metal.GOLD), List.of(
+                text(owner ? "Префикс и косметика на голове" : "Настраивать можно только свой профиль", NamedTextColor.DARK_GRAY)));
+    }
+
+    /** Пустой слот с моделью empty.json из ресурспака (невидимый предмет без текста/подсказки). */
+    static ItemStack emptySlot() {
+        ItemStack item = new ItemStack(Material.STRUCTURE_VOID);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.displayName(Component.empty());
+            meta.setItemModel(new NamespacedKey("f8resurs", "empty"));
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    /** Невидимая кнопка для фонового GUI. Не перекрывает текстуру меню своим спрайтом. */
+    static ItemStack invisibleItem(Component display, List<Component> lore) {
+        ItemStack item = new ItemStack(Material.STRUCTURE_VOID);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.displayName(display);
+            meta.lore(lore);
+            meta.setItemModel(new NamespacedKey("f8resurs", "empty"));
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    ItemStack invisibleCosmeticButton(boolean owner) {
+        return invisibleItem(medals.title("Настроить косметику", ProfileMedal.Metal.GOLD), List.of(
+                text(owner ? "Префикс и косметика на голове" : "Настраивать можно только свой профиль", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack invisibleSettingsButton(int placed, boolean owner) {
+        return invisibleItem(medals.title("Настроить медали", ProfileMedal.Metal.GOLD), List.of(
+                text(owner ? "Разместить или снять медали" : "Медали владельца профиля", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack invisibleVoteButton(ProfileData.Vote vote, boolean active, int count, boolean owner) {
+        boolean like = vote == ProfileData.Vote.LIKE;
+        TextColor color = like ? NamedTextColor.GREEN : NamedTextColor.RED;
+        String name = like ? "Лайк (" + count + ")" : "Дизлайк (" + count + ")";
+        List<Component> lore = new ArrayList<>();
+        if (owner) {
+            lore.add(text("Владелец профиля не может голосовать за себя", NamedTextColor.DARK_GRAY));
+        } else if (active) {
+            lore.add(text("Вы уже проголосовали. Нажмите, чтобы снять голос", NamedTextColor.DARK_GRAY));
+        } else {
+            lore.add(text("Нажмите, чтобы проголосовать", NamedTextColor.DARK_GRAY));
+        }
+        return invisibleItem(text(name, color), lore);
+    }
+
+    ItemStack backButton() {
+        return invisibleItem(text("Обратно", NamedTextColor.GOLD), List.of(
+                text("Вернуться в профиль", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack prefixesButton() {
+        return invisibleItem(text("Префиксы", NamedTextColor.WHITE), List.of(
+                text("Выбор и открытие префиксов", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack cosmeticButton() {
+        return invisibleItem(text("Косметика", NamedTextColor.WHITE), List.of(
+                text("Выбор и открытие косметики", NamedTextColor.DARK_GRAY)));
+    }
+
+    ItemStack everythingElseButton() {
+        return invisibleItem(text("Все остальное", NamedTextColor.WHITE), List.of());
+    }
+
+    ItemStack inventoryButton() {
+        return invisibleItem(text("Инвентарь", NamedTextColor.WHITE), List.of());
+    }
+
+    ItemStack totalSpinsItem(int totalSpins, int prefixSpins, int cosmeticSpins) {
+        int modelNum = Math.min(5, Math.max(0, totalSpins));
+        ItemStack item = new ItemStack(Material.STRUCTURE_VOID);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.displayName(text("Доступно круток: " + totalSpins, NamedTextColor.WHITE));
+            meta.lore(List.of(
+                    text("Префиксы: " + prefixSpins, NamedTextColor.GRAY),
+                    text("Косметика: " + cosmeticSpins, NamedTextColor.GRAY)
+            ));
+            meta.setItemModel(new NamespacedKey("f8resurs", "prof_menu" + modelNum));
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    ItemStack randomPrefixShowcase(PrefixCatalog.Prefix prefix) {
+        if (prefix == null) return emptySlot();
+        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(text(prefix.name(), prefix.color()));
+        ItemStack item = named(Material.NAME_TAG, display,
+                List.of(text("Случайный префикс из каталога", NamedTextColor.DARK_GRAY)));
+        return model(item, prefix.file());
+    }
+
+    ItemStack randomCosmeticShowcase(CosmeticCatalog.Cosmetic cosmetic) {
+        if (cosmetic == null) return emptySlot();
+        ItemStack item = named(Material.PAPER, text(cosmetic.name(), cosmetic.color()),
+                List.of(text("Случайная косметика из каталога", NamedTextColor.DARK_GRAY)));
+        return model(item, cosmetic.file());
+    }
+
+    /** Кнопка «Мои префиксы»: список уже собранных префиксов, чтобы надеть любой. */
+    ItemStack myPrefixesButton(int owned) {
+        return named(Material.CHEST, medals.title("Мои префиксы", ProfileMedal.Metal.COPPER), List.of(
+                text("Собрано " + owned + " " + plural(owned, "префикс", "префикса", "префиксов"),
+                        owned > 0 ? NamedTextColor.GRAY : NamedTextColor.RED),
+                text(owned > 0 ? "Нажмите, чтобы надеть любой" : "Префиксы выпадают из кейсов паков",
+                        NamedTextColor.DARK_GRAY)));
+    }
+
     /** Префикс в списке выбора. Чужой показан красным «У вас нету этого префикса!». */
     ItemStack prefixEntry(PrefixCatalog.Prefix prefix, boolean owned, boolean equipped) {
         if (!owned) {
-            ItemStack item = named(Material.NAME_TAG, bold("У вас нету этого префикса!", NamedTextColor.RED), List.of(
-                    text("№" + prefix.number() + ": ", NamedTextColor.DARK_GRAY).append(text(prefix.name(), prefix.color())),
+            Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(bold("У вас нету этого префикса!", NamedTextColor.RED));
+            ItemStack item = named(Material.NAME_TAG, display, List.of(
+                    text("№" + prefix.number() + ": ", NamedTextColor.DARK_GRAY).append(ProfileIcons.prefixIcon(prefix)).append(text(prefix.name(), prefix.color())),
                     text("Получите его из кейса префиксов", NamedTextColor.DARK_GRAY)));
             return model(item, prefix.file());
         }
@@ -94,7 +217,8 @@ final class ProfileItems {
             lore.add(text("Нажмите, чтобы надеть префикс", NamedTextColor.DARK_GRAY));
         }
         lore.add(text("№" + prefix.number() + " · файл " + prefix.file(), NamedTextColor.DARK_GRAY));
-        ItemStack item = named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), lore);
+        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(bold(prefix.name(), prefix.color()));
+        ItemStack item = named(Material.NAME_TAG, display, lore);
         ItemMeta meta = item.getItemMeta();
         meta.setEnchantmentGlintOverride(equipped);
         item.setItemMeta(meta);
@@ -113,11 +237,136 @@ final class ProfileItems {
         return item;
     }
 
+    /**
+     * Сундучок пака префиксов в меню: название пака, сколько кейсов лежит у
+     * игрока и что внутри. Надпись «бессрочный» — когда срок пака {@code -1}.
+     */
+    ItemStack prefixPack(PrefixPackCatalog.Pack pack, int cases, long nearestExpiry, long now) {
+        List<Component> lore = new ArrayList<>();
+        lore.add(text(cases > 0 ? countText(cases) : "Нет кейсов этого пака",
+                cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED));
+        lore.add(text(cases > 0 ? "Нажмите, чтобы открыть" : "Кейсы выдаёт администратор",
+                NamedTextColor.DARK_GRAY));
+        lore.add(Component.empty());
+        lore.add(text("Внутри " + pack.size() + " " + ProfileItems.plural(pack.size(), "префикс", "префикса", "префиксов"),
+                NamedTextColor.GOLD));
+        for (PrefixCatalog.Prefix prefix : pack.prefixes()) {
+            lore.add(text(" §7§l•§r ", NamedTextColor.DARK_GRAY).append(text(prefix.name(), prefix.color())));
+        }
+        if (cases > 0) {
+            lore.add(Component.empty());
+            lore.add(text(nearestExpiry == Long.MAX_VALUE
+                            ? "Кейсы бессрочные"
+                            : "Ближайший сгорит через " + PrefixPackCatalog.leftText(nearestExpiry, now),
+                    NamedTextColor.DARK_GRAY));
+        }
+        ItemStack item = named(Material.CHEST, medals.title(pack.name(), ProfileMedal.Metal.GOLD), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /**
+     * Кнопка «крутить кейс пака» на экране пака: название пака, сколько кейсов
+     * лежит у игрока, что внутри и срок ближайшего кейса.
+     */
+    ItemStack packCase(PrefixPackCatalog.Pack pack, int cases, long nearestExpiry, long now) {
+        List<Component> lore = new ArrayList<>();
+        lore.add(text(cases > 0 ? countText(cases) : "Нет кейсов этого пака",
+                cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED));
+        lore.add(text(cases > 0 ? "Нажмите, чтобы крутить кейс" : "Кейсы выдаёт администратор",
+                NamedTextColor.DARK_GRAY));
+        lore.add(Component.empty());
+        lore.add(text("Внутри " + pack.size() + " " + ProfileItems.plural(pack.size(), "префикс", "префикса", "префиксов"),
+                NamedTextColor.GOLD));
+        for (PrefixCatalog.Prefix prefix : pack.prefixes()) {
+            lore.add(text(" §7§l•§r ", NamedTextColor.DARK_GRAY).append(text(prefix.name(), prefix.color())));
+        }
+        if (cases > 0) {
+            lore.add(Component.empty());
+            lore.add(text(nearestExpiry == Long.MAX_VALUE
+                            ? "Кейсы бессрочные"
+                            : "Ближайший сгорит через " + PrefixPackCatalog.leftText(nearestExpiry, now),
+                    NamedTextColor.DARK_GRAY));
+        }
+        ItemStack item = named(Material.CHEST, medals.title("Крутить кейс пака", ProfileMedal.Metal.GOLD), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** Кнопка отмены на экране пака: обратно к списку паков. */
+    ItemStack backToPacks() {
+        return item(Material.ARROW, "Назад к пакам", NamedTextColor.GOLD, List.of(
+                text("Отмена — вернуться к списку паков", NamedTextColor.DARK_GRAY)));
+    }
+
+    private static String countText(int cases) {
+        return cases == 1 ? "Есть 1 кейс" : "Есть " + cases + " кейсов";
+    }
+
+    /** Русская форма числа: 1 префикс, 2 префикса, 5 префиксов. */
+    static String plural(int count, String one, String few, String many) {
+        int mod100 = Math.abs(count) % 100;
+        int mod10 = mod100 % 10;
+        if (mod100 >= 11 && mod100 <= 14) return many;
+        if (mod10 == 1) return one;
+        if (mod10 >= 2 && mod10 <= 4) return few;
+        return many;
+    }
+
     /** Карточка префикса во время вскрытия кейса. slot — номер места (1…9). */
     ItemStack prefixReveal(PrefixCatalog.Prefix prefix, int slot) {
-        return model(named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), List.of(
+        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(bold(prefix.name(), prefix.color()));
+        return model(named(Material.NAME_TAG, display, List.of(
                 text("Место " + slot, NamedTextColor.DARK_GRAY),
                 text("Вскрытие кейса…", NamedTextColor.DARK_GRAY))), prefix.file());
+    }
+
+    /**
+     * Косметика в списке выбора. Иконка — сама модель косметики из ресурспака.
+     * Чужая показана красным «У вас нету этой косметики!».
+     */
+    ItemStack cosmeticEntry(CosmeticCatalog.Cosmetic cosmetic, boolean owned, boolean equipped) {
+        if (!owned) {
+            return model(named(Material.PAPER, bold("У вас нету этой косметики!", NamedTextColor.RED), List.of(
+                    text("№" + cosmetic.number() + ": ", NamedTextColor.DARK_GRAY).append(text(cosmetic.name(), cosmetic.color())),
+                    text("Получите её из кейса косметики", NamedTextColor.DARK_GRAY))), cosmetic.file());
+        }
+        List<Component> lore = new ArrayList<>();
+        if (equipped) {
+            lore.add(text("Надета. Shift + клик — снять косметику", NamedTextColor.DARK_GRAY));
+        } else {
+            lore.add(text("Нажмите, чтобы надеть на голову", NamedTextColor.DARK_GRAY));
+        }
+        lore.add(text("Видна другим игрокам; вам — только в меню", NamedTextColor.DARK_GRAY));
+        lore.add(text("№" + cosmetic.number() + " · модель " + cosmetic.file(), NamedTextColor.DARK_GRAY));
+        ItemStack item = named(Material.PAPER, bold(cosmetic.name(), cosmetic.color()), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(equipped);
+        item.setItemMeta(meta);
+        return model(item, cosmetic.file());
+    }
+
+    /** Кнопка «Кейс косметики»: показывает число кейсов у игрока. */
+    ItemStack cosmeticCase(int cases) {
+        String count = cases == 1 ? "Есть 1 кейс косметики" : "Есть " + cases + " кейсов косметики";
+        ItemStack item = named(Material.CHEST, medals.title("Кейс косметики", ProfileMedal.Metal.GOLD), List.of(
+                text(count, cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED),
+                text(cases > 0 ? "Нажмите, чтобы открыть" : "Кейсы выдаёт администратор", NamedTextColor.DARK_GRAY)));
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** Карточка косметики во время вскрытия кейса. slot — номер места (1…9). */
+    ItemStack cosmeticReveal(CosmeticCatalog.Cosmetic cosmetic, int slot) {
+        return model(named(Material.PAPER, bold(cosmetic.name(), cosmetic.color()), List.of(
+                text("Место " + slot, NamedTextColor.DARK_GRAY),
+                text("Вскрытие кейса…", NamedTextColor.DARK_GRAY))), cosmetic.file());
     }
 
     static ItemStack item(Material material, String name, TextColor color, List<Component> lore) {
