@@ -779,9 +779,6 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         var filler = ProfileItems.filler();
         for (int i = 0; i < 27; i++) if (ProfileText.medalSlot(i) >= 0) inventory.setItem(i, filler);
         populateDetails(menu, data);
-        for (int i = 0; i < 27; i++) if (ProfileText.medalSlot(i) >= 0) inventory.setItem(i, filler);
-        populateDetails(menu, data);
->>>>>>> 8abe9e3 (feat(profile): rework customize screen to profile-menu3 6-row layout with 3 random prefixes/cosmetics, spin counters and fix slot click range)
         if (menu.screen == Screen.COSMETIC) {
             List<CosmeticCatalog.Cosmetic> all = cosmetics.list();
             int pages = Math.max(1, (all.size() + 17) / 18);
@@ -1016,7 +1013,6 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         inventory.setItem(34, c3);
     }
 
->>>>>>> 8abe9e3 (feat(profile): rework customize screen to profile-menu3 6-row layout with 3 random prefixes/cosmetics, spin counters and fix slot click range)
     private static boolean isCosmeticSlot(int slot) {
         return slot == 18 || slot == 19 || slot == 27 || slot == 28;
     }
