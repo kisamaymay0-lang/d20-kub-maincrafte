@@ -179,14 +179,17 @@ final class ProfileItems {
 
     ItemStack randomPrefixShowcase(PrefixCatalog.Prefix prefix) {
         if (prefix == null) return emptySlot();
-        return invisibleItem(Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(text(prefix.name(), prefix.color())),
+        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(text(prefix.name(), prefix.color()));
+        ItemStack item = named(Material.NAME_TAG, display,
                 List.of(text("Случайный префикс из каталога", NamedTextColor.DARK_GRAY)));
+        return model(item, prefix.file());
     }
 
     ItemStack randomCosmeticShowcase(CosmeticCatalog.Cosmetic cosmetic) {
         if (cosmetic == null) return emptySlot();
-        return invisibleItem(text(cosmetic.name(), cosmetic.color()),
+        ItemStack item = named(Material.PAPER, text(cosmetic.name(), cosmetic.color()),
                 List.of(text("Случайная косметика из каталога", NamedTextColor.DARK_GRAY)));
+        return model(item, cosmetic.file());
     }
 
     /** Кнопка «Мои префиксы»: список уже собранных префиксов, чтобы надеть любой. */
@@ -201,8 +204,9 @@ final class ProfileItems {
     /** Префикс в списке выбора. Чужой показан красным «У вас нету этого префикса!». */
     ItemStack prefixEntry(PrefixCatalog.Prefix prefix, boolean owned, boolean equipped) {
         if (!owned) {
-            ItemStack item = named(Material.NAME_TAG, bold("У вас нету этого префикса!", NamedTextColor.RED), List.of(
-                    text("№" + prefix.number() + ": ", NamedTextColor.DARK_GRAY).append(text(prefix.name(), prefix.color())),
+            Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(bold("У вас нету этого префикса!", NamedTextColor.RED));
+            ItemStack item = named(Material.NAME_TAG, display, List.of(
+                    text("№" + prefix.number() + ": ", NamedTextColor.DARK_GRAY).append(ProfileIcons.prefixIcon(prefix)).append(text(prefix.name(), prefix.color())),
                     text("Получите его из кейса префиксов", NamedTextColor.DARK_GRAY)));
             return model(item, prefix.file());
         }
@@ -213,7 +217,8 @@ final class ProfileItems {
             lore.add(text("Нажмите, чтобы надеть префикс", NamedTextColor.DARK_GRAY));
         }
         lore.add(text("№" + prefix.number() + " · файл " + prefix.file(), NamedTextColor.DARK_GRAY));
-        ItemStack item = named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), lore);
+        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(bold(prefix.name(), prefix.color()));
+        ItemStack item = named(Material.NAME_TAG, display, lore);
         ItemMeta meta = item.getItemMeta();
         meta.setEnchantmentGlintOverride(equipped);
         item.setItemMeta(meta);
@@ -314,7 +319,8 @@ final class ProfileItems {
 
     /** Карточка префикса во время вскрытия кейса. slot — номер места (1…9). */
     ItemStack prefixReveal(PrefixCatalog.Prefix prefix, int slot) {
-        return model(named(Material.NAME_TAG, bold(prefix.name(), prefix.color()), List.of(
+        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(bold(prefix.name(), prefix.color()));
+        return model(named(Material.NAME_TAG, display, List.of(
                 text("Место " + slot, NamedTextColor.DARK_GRAY),
                 text("Вскрытие кейса…", NamedTextColor.DARK_GRAY))), prefix.file());
     }
