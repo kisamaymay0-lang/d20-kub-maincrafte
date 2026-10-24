@@ -1,0 +1,35 @@
+# Блок сладких ягод — кастомный блок CraftEngine.
+#
+# Куда положить: в ВАШ пак, который уже стоит в CraftEngine —
+#   plugins/CraftEngine/resources/<имя вашего пака>/configuration/blocks/sweetie_bery_block.yml
+# CraftEngine читает конфиги только из паков (resources/<имя>/configuration/,
+# рекурсивно по подпапкам). Рядом в паке должен быть pack.yml с
+#   namespace: f8resurs
+# Дальше — /ce reload all.
+#
+# Модель и текстура блока: sweetie_bery_block.json (f8resurs:block/sweetie_bery_block),
+# настроена как полублок (плита / slab).
+# state.auto_state: cactus — визуальный носитель из группы cactus.
+
+blocks:
+
+  f8resurs:sweetie_bery_block:
+    state:
+      auto_state: cactus
+      model:
+        path: "f8resurs:block/sweetie_bery_block"
+    settings:
+      hardness: 0.5
+      resistance: 0.5
+      replaceable: false
+      is_suffocating: false
+      is_view_blocking: false
+      is_redstone_conductor: false
+      can_occlude: false
+      propagate_skylight: true
+      sounds:
+        break: minecraft:block.sweet_berry_bush.break
+        step: minecraft:block.sweet_berry_bush.step
+        place: minecraft:block.sweet_berry_bush.place
+        hit: minecraft:block.sweet_berry_bush.pick_berries
+        fall: minecraft:block.sweet_berry_bush.step
