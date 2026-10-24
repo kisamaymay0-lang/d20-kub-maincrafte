@@ -18,7 +18,6 @@ public class PetManager implements Listener {
 
     private final AdaptationPlugin plugin;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
-    private final Map<UUID, Boolean> modelTwo = new HashMap<>();
 
     public PetManager(AdaptationPlugin plugin) {
         this.plugin = plugin;
@@ -30,7 +29,6 @@ public class PetManager implements Listener {
         if (current != null) {
             current.remove();
             pets.remove(uuid);
-            modelTwo.remove(uuid);
             return;
         }
         spawn(player);
@@ -54,7 +52,6 @@ public class PetManager implements Listener {
         pet.setPersistent(true);
 
         pets.put(player.getUniqueId(), pet);
-        modelTwo.put(player.getUniqueId(), false);
     }
 
     public void tick() {
@@ -67,7 +64,6 @@ public class PetManager implements Listener {
                     pet.remove();
                 }
                 pets.remove(uuid);
-                modelTwo.remove(uuid);
                 continue;
             }
 
@@ -84,17 +80,13 @@ public class PetManager implements Listener {
                     .add(right.clone().multiply(0.55))
                     .add(0, -0.1, 0);
 
-            // Плавное движение к цели (интерполяция 30 % за тик, без рывков)
+            // Плавное движение: очень медленная интерполяция (15 % за тик)
             Location current = pet.getLocation();
             Location next = current.add(
-                    (target.getX() - current.getX()) * 0.3,
-                    (target.getY() - current.getY()) * 0.3,
-                    (target.getZ() - current.getZ()) * 0.3
+                    (target.getX() - current.getX()) * 0.15,
+                    (target.getY() - current.getY()) * 0.15,
+                    (target.getZ() - current.getZ()) * 0.15
             );
-
-            // Подёргивание вверх-вниз
-            double bob = Math.sin(System.currentTimeMillis() / 150.0) * 0.12;
-            next.add(0, bob, 0);
 
             pet.teleport(next);
 
@@ -103,30 +95,11 @@ public class PetManager implements Listener {
         }
     }
 
-    public void switchModel() {
-        for (Map.Entry<UUID, ItemDisplay> entry : pets.entrySet()) {
-            UUID uuid = entry.getKey();
-            ItemDisplay pet = entry.getValue();
-            boolean isTwo = modelTwo.getOrDefault(uuid, false);
-            boolean next = !isTwo;
-            modelTwo.put(uuid, next);
-
-            ItemStack item = pet.getItemStack();
-            ItemMeta meta = item.getItemMeta();
-            if (meta != null) {
-                meta.setCustomModelData(next ? 2 : 1);
-                item.setItemMeta(meta);
-            }
-            pet.setItemStack(item);
-        }
-    }
-
     public void stopAll() {
         for (ItemDisplay pet : pets.values()) {
             pet.remove();
         }
         pets.clear();
-        modelTwo.clear();
     }
 
     @EventHandler
@@ -136,7 +109,6 @@ public class PetManager implements Listener {
         if (pet != null) {
             pet.remove();
             pets.remove(uuid);
-            modelTwo.remove(uuid);
         }
     }
 }

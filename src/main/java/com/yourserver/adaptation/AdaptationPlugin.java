@@ -228,13 +228,6 @@ public void onEnable() {
         }
     }.runTaskTimer(this, 0L, 1L);
 
-    new BukkitRunnable() {
-        @Override
-        public void run() {
-            petManager.switchModel();
-        }
-    }.runTaskTimer(this, 0L, 160L);
-
     // Регистрируем обработчик команды /d20.
     // Без этого команда из plugin.yml не будет работать.
     if (getCommand("d20") != null) {
