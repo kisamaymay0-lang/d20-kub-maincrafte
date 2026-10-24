@@ -4,8 +4,8 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.ItemDisplay;
-import org.bukkit.util.Vector;
 import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -75,27 +75,28 @@ public class PetManager implements Listener {
 
             // Направление взгляда игрока по горизонтали
             Vector forward = eye.getDirection().clone().setY(0).normalize();
-            // Вектор вправо (перпендикулярно направлению взгляда)
+            // Вектор вправо (перпендикулярно направлению взгляда, от первого лица)
             Vector right = forward.crossProduct(new Vector(0, 1, 0)).normalize();
 
             // Цель: перед игроком, правее (от первого лица) и чуть ниже глаз
             Location target = eye.clone()
-                    .add(forward.multiply(0.45))
-                    .add(right.multiply(0.55))
+                    .add(forward.clone().multiply(0.45))
+                    .add(right.clone().multiply(0.55))
                     .add(0, -0.1, 0);
 
-            Vector toTarget = target.subtract(pet.getLocation()).toVector();
-            double dist = toTarget.length();
+            // Плавное движение к цели (интерполяция 30 % за тик, без рывков)
+            Location current = pet.getLocation();
+            Location next = current.add(
+                    (target.getX() - current.getX()) * 0.3,
+                    (target.getY() - current.getY()) * 0.3,
+                    (target.getZ() - current.getZ()) * 0.3
+            );
 
-            // Плавное движение через клиентское ускорение, а не телепорт
-            if (dist > 0.05) {
-                if (dist > 1.0) {
-                    toTarget.normalize().multiply(1.0);
-                }
-                pet.setVelocity(toTarget);
-            } else {
-                pet.setVelocity(new Vector(0, 0, 0));
-            }
+            // Подёргивание вверх-вниз
+            double bob = Math.sin(System.currentTimeMillis() / 150.0) * 0.12;
+            next.add(0, bob, 0);
+
+            pet.teleport(next);
 
             // Поворачиваем питомца лицом к игроку
             pet.setRotation(player.getLocation().getYaw(), player.getLocation().getPitch());
