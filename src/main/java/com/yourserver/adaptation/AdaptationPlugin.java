@@ -51,6 +51,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private CaviarListener caviarListener;
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
+    private PetManager petManager;
     private ConstellationManager constellationManager;
     private ProfileManager profileManager;
     private ResourcePackPusher resourcePackPusher;
@@ -120,6 +121,9 @@ public void onEnable() {
     ancientJug = new AncientJug(this, dataWriter);
     getServer().getPluginManager().registerEvents(ancientJug, this);
 
+    petManager = new PetManager(this);
+    getServer().getPluginManager().registerEvents(petManager, this);
+
     // Раздача актуального ресурспака клиентам при входе.
     resourcePackPusher = new ResourcePackPusher(this);
     getServer().getPluginManager().registerEvents(resourcePackPusher, this);
@@ -160,7 +164,8 @@ public void onEnable() {
                     copperBlockListener,
                     caviarListener,
                     winterFishing,
-                    ancientJug
+                    ancientJug,
+                    petManager
             );
 
     getServer().getPluginManager().registerEvents(
@@ -173,6 +178,20 @@ public void onEnable() {
                 f8Command
         );
     }
+
+    new BukkitRunnable() {
+        @Override
+        public void run() {
+            petManager.tick();
+        }
+    }.runTaskTimer(this, 0L, 1L);
+
+    new BukkitRunnable() {
+        @Override
+        public void run() {
+            petManager.switchModel();
+        }
+    }.runTaskTimer(this, 0L, 160L);
 
     // Регистрируем обработчик команды /d20.
     // Без этого команда из plugin.yml не будет работать.
@@ -218,6 +237,9 @@ public void onEnable() {
         }
         if (ancientJug != null) {
             ancientJug.disable();
+        }
+        if (petManager != null) {
+            petManager.stopAll();
         }
         if (resourcePackPusher != null) {
             resourcePackPusher.disable();

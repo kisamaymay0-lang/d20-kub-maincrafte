@@ -35,6 +35,7 @@ public class F8Command implements CommandExecutor, Listener {
     private final CaviarListener caviarListener;
     private final WinterFishing winterFishing;
     private final AncientJug ancientJug;
+    private final PetManager petManager;
 
     private final NamespacedKey menuKey;
 
@@ -46,7 +47,8 @@ public class F8Command implements CommandExecutor, Listener {
             CopperBlockListener copperBlockListener,
             CaviarListener caviarListener,
             WinterFishing winterFishing,
-            AncientJug ancientJug
+            AncientJug ancientJug,
+            PetManager petManager
     ) {
         this.plugin = plugin;
         this.diceRollListener = diceRollListener;
@@ -56,6 +58,7 @@ public class F8Command implements CommandExecutor, Listener {
         this.caviarListener = caviarListener;
         this.winterFishing = winterFishing;
         this.ancientJug = ancientJug;
+        this.petManager = petManager;
         this.menuKey = new NamespacedKey(plugin, "f8_menu");
     }
 
@@ -71,6 +74,11 @@ public class F8Command implements CommandExecutor, Listener {
         }
 
         if (!player.hasPermission("f8.admin")) {
+            return true;
+        }
+
+        if (args.length > 0 && args[0].equalsIgnoreCase("pet")) {
+            petManager.toggle(player);
             return true;
         }
 
