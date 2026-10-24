@@ -64,7 +64,7 @@ public class PetManager implements Listener {
             ItemDisplay pet = pets.get(uuid);
             Player player = Bukkit.getPlayer(uuid);
 
-            if (player == null || !player.isOnline() || pet.isDead() || pet.isRemoved()) {
+            if (player == null || !player.isOnline() || pet.isDead()) {
                 if (pet != null) {
                     pet.remove();
                 }
@@ -88,7 +88,7 @@ public class PetManager implements Listener {
             double bob = Math.sin(System.currentTimeMillis() / 150.0) * 0.12;
             prev.add(0, bob, 0);
 
-            pet.teleport(prev, org.bukkit.event.entity.EntityTeleportEvent.TeleportCause.PLUGIN);
+            pet.teleport(prev);
             pet.setRotation(player.getLocation().getYaw(), player.getLocation().getPitch());
 
             previous.put(uuid, prev);
