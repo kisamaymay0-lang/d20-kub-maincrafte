@@ -1,7 +1,6 @@
 package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
-import org.bukkit.EntityType;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.ItemDisplay;
@@ -48,7 +47,7 @@ public class PetManager implements Listener {
             item.setItemMeta(meta);
         }
 
-        ItemDisplay pet = (ItemDisplay) player.getWorld().spawnEntity(eye, EntityType.ITEM_DISPLAY);
+        ItemDisplay pet = player.getWorld().spawn(eye, ItemDisplay.class);
         pet.setItemStack(item);
         pet.setGravity(false);
         pet.setInvulnerable(true);
