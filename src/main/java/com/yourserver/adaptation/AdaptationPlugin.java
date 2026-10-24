@@ -298,7 +298,6 @@ public void onEnable() {
         if (coralCare != null) {
             coralCare.flush();
         }
-        }
         if (dataWriter != null) {
             dataWriter.close();
         }
