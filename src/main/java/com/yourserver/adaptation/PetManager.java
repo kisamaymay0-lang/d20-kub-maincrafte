@@ -3,6 +3,7 @@ package com.yourserver.adaptation;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Vector;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -18,7 +19,6 @@ public class PetManager implements Listener {
     private final AdaptationPlugin plugin;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
     private final Map<UUID, Boolean> modelTwo = new HashMap<>();
-    private final Map<UUID, Location> previous = new HashMap<>();
 
     public PetManager(AdaptationPlugin plugin) {
         this.plugin = plugin;
@@ -31,7 +31,6 @@ public class PetManager implements Listener {
             current.remove();
             pets.remove(uuid);
             modelTwo.remove(uuid);
-            previous.remove(uuid);
             return;
         }
         spawn(player);
@@ -56,7 +55,6 @@ public class PetManager implements Listener {
 
         pets.put(player.getUniqueId(), pet);
         modelTwo.put(player.getUniqueId(), false);
-        previous.put(player.getUniqueId(), eye.clone());
     }
 
     public void tick() {
@@ -70,28 +68,37 @@ public class PetManager implements Listener {
                 }
                 pets.remove(uuid);
                 modelTwo.remove(uuid);
-                previous.remove(uuid);
                 continue;
             }
 
-            Location target = player.getEyeLocation().clone();
-            target.add(target.getDirection().multiply(0.35));
-            target.add(0, 0.15, 0);
+            Location eye = player.getEyeLocation();
 
-            Location prev = previous.getOrDefault(uuid, target.clone());
-            prev = prev.add(
-                    (target.getX() - prev.getX()) * 0.2,
-                    (target.getY() - prev.getY()) * 0.2,
-                    (target.getZ() - prev.getZ()) * 0.2
-            );
+            // Направление взгляда игрока по горизонтали
+            Vector forward = eye.getDirection().clone().setY(0).normalize();
+            // Вектор вправо (перпендикулярно направлению взгляда)
+            Vector right = forward.crossProduct(new Vector(0, 1, 0)).normalize();
 
-            double bob = Math.sin(System.currentTimeMillis() / 150.0) * 0.12;
-            prev.add(0, bob, 0);
+            // Цель: перед игроком, правее (от первого лица) и чуть ниже глаз
+            Location target = eye.clone()
+                    .add(forward.multiply(0.45))
+                    .add(right.multiply(0.55))
+                    .add(0, -0.1, 0);
 
-            pet.teleport(prev);
+            Vector toTarget = target.subtract(pet.getLocation()).toVector();
+            double dist = toTarget.length();
+
+            // Плавное движение через клиентское ускорение, а не телепорт
+            if (dist > 0.05) {
+                if (dist > 1.0) {
+                    toTarget.normalize().multiply(1.0);
+                }
+                pet.setVelocity(toTarget);
+            } else {
+                pet.setVelocity(new Vector(0, 0, 0));
+            }
+
+            // Поворачиваем питомца лицом к игроку
             pet.setRotation(player.getLocation().getYaw(), player.getLocation().getPitch());
-
-            previous.put(uuid, prev);
         }
     }
 
@@ -119,7 +126,6 @@ public class PetManager implements Listener {
         }
         pets.clear();
         modelTwo.clear();
-        previous.clear();
     }
 
     @EventHandler
@@ -130,7 +136,6 @@ public class PetManager implements Listener {
             pet.remove();
             pets.remove(uuid);
             modelTwo.remove(uuid);
-            previous.remove(uuid);
         }
     }
 }
