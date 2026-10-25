@@ -52,7 +52,6 @@ public class PetManager implements Listener {
         pet.setInvulnerable(true);
         pet.setSilent(true);
         pet.setPersistent(true);
-        pet.setScale(1.0f);
 
         pets.put(player.getUniqueId(), pet);
     }
@@ -62,7 +61,7 @@ public class PetManager implements Listener {
             ItemDisplay pet = pets.get(uuid);
             Player player = Bukkit.getPlayer(uuid);
 
-            if (player == null || !player.isOnline() || pet.isDead() || pet.isRemoved()) {
+            if (player == null || !player.isOnline() || pet.isDead()) {
                 if (pet != null) {
                     pet.remove();
                 }
