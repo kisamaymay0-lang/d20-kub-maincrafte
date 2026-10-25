@@ -51,9 +51,18 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private CaviarListener caviarListener;
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
+    private PetManager petManager;
+    private Apvsh apvsh;
+    private SweetBerryBlock sweetBerryBlock;
+    private Shaker shaker;
+    private BambooBarrel bambooBarrel;
+    /** Сигарета из /f8: тикает шкалу тяги и дым, поэтому нужен доступ на выключении. */
+    private Cigarette cigarette;
+    /** Политые кораллы: список живёт в файле, поэтому нужен доступ на выключении. */
+    private CoralCare coralCare;
+    private SpecialCatch specialCatch;
     private ConstellationManager constellationManager;
     private ProfileManager profileManager;
-    private ResourcePackPusher resourcePackPusher;
 
     private final Particle.DustOptions meleeDust =
             new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -67,6 +76,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
 @Override
 public void onEnable() {
     saveDefaultConfig();
+    // Файлы настроек держим полными: чего в них нет — дописываем из комплекта (значения владельца
+    // не трогаем), сломанный файл уходит в копию и заменяется новым.
+    ConfigSync.sync(this);
     dataWriter = new AsyncTextWriter(getLogger());
 
     getServer().getPluginManager().registerEvents(
@@ -117,12 +129,45 @@ public void onEnable() {
     winterFishing = new WinterFishing(this);
     getServer().getPluginManager().registerEvents(winterFishing, this);
 
+    // Уход за блоками руками: вода по меди и кораллам, блок света спрятанной
+    // рамкой — всё это шифт + ПКМ, отдельными слушателями.
+    getServer().getPluginManager().registerEvents(new CopperCare(), this);
+
+    coralCare = new CoralCare(this, dataWriter);
+    getServer().getPluginManager().registerEvents(coralCare, this);
+
+    getServer().getPluginManager().registerEvents(new LightBlocks(this), this);
+    getServer().getPluginManager().registerEvents(new FrameVeil(), this);
+    getServer().getPluginManager().registerEvents(new PaintingListener(), this);
+
     ancientJug = new AncientJug(this, dataWriter);
     getServer().getPluginManager().registerEvents(ancientJug, this);
 
-    // Раздача актуального ресурспака клиентам при входе.
-    resourcePackPusher = new ResourcePackPusher(this);
-    getServer().getPluginManager().registerEvents(resourcePackPusher, this);
+    petManager = new PetManager(this);
+    getServer().getPluginManager().registerEvents(petManager, this);
+
+    // АПВШ — аппарат для создания и наполнения сигарет и другого.
+    apvsh = new Apvsh(this, dataWriter);
+    getServer().getPluginManager().registerEvents(apvsh, this);
+
+    // Блок сладких ягод.
+    sweetBerryBlock = new SweetBerryBlock(this, dataWriter);
+    getServer().getPluginManager().registerEvents(sweetBerryBlock, this);
+
+    // Сигарета: слушает клики сама, поэтому registerEvents внутри конструктора.
+    cigarette = new Cigarette(this);
+
+    // Шейкер — инструмент для смешивания напитков и коктейлей.
+    shaker = new Shaker(this);
+    getServer().getPluginManager().registerEvents(shaker, this);
+    shaker.registerRecipe();
+
+    // Бамбуковая бочка для брожения пиратского рома.
+    bambooBarrel = new BambooBarrel(this);
+    getServer().getPluginManager().registerEvents(bambooBarrel, this);
+    // Миниигра особого предмета биома: вылавливается вместо обычной рыбы.
+    specialCatch = new SpecialCatch(this, ancientJug, winterFishing);
+    getServer().getPluginManager().registerEvents(specialCatch, this);
 
     profileManager = new ProfileManager(this, dataWriter);
     getServer().getPluginManager().registerEvents(profileManager, this);
@@ -160,7 +205,9 @@ public void onEnable() {
                     copperBlockListener,
                     caviarListener,
                     winterFishing,
-                    ancientJug
+                    ancientJug,
+                    petManager,
+                    apvsh
             );
 
     getServer().getPluginManager().registerEvents(
@@ -173,6 +220,13 @@ public void onEnable() {
                 f8Command
         );
     }
+
+    new BukkitRunnable() {
+        @Override
+        public void run() {
+            petManager.tick();
+        }
+    }.runTaskTimer(this, 0L, 1L);
 
     // Регистрируем обработчик команды /d20.
     // Без этого команда из plugin.yml не будет работать.
@@ -216,15 +270,55 @@ public void onEnable() {
         if (winterFishing != null) {
             winterFishing.disable();
         }
+        if (specialCatch != null) {
+            specialCatch.disable();
+        }
         if (ancientJug != null) {
             ancientJug.disable();
         }
-        if (resourcePackPusher != null) {
-            resourcePackPusher.disable();
+        if (petManager != null) {
+            petManager.stopAll();
+        }
+        if (apvsh != null) {
+            apvsh.disable();
+        }
+        if (sweetBerryBlock != null) {
+            sweetBerryBlock.disable();
+        }
+        if (cigarette != null) {
+            cigarette.disable();
+        }
+        if (coralCare != null) {
+            coralCare.flush();
         }
         if (dataWriter != null) {
             dataWriter.close();
         }
+    }
+
+    /**
+     * Перечитать config.yml и настройки подсистем (/f8 reload).
+     * Настройки миниигры и кувшина читаются на ходу, поэтому им reload не нужен;
+     * созвездия и зацеп изморози держат копию настроек в памяти — их просим перечитаться.
+     * Префиксы и паки префиксов живут в своих файлах, поэтому их тоже перечитываем:
+     * без этого правки prefixes.yml и prefixpacks/ до перезапуска не доходили.
+     */
+    public String reloadPluginSettings() {
+        ConfigSync.sync(this);   // /f8 reload тоже доводит файлы до полного вида
+        reloadConfig();
+        if (constellationManager != null) {
+            constellationManager.reloadSettings();
+        }
+        if (winterFishing != null) {
+            winterFishing.reloadSettings();
+        }
+        if (bambooBarrel != null) {
+            bambooBarrel.reloadSettings();
+        }
+        String prefixes = profileManager == null ? "" : profileManager.reloadPrefixes();
+        if (prefixes.isBlank()) return specialCatch == null ? "" : specialCatch.describe();
+        if (specialCatch == null || specialCatch.describe().isBlank()) return prefixes;
+        return prefixes + "\n" + specialCatch.describe();
     }
 
     public void breakAdaptation(Player player) {
@@ -1373,5 +1467,17 @@ public void onEnable() {
         superDamageCounters.remove(uuid);
 
         damageHitLimiter.remove(uuid);
+    }
+
+    public Apvsh getApvsh() {
+        return apvsh;
+    }
+
+    public SweetBerryBlock getSweetBerryBlock() {
+        return sweetBerryBlock;
+    }
+
+    public Shaker getShaker() {
+        return shaker;
     }
 }
