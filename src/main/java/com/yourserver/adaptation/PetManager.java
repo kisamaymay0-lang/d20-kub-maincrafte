@@ -32,7 +32,7 @@ public class PetManager implements Listener {
     /** Поворот идёт с инерцией, а не мгновенно вслед за камерой. */
     private static final double ROTATION_STRENGTH = 0.08;
     /** Остановка включается только после непрерывного наведения на питомца. */
-    private static final int GAZE_DURATION_TICKS = 20;
+    private static final int GAZE_DURATION_TICKS = 10;
     /** Во время возвращения взгляд игрока полностью игнорируется. */
     private static final int RETURN_DURATION_TICKS = 30;
     /** На таком расстоянии питомец прекращает стоять и возвращается к игроку. */
