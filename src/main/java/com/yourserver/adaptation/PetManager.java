@@ -46,9 +46,9 @@ public class PetManager implements Listener {
     /** Только спереди и по бокам: смещения {вперёд, вправо}, без позиций за спиной. */
     private static final double[][] HOME_SLOTS = {
             {0.40, 0.45},
-            {0.10, 0.80},
-            {0.10, -0.80},
-            {0.40, -0.45}
+            {0.20, 0.80},
+            {0.20, -0.80},
+            {0.55, -0.45}
     };
     private static final float HITBOX_WIDTH = 0.4f;
     private static final float HITBOX_HEIGHT = 0.4f;
