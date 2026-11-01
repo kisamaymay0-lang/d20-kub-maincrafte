@@ -18,6 +18,9 @@ import java.util.*;
 
 public class PetManager implements Listener {
 
+    /** Клиент сглаживает позицию и поворот между серверными обновлениями. */
+    private static final int MOVEMENT_INTERPOLATION_TICKS = 2;
+
     private final AdaptationPlugin plugin;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
 
@@ -53,6 +56,8 @@ public class PetManager implements Listener {
         pet.setInvulnerable(true);
         pet.setSilent(true);
         pet.setPersistent(true);
+        pet.setTeleportDuration(MOVEMENT_INTERPOLATION_TICKS);
+        pet.setInterpolationDelay(0);
 
         pets.put(player.getUniqueId(), pet);
     }
@@ -87,8 +92,9 @@ public class PetManager implements Listener {
                     (target.getZ() - current.getZ()) * 0.12
             );
 
+            next.setYaw(eye.getYaw());
+            next.setPitch(eye.getPitch());
             pet.teleport(next);
-            pet.setRotation(player.getLocation().getYaw(), player.getLocation().getPitch());
         }
     }
 
