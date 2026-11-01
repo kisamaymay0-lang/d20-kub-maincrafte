@@ -32,6 +32,8 @@ public class PetManager implements Listener {
     private static final double ROTATION_STRENGTH = 0.08;
     /** Во время возвращения взгляд игрока полностью игнорируется. */
     private static final int RETURN_DURATION_TICKS = 30;
+    /** На таком расстоянии питомец прекращает стоять и возвращается к игроку. */
+    private static final double RETURN_DISTANCE_SQUARED = 4.0 * 4.0;
 
     private final AdaptationPlugin plugin;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
@@ -113,13 +115,16 @@ public class PetManager implements Listener {
 
             boolean facingPlayer = petsFacingPlayer.contains(uuid);
             if (facingPlayer) {
-                if (isPetInView(eye, current, true)) {
+                boolean playerWalkedAway = eye.getWorld().equals(current.getWorld())
+                        && eye.distanceSquared(current) >= RETURN_DISTANCE_SQUARED;
+                if (!playerWalkedAway && isPetInView(eye, current, true)) {
                     facePlayer(pet, eye, current);
                     continue;
                 }
 
-                // Позиция и поворот запоминаются один раз: до конца возвращения
-                // камера не двигает цель и не может снова включить режим взгляда.
+                // Отвод взгляда или отход на 4 блока запускает одно и то же
+                // возвращение. До его конца камера не двигает цель и не может
+                // снова включить режим взгляда.
                 petsFacingPlayer.remove(uuid);
                 petsReturning.put(uuid, new ReturnMovement(current, followPose(eye)));
                 continue;
