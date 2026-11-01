@@ -3,6 +3,7 @@ package com.yourserver.adaptation;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
@@ -41,7 +42,7 @@ public class PetManager implements Listener {
         ItemStack item = new ItemStack(Material.PAPER, 1);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.setCustomModelData(1);
+            meta.setItemModel(new NamespacedKey("f8resurs", "test-pets"));
             item.setItemMeta(meta);
         }
 
