@@ -45,6 +45,8 @@ public class PetManager implements Listener {
     private static final double[] ROTATION_STRENGTHS = {0.065, 0.095};
     /** Остановка включается после 0,2 секунды непрерывного наведения. */
     private static final int GAZE_DURATION_TICKS = 4;
+    /** После удара питомец следит за владельцем 2 секунды, пока тот не посмотрит в ответ. */
+    private static final int HIT_ATTENTION_TICKS = 40;
     private static final int HELP_GAZE_DELAY_TICKS = 60;
     private static final int HELP_VISIBLE_TICKS = 80;
     private static final int HELP_FADE_TICKS = 20;
@@ -88,6 +90,7 @@ public class PetManager implements Listener {
     private final Set<UUID> petsFacingPlayer = new HashSet<>();
     private final Map<UUID, ReturnMovement> petsReturning = new HashMap<>();
     private final Map<UUID, Integer> gazeTicks = new HashMap<>();
+    private final Map<UUID, Integer> hitAttentionTicks = new HashMap<>();
     private final Map<UUID, Integer> homeSlots = new HashMap<>();
     private final Map<UUID, Double> rotationStrengths = new HashMap<>();
     private final Map<UUID, Long> lastHitTimestamps = new HashMap<>();
@@ -191,6 +194,23 @@ public class PetManager implements Listener {
             Location current = pet.getLocation();
             double rotationStrength = rotationStrengths.getOrDefault(uuid, 0.08);
 
+            Integer attentionTicks = hitAttentionTicks.get(uuid);
+            if (attentionTicks != null) {
+                if (!eye.getWorld().equals(current.getWorld())) {
+                    hitAttentionTicks.remove(uuid);
+                } else if (isPetInView(eye, current, false)) {
+                    // Взаимный взгляд возвращает обычные правила: 0,2 секунды
+                    // на включение, затем удержание и стандартное возвращение.
+                    hitAttentionTicks.remove(uuid);
+                } else if (attentionTicks < HIT_ATTENTION_TICKS) {
+                    facePlayer(pet, eye, current, rotationStrength);
+                    hitAttentionTicks.put(uuid, attentionTicks + 1);
+                    return;
+                } else {
+                    hitAttentionTicks.remove(uuid);
+                }
+            }
+
             ReturnMovement returning = petsReturning.get(uuid);
             if (returning != null) {
                 updateReturning(pet, current, returning, rotationStrength);
@@ -252,6 +272,14 @@ public class PetManager implements Listener {
             return;
         }
         lastHitTimestamps.put(uuid, timestamp);
+
+        if (attack.getPlayer().getUniqueId().equals(uuid) && !petsFacingPlayer.contains(uuid)) {
+            // Каждый новый удар обновляет двухсекундное внимание. Если питомец
+            // уже смотрит на владельца по обычным правилам, этот режим не нужен.
+            resetGaze(uuid);
+            hitAttentionTicks.put(uuid, 0);
+            rotationStrengths.put(uuid, randomRotationStrength());
+        }
 
         Location at = pet.getLocation().clone().add(0.0, hoverOffset, 0.0);
         World world = pet.getWorld();
@@ -627,6 +655,7 @@ public class PetManager implements Listener {
         petsFacingPlayer.remove(uuid);
         petsReturning.remove(uuid);
         gazeTicks.remove(uuid);
+        hitAttentionTicks.remove(uuid);
         homeSlots.remove(uuid);
         rotationStrengths.remove(uuid);
         lastHitTimestamps.remove(uuid);
@@ -640,6 +669,7 @@ public class PetManager implements Listener {
         petsFacingPlayer.clear();
         petsReturning.clear();
         gazeTicks.clear();
+        hitAttentionTicks.clear();
         homeSlots.clear();
         rotationStrengths.clear();
         lastHitTimestamps.clear();
