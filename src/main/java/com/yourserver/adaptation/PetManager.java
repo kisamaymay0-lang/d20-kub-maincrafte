@@ -44,6 +44,8 @@ public class PetManager implements Listener {
     private static final int GAZE_DURATION_TICKS = 4;
     private static final int HELP_GAZE_DELAY_TICKS = 60;
     private static final int HELP_VISIBLE_TICKS = 80;
+    private static final int HELP_FADE_TICKS = 20;
+    private static final float HELP_SCALE = 0.5f;
     private static final double HELP_HEIGHT = 0.7;
     private static final Component HELP_TEXT = Component.text("Могу ли я чем нибудь тебе помочь?");
     /** Во время возвращения взгляд игрока полностью игнорируется. */
@@ -278,6 +280,7 @@ public class PetManager implements Listener {
             return;
         }
         helpTextAges.put(uuid, age);
+        text.setTextOpacity(helpOpacity(age));
         syncHelpText(text, pet.getLocation(), hoverOffset);
     }
 
@@ -293,13 +296,31 @@ public class PetManager implements Listener {
             display.setSeeThrough(false);
             display.setShadowed(true);
             display.setDefaultBackground(false);
-            display.setTextOpacity((byte) 255);
+            display.setTextOpacity(helpOpacity(0));
+            Transformation transformation = display.getTransformation();
+            transformation.getScale().set(HELP_SCALE, HELP_SCALE, HELP_SCALE);
+            display.setTransformation(transformation);
             display.setLineWidth(300);
             display.setAlignment(TextDisplay.TextAlignment.CENTER);
             display.setTeleportDuration(MOVEMENT_INTERPOLATION_TICKS);
             display.setInterpolationDuration(0);
             display.getPersistentDataContainer().set(helpMarkerKey, PersistentDataType.BYTE, (byte) 1);
         });
+    }
+
+    private static byte helpOpacity(int age) {
+        double progress;
+        if (age < HELP_FADE_TICKS) {
+            progress = age / (double) HELP_FADE_TICKS;
+        } else if (age > HELP_VISIBLE_TICKS - HELP_FADE_TICKS) {
+            progress = (HELP_VISIBLE_TICKS - age) / (double) HELP_FADE_TICKS;
+        } else {
+            progress = 1.0;
+        }
+
+        progress = Math.max(0.0, Math.min(1.0, progress));
+        // Значения 0..3 клиент трактует как непрозрачные, поэтому минимум — 4.
+        return (byte) Math.round(4.0 + 251.0 * progress);
     }
 
     private static void syncHelpText(TextDisplay text, Location petLocation, float hoverOffset) {
