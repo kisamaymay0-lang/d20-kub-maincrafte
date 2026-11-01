@@ -16,6 +16,7 @@ import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
 
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class PetManager implements Listener {
 
@@ -30,15 +31,29 @@ public class PetManager implements Listener {
     private static final double FOLLOW_STRENGTH = 0.12;
     /** Поворот идёт с инерцией, а не мгновенно вслед за камерой. */
     private static final double ROTATION_STRENGTH = 0.08;
+    /** Остановка включается только после непрерывного наведения на питомца. */
+    private static final int GAZE_DURATION_TICKS = 20;
     /** Во время возвращения взгляд игрока полностью игнорируется. */
     private static final int RETURN_DURATION_TICKS = 30;
     /** На таком расстоянии питомец прекращает стоять и возвращается к игроку. */
-    private static final double RETURN_DISTANCE_SQUARED = 4.0 * 4.0;
+    private static final double RETURN_DISTANCE_SQUARED = 3.0 * 3.0;
+    /** Смещения {вперёд, вправо}; первый слот — исходная позиция у взгляда. */
+    private static final double[][] HOME_SLOTS = {
+            {0.45, 0.55},
+            {0.0, 0.85},
+            {-0.55, 0.65},
+            {-0.85, 0.0},
+            {-0.55, -0.65},
+            {0.0, -0.85},
+            {0.45, -0.55}
+    };
 
     private final AdaptationPlugin plugin;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
     private final Set<UUID> petsFacingPlayer = new HashSet<>();
     private final Map<UUID, ReturnMovement> petsReturning = new HashMap<>();
+    private final Map<UUID, Integer> gazeTicks = new HashMap<>();
+    private final Map<UUID, Integer> homeSlots = new HashMap<>();
     private long hoverTicks;
 
     public PetManager(AdaptationPlugin plugin) {
@@ -122,25 +137,40 @@ public class PetManager implements Listener {
                     continue;
                 }
 
-                // Отвод взгляда или отход на 4 блока запускает одно и то же
+                // Отвод взгляда или отход на 3 блока запускает одно и то же
                 // возвращение. До его конца камера не двигает цель и не может
                 // снова включить режим взгляда.
                 petsFacingPlayer.remove(uuid);
-                petsReturning.put(uuid, new ReturnMovement(current, followPose(eye)));
+                beginReturn(uuid, current, eye);
                 continue;
             }
 
             if (isPetInView(eye, current, false)) {
-                petsFacingPlayer.add(uuid);
-                facePlayer(pet, eye, current);
-                continue;
+                int ticks = gazeTicks.getOrDefault(uuid, 0) + 1;
+                if (ticks >= GAZE_DURATION_TICKS) {
+                    gazeTicks.remove(uuid);
+                    petsFacingPlayer.add(uuid);
+                    facePlayer(pet, eye, current);
+                    continue;
+                }
+                gazeTicks.put(uuid, ticks);
+            } else {
+                // Секунда должна быть непрерывной: мимолётный взгляд ничего не включает.
+                gazeTicks.remove(uuid);
             }
 
-            follow(pet, current, followPose(eye));
+            follow(pet, current, followPose(eye, homeSlots.getOrDefault(uuid, 0)));
         }
     }
 
-    private static Location followPose(Location eye) {
+    private void beginReturn(UUID uuid, Location current, Location eye) {
+        gazeTicks.remove(uuid);
+        int slot = ThreadLocalRandom.current().nextInt(HOME_SLOTS.length);
+        homeSlots.put(uuid, slot);
+        petsReturning.put(uuid, new ReturnMovement(current, followPose(eye, slot)));
+    }
+
+    private static Location followPose(Location eye, int slot) {
         Vector forward = eye.getDirection().clone().setY(0);
         if (forward.lengthSquared() < 1.0E-6) {
             double yaw = Math.toRadians(eye.getYaw());
@@ -150,9 +180,10 @@ public class PetManager implements Listener {
         }
         Vector right = forward.clone().crossProduct(new Vector(0, 1, 0)).normalize();
 
+        double[] offset = HOME_SLOTS[slot];
         Location target = eye.clone()
-                .add(forward.clone().multiply(0.45))
-                .add(right.clone().multiply(0.55))
+                .add(forward.clone().multiply(offset[0]))
+                .add(right.clone().multiply(offset[1]))
                 .add(0, -0.1, 0);
         target.setYaw(eye.getYaw());
         target.setPitch(eye.getPitch());
@@ -231,6 +262,8 @@ public class PetManager implements Listener {
     private void clearState(UUID uuid) {
         petsFacingPlayer.remove(uuid);
         petsReturning.remove(uuid);
+        gazeTicks.remove(uuid);
+        homeSlots.remove(uuid);
     }
 
     public void stopAll() {
@@ -240,6 +273,8 @@ public class PetManager implements Listener {
         pets.clear();
         petsFacingPlayer.clear();
         petsReturning.clear();
+        gazeTicks.clear();
+        homeSlots.clear();
     }
 
     @EventHandler
