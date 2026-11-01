@@ -34,13 +34,13 @@ public class PetManager implements Listener {
     /** ±4 см, полный цикл вверх–вниз занимает 120 тиков (6 секунд). */
     private static final double HOVER_AMPLITUDE_BLOCKS = 0.04;
     private static final double HOVER_RADIANS_PER_TICK = Math.PI * 2.0 / 120.0;
-    private static final double FOLLOW_STRENGTH = 0.12;
+    private static final double FOLLOW_STRENGTH = 0.18;
     /** Два темпа поворота: немного медленнее и немного быстрее прежнего. */
     private static final double[] ROTATION_STRENGTHS = {0.065, 0.095};
     /** Остановка включается после 0,2 секунды непрерывного наведения. */
     private static final int GAZE_DURATION_TICKS = 4;
     /** Во время возвращения взгляд игрока полностью игнорируется. */
-    private static final int RETURN_DURATION_TICKS = 30;
+    private static final int RETURN_DURATION_TICKS = 20;
     /** На таком расстоянии питомец прекращает стоять и возвращается к игроку. */
     private static final double RETURN_DISTANCE_SQUARED = 3.0 * 3.0;
     /** Только спереди и по бокам: смещения {вперёд, вправо}, без позиций за спиной. */
@@ -50,8 +50,8 @@ public class PetManager implements Listener {
             {0.20, -0.80},
             {0.55, -0.45}
     };
-    private static final float HITBOX_WIDTH = 0.8f;
-    private static final float HITBOX_HEIGHT = 0.8f;
+    private static final float HITBOX_WIDTH = 0.4f;
+    private static final float HITBOX_HEIGHT = 0.4f;
 
     private final AdaptationPlugin plugin;
     private final NamespacedKey petMarkerKey;
