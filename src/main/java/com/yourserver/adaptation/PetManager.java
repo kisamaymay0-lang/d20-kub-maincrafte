@@ -71,6 +71,8 @@ public class PetManager implements Listener {
     private final Map<UUID, TextDisplay> helpTexts = new HashMap<>();
     private final Map<UUID, Integer> helpTextAges = new HashMap<>();
     private final Set<UUID> helpShownThisGaze = new HashSet<>();
+    private final Set<UUID> helpFadingOut = new HashSet<>();
+    private final Map<UUID, Integer> helpFadeStartOpacities = new HashMap<>();
     private final Set<UUID> petsFacingPlayer = new HashSet<>();
     private final Map<UUID, ReturnMovement> petsReturning = new HashMap<>();
     private final Map<UUID, Integer> gazeTicks = new HashMap<>();
@@ -170,6 +172,7 @@ public class PetManager implements Listener {
     private void tickPet(UUID uuid, Player player, ItemDisplay pet, Interaction hitbox, float hoverOffset) {
         applyHover(pet, hoverOffset);
         processHits(uuid, pet, hitbox, hoverOffset);
+        tickHelpText(uuid, pet, hoverOffset);
 
         try {
             Location eye = player.getEyeLocation();
@@ -193,7 +196,7 @@ public class PetManager implements Listener {
                     int continuousTicks = gazeTicks.getOrDefault(uuid, 0) + 1;
                     gazeTicks.put(uuid, continuousTicks);
                     facePlayer(pet, eye, current, rotationStrength);
-                    updateHelpText(uuid, pet, continuousTicks, hoverOffset);
+                    showHelpTextIfNeeded(uuid, pet, continuousTicks, hoverOffset);
                     return;
                 }
 
@@ -254,33 +257,48 @@ public class PetManager implements Listener {
         }
     }
 
-    private void updateHelpText(UUID uuid, ItemDisplay pet, int continuousTicks, float hoverOffset) {
-        TextDisplay text = helpTexts.get(uuid);
-        if (text != null && !text.isValid()) {
-            helpTexts.remove(uuid);
-            helpTextAges.remove(uuid);
-            text = null;
-        }
-
-        if (text == null && !helpShownThisGaze.contains(uuid) && continuousTicks >= HELP_GAZE_DELAY_TICKS) {
-            text = spawnHelpText(pet.getLocation(), hoverOffset);
-            helpTexts.put(uuid, text);
-            helpTextAges.put(uuid, 0);
-            helpShownThisGaze.add(uuid);
+    private void showHelpTextIfNeeded(UUID uuid, ItemDisplay pet, int continuousTicks, float hoverOffset) {
+        if (helpTexts.containsKey(uuid) || helpShownThisGaze.contains(uuid)
+                || continuousTicks < HELP_GAZE_DELAY_TICKS) {
             return;
         }
+
+        TextDisplay text = spawnHelpText(pet.getLocation(), hoverOffset);
+        helpTexts.put(uuid, text);
+        helpTextAges.put(uuid, 0);
+        helpShownThisGaze.add(uuid);
+    }
+
+    private void tickHelpText(UUID uuid, ItemDisplay pet, float hoverOffset) {
+        TextDisplay text = helpTexts.get(uuid);
         if (text == null) {
+            return;
+        }
+        if (!text.isValid()) {
+            removeHelpText(uuid);
             return;
         }
 
         int age = helpTextAges.getOrDefault(uuid, 0) + 1;
-        if (age >= HELP_VISIBLE_TICKS) {
-            // Пока взгляд не прерван, после исчезновения надпись не появляется заново.
-            removeHelpText(uuid);
-            return;
-        }
         helpTextAges.put(uuid, age);
-        text.setTextOpacity(helpOpacity(age));
+
+        if (helpFadingOut.contains(uuid)) {
+            if (age >= HELP_FADE_TICKS) {
+                removeHelpText(uuid);
+                return;
+            }
+            int startOpacity = helpFadeStartOpacities.getOrDefault(uuid, 255);
+            double remaining = 1.0 - age / (double) HELP_FADE_TICKS;
+            int opacity = (int) Math.round(4.0 + (startOpacity - 4.0) * remaining);
+            text.setTextOpacity((byte) Math.max(4, opacity));
+        } else {
+            if (age >= HELP_VISIBLE_TICKS) {
+                // Пока взгляд не прерван, после исчезновения надпись не появляется заново.
+                removeHelpText(uuid);
+                return;
+            }
+            text.setTextOpacity(helpOpacity(age));
+        }
         syncHelpText(text, pet.getLocation(), hoverOffset);
     }
 
@@ -344,12 +362,25 @@ public class PetManager implements Listener {
             text.remove();
         }
         helpTextAges.remove(uuid);
+        helpFadingOut.remove(uuid);
+        helpFadeStartOpacities.remove(uuid);
+    }
+
+    private void fadeHelpText(UUID uuid) {
+        TextDisplay text = helpTexts.get(uuid);
+        if (text == null || helpFadingOut.contains(uuid)) {
+            return;
+        }
+
+        helpFadingOut.add(uuid);
+        helpFadeStartOpacities.put(uuid, Byte.toUnsignedInt(text.getTextOpacity()));
+        helpTextAges.put(uuid, 0);
     }
 
     private void resetGaze(UUID uuid) {
         gazeTicks.remove(uuid);
         helpShownThisGaze.remove(uuid);
-        removeHelpText(uuid);
+        fadeHelpText(uuid);
     }
 
     private void beginReturn(UUID uuid, Location current, Location eye) {
@@ -551,6 +582,8 @@ public class PetManager implements Listener {
         lastHitTimestamps.remove(uuid);
         helpTextAges.remove(uuid);
         helpShownThisGaze.remove(uuid);
+        helpFadingOut.remove(uuid);
+        helpFadeStartOpacities.remove(uuid);
     }
 
     private void clearAllStates() {
@@ -562,6 +595,8 @@ public class PetManager implements Listener {
         lastHitTimestamps.clear();
         helpTextAges.clear();
         helpShownThisGaze.clear();
+        helpFadingOut.clear();
+        helpFadeStartOpacities.clear();
     }
 
     public void stopAll() {
