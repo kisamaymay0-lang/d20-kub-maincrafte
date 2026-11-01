@@ -4,7 +4,11 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Interaction;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -12,6 +16,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
 
@@ -20,6 +25,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public class PetManager implements Listener {
 
+    private static final NamespacedKey PET_MODEL = new NamespacedKey("f8resurs", "test-pets");
     /** Клиент сглаживает позицию и поворот между серверными обновлениями. */
     private static final int MOVEMENT_INTERPOLATION_TICKS = 2;
     /** Разные углы входа и выхода не дают режиму дёргаться на границе взгляда. */
@@ -29,69 +35,95 @@ public class PetManager implements Listener {
     private static final double HOVER_AMPLITUDE_BLOCKS = 0.04;
     private static final double HOVER_RADIANS_PER_TICK = Math.PI * 2.0 / 120.0;
     private static final double FOLLOW_STRENGTH = 0.12;
-    /** Поворот идёт с инерцией, а не мгновенно вслед за камерой. */
-    private static final double ROTATION_STRENGTH = 0.08;
-    /** Остановка включается только после непрерывного наведения на питомца. */
-    private static final int GAZE_DURATION_TICKS = 10;
+    /** Два темпа поворота: немного медленнее и немного быстрее прежнего. */
+    private static final double[] ROTATION_STRENGTHS = {0.065, 0.095};
+    /** Остановка включается после 0,2 секунды непрерывного наведения. */
+    private static final int GAZE_DURATION_TICKS = 4;
     /** Во время возвращения взгляд игрока полностью игнорируется. */
     private static final int RETURN_DURATION_TICKS = 30;
     /** На таком расстоянии питомец прекращает стоять и возвращается к игроку. */
     private static final double RETURN_DISTANCE_SQUARED = 3.0 * 3.0;
     /** Только спереди и по бокам: смещения {вперёд, вправо}, без позиций за спиной. */
     private static final double[][] HOME_SLOTS = {
-            {0.45, 0.55},
-            {0.0, 0.85},
-            {0.0, -0.85},
-            {0.45, -0.55}
+            {0.55, 0.45},
+            {0.20, 0.80},
+            {0.20, -0.80},
+            {0.55, -0.45}
     };
+    private static final float HITBOX_WIDTH = 0.8f;
+    private static final float HITBOX_HEIGHT = 0.8f;
 
     private final AdaptationPlugin plugin;
+    private final NamespacedKey petMarkerKey;
+    private final NamespacedKey hitboxMarkerKey;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
+    private final Map<UUID, Interaction> hitboxes = new HashMap<>();
     private final Set<UUID> petsFacingPlayer = new HashSet<>();
     private final Map<UUID, ReturnMovement> petsReturning = new HashMap<>();
     private final Map<UUID, Integer> gazeTicks = new HashMap<>();
     private final Map<UUID, Integer> homeSlots = new HashMap<>();
+    private final Map<UUID, Double> rotationStrengths = new HashMap<>();
+    private final Map<UUID, Long> lastHitTimestamps = new HashMap<>();
     private long hoverTicks;
 
     public PetManager(AdaptationPlugin plugin) {
         this.plugin = plugin;
+        this.petMarkerKey = new NamespacedKey(plugin, "test_pet_display");
+        this.hitboxMarkerKey = new NamespacedKey(plugin, "test_pet_hitbox");
     }
 
     public void toggle(Player player) {
         UUID uuid = player.getUniqueId();
         ItemDisplay current = pets.get(uuid);
         if (current != null) {
-            current.remove();
-            pets.remove(uuid);
-            clearState(uuid);
+            removeTracked(uuid);
             return;
         }
-        clearState(uuid);
+        removeTracked(uuid);
         spawn(player);
     }
 
     private void spawn(Player player) {
+        UUID uuid = player.getUniqueId();
         Location eye = player.getEyeLocation().clone();
 
-        ItemStack item = new ItemStack(Material.PAPER, 1);
+        // Служебный носитель не пересекается с ванильной бумагой и её ресурсами.
+        ItemStack item = new ItemStack(Material.BARRIER, 1);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.setItemModel(new NamespacedKey("f8resurs", "test-pets"));
+            meta.setItemModel(PET_MODEL);
             item.setItemMeta(meta);
         }
 
         World world = player.getWorld();
-        ItemDisplay pet = world.spawn(eye, ItemDisplay.class);
-        pet.setItemStack(item);
-        pet.setGravity(false);
-        pet.setInvulnerable(true);
-        pet.setSilent(true);
-        pet.setPersistent(true);
-        pet.setTeleportDuration(MOVEMENT_INTERPOLATION_TICKS);
-        pet.setInterpolationDuration(MOVEMENT_INTERPOLATION_TICKS);
-        pet.setInterpolationDelay(0);
+        ItemDisplay pet = world.spawn(eye, ItemDisplay.class, display -> {
+            display.setItemStack(item);
+            display.setGravity(false);
+            display.setInvulnerable(true);
+            display.setSilent(true);
+            display.setPersistent(false);
+            display.setTeleportDuration(MOVEMENT_INTERPOLATION_TICKS);
+            display.setInterpolationDuration(MOVEMENT_INTERPOLATION_TICKS);
+            display.setInterpolationDelay(0);
+            display.getPersistentDataContainer().set(petMarkerKey, PersistentDataType.BYTE, (byte) 1);
+        });
 
-        pets.put(player.getUniqueId(), pet);
+        pets.put(uuid, pet);
+        hitboxes.put(uuid, spawnHitbox(eye));
+        rotationStrengths.put(uuid, randomRotationStrength());
+        lastHitTimestamps.put(uuid, 0L);
+    }
+
+    private Interaction spawnHitbox(Location location) {
+        return location.getWorld().spawn(location, Interaction.class, hitbox -> {
+            hitbox.setInteractionWidth(HITBOX_WIDTH);
+            hitbox.setInteractionHeight(HITBOX_HEIGHT);
+            hitbox.setResponsive(true);
+            hitbox.setPersistent(false);
+            hitbox.setGravity(false);
+            hitbox.setSilent(true);
+            hitbox.getPersistentDataContainer().set(hitboxMarkerKey, PersistentDataType.BYTE, (byte) 1);
+        });
     }
 
     public void tick() {
@@ -102,27 +134,41 @@ public class PetManager implements Listener {
             ItemDisplay pet = pets.get(uuid);
             Player player = Bukkit.getPlayer(uuid);
 
-            if (player == null || !player.isOnline() || pet.isDead()) {
-                if (pet != null) {
-                    pet.remove();
-                }
-                pets.remove(uuid);
-                clearState(uuid);
+            if (player == null || !player.isOnline() || pet == null || pet.isDead()) {
+                removeTracked(uuid);
                 continue;
             }
 
-            applyHover(pet, hoverOffset);
+            Interaction hitbox = hitboxes.get(uuid);
+            if (hitbox == null || hitbox.isDead()) {
+                if (hitbox != null) {
+                    hitbox.remove();
+                }
+                hitbox = spawnHitbox(pet.getLocation());
+                hitboxes.put(uuid, hitbox);
+                lastHitTimestamps.put(uuid, 0L);
+            }
 
+            tickPet(uuid, player, pet, hitbox, hoverOffset);
+        }
+    }
+
+    private void tickPet(UUID uuid, Player player, ItemDisplay pet, Interaction hitbox, float hoverOffset) {
+        applyHover(pet, hoverOffset);
+        processHits(uuid, pet, hitbox, hoverOffset);
+
+        try {
             Location eye = player.getEyeLocation();
             Location current = pet.getLocation();
+            double rotationStrength = rotationStrengths.getOrDefault(uuid, 0.08);
 
             ReturnMovement returning = petsReturning.get(uuid);
             if (returning != null) {
-                updateReturning(pet, current, returning);
+                updateReturning(pet, current, returning, rotationStrength);
                 if (returning.isFinished()) {
                     petsReturning.remove(uuid);
                 }
-                continue;
+                return;
             }
 
             boolean facingPlayer = petsFacingPlayer.contains(uuid);
@@ -130,8 +176,8 @@ public class PetManager implements Listener {
                 boolean playerWalkedAway = eye.getWorld().equals(current.getWorld())
                         && eye.distanceSquared(current) >= RETURN_DISTANCE_SQUARED;
                 if (!playerWalkedAway && isPetInView(eye, current, true)) {
-                    facePlayer(pet, eye, current);
-                    continue;
+                    facePlayer(pet, eye, current, rotationStrength);
+                    return;
                 }
 
                 // Отвод взгляда или отход на 3 блока запускает одно и то же
@@ -139,7 +185,7 @@ public class PetManager implements Listener {
                 // снова включить режим взгляда.
                 petsFacingPlayer.remove(uuid);
                 beginReturn(uuid, current, eye);
-                continue;
+                return;
             }
 
             if (isPetInView(eye, current, false)) {
@@ -147,16 +193,48 @@ public class PetManager implements Listener {
                 if (ticks >= GAZE_DURATION_TICKS) {
                     gazeTicks.remove(uuid);
                     petsFacingPlayer.add(uuid);
-                    facePlayer(pet, eye, current);
-                    continue;
+                    rotationStrength = randomRotationStrength();
+                    rotationStrengths.put(uuid, rotationStrength);
+                    facePlayer(pet, eye, current, rotationStrength);
+                    return;
                 }
                 gazeTicks.put(uuid, ticks);
             } else {
-                // Секунда должна быть непрерывной: мимолётный взгляд ничего не включает.
+                // Время должно быть непрерывным: мимолётный взгляд ничего не включает.
                 gazeTicks.remove(uuid);
             }
 
-            follow(pet, current, followPose(eye, homeSlots.getOrDefault(uuid, 0)));
+            follow(pet, current, followPose(eye, homeSlots.getOrDefault(uuid, 0)), rotationStrength);
+        } finally {
+            syncHitbox(hitbox, pet.getLocation(), hoverOffset);
+        }
+    }
+
+    private void processHits(UUID uuid, ItemDisplay pet, Interaction hitbox, float hoverOffset) {
+        Interaction.PreviousInteraction attack = hitbox.getLastAttack();
+        if (attack == null) {
+            return;
+        }
+
+        long timestamp = attack.getTimestamp();
+        if (timestamp <= lastHitTimestamps.getOrDefault(uuid, 0L)) {
+            return;
+        }
+        lastHitTimestamps.put(uuid, timestamp);
+
+        Location at = pet.getLocation().clone().add(0.0, hoverOffset, 0.0);
+        World world = pet.getWorld();
+        world.spawnParticle(Particle.CRIT, at, 5, 0.16, 0.16, 0.16, 0.02);
+        world.playSound(at, Sound.ENTITY_PLAYER_ATTACK_CRIT, 0.45f, 1.3f);
+    }
+
+    private static void syncHitbox(Interaction hitbox, Location petLocation, float hoverOffset) {
+        Location target = petLocation.clone().add(0.0, hoverOffset - HITBOX_HEIGHT / 2.0, 0.0);
+        target.setYaw(0.0f);
+        target.setPitch(0.0f);
+        if (!hitbox.getWorld().equals(target.getWorld())
+                || hitbox.getLocation().distanceSquared(target) > 1.0E-6) {
+            hitbox.teleport(target);
         }
     }
 
@@ -164,6 +242,7 @@ public class PetManager implements Listener {
         gazeTicks.remove(uuid);
         int slot = ThreadLocalRandom.current().nextInt(HOME_SLOTS.length);
         homeSlots.put(uuid, slot);
+        rotationStrengths.put(uuid, randomRotationStrength());
         petsReturning.put(uuid, new ReturnMovement(current, followPose(eye, slot)));
     }
 
@@ -187,43 +266,65 @@ public class PetManager implements Listener {
         return target;
     }
 
-    private static void follow(ItemDisplay pet, Location current, Location target) {
+    private static void follow(ItemDisplay pet, Location current, Location target, double rotationStrength) {
+        if (!current.getWorld().equals(target.getWorld())) {
+            pet.teleport(target);
+            return;
+        }
+
         Location next = current.clone();
         next.setX(current.getX() + (target.getX() - current.getX()) * FOLLOW_STRENGTH);
         next.setY(current.getY() + (target.getY() - current.getY()) * FOLLOW_STRENGTH);
         next.setZ(current.getZ() + (target.getZ() - current.getZ()) * FOLLOW_STRENGTH);
-        rotateTowards(current, next, target.getYaw(), target.getPitch());
+        rotateTowards(current, next, target.getYaw(), target.getPitch(), rotationStrength);
         pet.teleport(next);
     }
 
-    private static void updateReturning(ItemDisplay pet, Location current, ReturnMovement movement) {
+    private static void updateReturning(
+            ItemDisplay pet,
+            Location current,
+            ReturnMovement movement,
+            double rotationStrength
+    ) {
         movement.ticks++;
+        Location start = movement.start;
+        Location target = movement.target;
+        if (!start.getWorld().equals(target.getWorld())) {
+            pet.teleport(target);
+            movement.ticks = RETURN_DURATION_TICKS;
+            return;
+        }
+
         double progress = Math.min(1.0, movement.ticks / (double) RETURN_DURATION_TICKS);
         // Smoothstep: спокойный старт, небольшой разгон и мягкое завершение.
         double eased = progress * progress * (3.0 - 2.0 * progress);
 
-        Location start = movement.start;
-        Location target = movement.target;
         Location next = start.clone();
         next.setX(start.getX() + (target.getX() - start.getX()) * eased);
         next.setY(start.getY() + (target.getY() - start.getY()) * eased);
         next.setZ(start.getZ() + (target.getZ() - start.getZ()) * eased);
-        rotateTowards(current, next, target.getYaw(), target.getPitch());
+        rotateTowards(current, next, target.getYaw(), target.getPitch(), rotationStrength);
         pet.teleport(next);
     }
 
-    private static void facePlayer(ItemDisplay pet, Location eye, Location current) {
+    private static void facePlayer(ItemDisplay pet, Location eye, Location current, double rotationStrength) {
         Location facing = current.clone();
         Vector toPlayer = eye.toVector().subtract(current.toVector());
         if (toPlayer.lengthSquared() >= 1.0E-6) {
             Location desired = current.clone();
             desired.setDirection(toPlayer);
-            rotateTowards(current, facing, desired.getYaw(), desired.getPitch());
+            rotateTowards(current, facing, desired.getYaw(), desired.getPitch(), rotationStrength);
         }
         pet.teleport(facing);
     }
 
-    private static void rotateTowards(Location current, Location next, float targetYaw, float targetPitch) {
+    private static void rotateTowards(
+            Location current,
+            Location next,
+            float targetYaw,
+            float targetPitch,
+            double rotationStrength
+    ) {
         float yawDelta = (targetYaw - current.getYaw()) % 360.0f;
         if (yawDelta > 180.0f) {
             yawDelta -= 360.0f;
@@ -231,8 +332,12 @@ public class PetManager implements Listener {
             yawDelta += 360.0f;
         }
 
-        next.setYaw(current.getYaw() + (float) (yawDelta * ROTATION_STRENGTH));
-        next.setPitch(current.getPitch() + (float) ((targetPitch - current.getPitch()) * ROTATION_STRENGTH));
+        next.setYaw(current.getYaw() + (float) (yawDelta * rotationStrength));
+        next.setPitch(current.getPitch() + (float) ((targetPitch - current.getPitch()) * rotationStrength));
+    }
+
+    private static double randomRotationStrength() {
+        return ROTATION_STRENGTHS[ThreadLocalRandom.current().nextInt(ROTATION_STRENGTHS.length)];
     }
 
     private static void applyHover(ItemDisplay pet, float hoverOffset) {
@@ -256,33 +361,88 @@ public class PetManager implements Listener {
         return alignment >= threshold;
     }
 
+    /** Удаляет активных и потерянных питомцев во всех загруженных мирах. */
+    public int killAll() {
+        Set<UUID> removed = new HashSet<>();
+        for (ItemDisplay pet : pets.values()) {
+            removeEntity(pet, removed);
+        }
+        for (Interaction hitbox : hitboxes.values()) {
+            removeEntity(hitbox, removed);
+        }
+
+        for (World world : Bukkit.getWorlds()) {
+            for (ItemDisplay display : world.getEntitiesByClass(ItemDisplay.class)) {
+                if (isPetDisplay(display)) {
+                    removeEntity(display, removed);
+                }
+            }
+            for (Interaction hitbox : world.getEntitiesByClass(Interaction.class)) {
+                if (hitbox.getPersistentDataContainer().has(hitboxMarkerKey, PersistentDataType.BYTE)) {
+                    removeEntity(hitbox, removed);
+                }
+            }
+        }
+
+        pets.clear();
+        hitboxes.clear();
+        clearAllStates();
+        return removed.size();
+    }
+
+    private boolean isPetDisplay(ItemDisplay display) {
+        if (display.getPersistentDataContainer().has(petMarkerKey, PersistentDataType.BYTE)) {
+            return true;
+        }
+
+        // Старые питомцы до появления маркера тоже находятся по их item model.
+        ItemStack item = display.getItemStack();
+        return item != null && item.hasItemMeta() && PET_MODEL.equals(item.getItemMeta().getItemModel());
+    }
+
+    private static void removeEntity(Entity entity, Set<UUID> removed) {
+        if (removed.add(entity.getUniqueId())) {
+            entity.remove();
+        }
+    }
+
+    private void removeTracked(UUID uuid) {
+        ItemDisplay pet = pets.remove(uuid);
+        if (pet != null) {
+            pet.remove();
+        }
+        Interaction hitbox = hitboxes.remove(uuid);
+        if (hitbox != null) {
+            hitbox.remove();
+        }
+        clearState(uuid);
+    }
+
     private void clearState(UUID uuid) {
         petsFacingPlayer.remove(uuid);
         petsReturning.remove(uuid);
         gazeTicks.remove(uuid);
         homeSlots.remove(uuid);
+        rotationStrengths.remove(uuid);
+        lastHitTimestamps.remove(uuid);
     }
 
-    public void stopAll() {
-        for (ItemDisplay pet : pets.values()) {
-            pet.remove();
-        }
-        pets.clear();
+    private void clearAllStates() {
         petsFacingPlayer.clear();
         petsReturning.clear();
         gazeTicks.clear();
         homeSlots.clear();
+        rotationStrengths.clear();
+        lastHitTimestamps.clear();
+    }
+
+    public void stopAll() {
+        killAll();
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        UUID uuid = event.getPlayer().getUniqueId();
-        ItemDisplay pet = pets.get(uuid);
-        if (pet != null) {
-            pet.remove();
-            pets.remove(uuid);
-        }
-        clearState(uuid);
+        removeTracked(event.getPlayer().getUniqueId());
     }
 
     private static final class ReturnMovement {

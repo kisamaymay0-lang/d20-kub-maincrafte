@@ -84,6 +84,17 @@ public class F8Command implements CommandExecutor, Listener {
             return true;
         }
 
+        // /f8 pets kill — убрать активных и застрявших питомцев (доступно и из консоли).
+        if (args.length >= 2 && args[0].equalsIgnoreCase("pets") && args[1].equalsIgnoreCase("kill")) {
+            if (!sender.hasPermission("f8.admin")) {
+                sender.sendMessage("§cНедостаточно прав.");
+                return true;
+            }
+            int removed = petManager.killAll();
+            sender.sendMessage("§aОчистка завершена: удалено сущностей питомцев — §f" + removed + "§a.");
+            return true;
+        }
+
         if (args.length > 0 && args[0].equalsIgnoreCase("apvsh")) {
             if (!sender.hasPermission("f8.admin")) {
                 sender.sendMessage("§cНедостаточно прав.");
