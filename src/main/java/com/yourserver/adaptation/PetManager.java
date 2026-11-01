@@ -52,6 +52,7 @@ public class PetManager implements Listener {
     private static final double HELP_HEIGHT = 0.45;
     private static final Component HELP_TEXT = Component.text("Могу ли я чем нибудь тебе помочь?");
     private static final String PET_TALK_SOUND = "f8resurs:pet-talking1";
+    private static final double PET_TALK_SOUND_RADIUS_SQUARED = 16.0 * 16.0;
     private static final Component[] PET_CHAT_PHRASES = {
             Component.text("Это ты мне?"),
             Component.text("Думаю да!"),
@@ -361,8 +362,18 @@ public class PetManager implements Listener {
             display.setInterpolationDuration(0);
             display.getPersistentDataContainer().set(helpMarkerKey, PersistentDataType.BYTE, (byte) 1);
         });
-        at.getWorld().playSound(at, PET_TALK_SOUND, SoundCategory.NEUTRAL, 0.8f, 1.0f);
+        playPetTalkSound(at);
         return text;
+    }
+
+    private static void playPetTalkSound(Location at) {
+        // Отправляем кастомный звук непосредственно каждому клиенту рядом.
+        // MASTER не зависит от отдельно выключенного ползунка friendly/neutral.
+        for (Player listener : at.getWorld().getPlayers()) {
+            if (listener.getLocation().distanceSquared(at) <= PET_TALK_SOUND_RADIUS_SQUARED) {
+                listener.playSound(at, PET_TALK_SOUND, SoundCategory.MASTER, 1.0f, 1.0f);
+            }
+        }
     }
 
     private static byte helpOpacity(int age) {
