@@ -12,6 +12,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
 
 import java.util.*;
@@ -23,10 +24,14 @@ public class PetManager implements Listener {
     /** Разные углы входа и выхода не дают режиму дёргаться на границе взгляда. */
     private static final double LOOK_ENTER_DOT = Math.cos(Math.toRadians(25.0));
     private static final double LOOK_EXIT_DOT = Math.cos(Math.toRadians(35.0));
+    /** ±4 см, полный цикл вверх–вниз занимает 120 тиков (6 секунд). */
+    private static final double HOVER_AMPLITUDE_BLOCKS = 0.04;
+    private static final double HOVER_RADIANS_PER_TICK = Math.PI * 2.0 / 120.0;
 
     private final AdaptationPlugin plugin;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
     private final Set<UUID> petsFacingPlayer = new HashSet<>();
+    private long hoverTicks;
 
     public PetManager(AdaptationPlugin plugin) {
         this.plugin = plugin;
@@ -63,12 +68,16 @@ public class PetManager implements Listener {
         pet.setSilent(true);
         pet.setPersistent(true);
         pet.setTeleportDuration(MOVEMENT_INTERPOLATION_TICKS);
+        pet.setInterpolationDuration(MOVEMENT_INTERPOLATION_TICKS);
         pet.setInterpolationDelay(0);
 
         pets.put(player.getUniqueId(), pet);
     }
 
     public void tick() {
+        float hoverOffset = (float) (Math.sin(hoverTicks * HOVER_RADIANS_PER_TICK) * HOVER_AMPLITUDE_BLOCKS);
+        hoverTicks++;
+
         for (UUID uuid : new ArrayList<>(pets.keySet())) {
             ItemDisplay pet = pets.get(uuid);
             Player player = Bukkit.getPlayer(uuid);
@@ -81,6 +90,8 @@ public class PetManager implements Listener {
                 petsFacingPlayer.remove(uuid);
                 continue;
             }
+
+            applyHover(pet, hoverOffset);
 
             Location eye = player.getEyeLocation();
             Location current = pet.getLocation();
@@ -111,6 +122,12 @@ public class PetManager implements Listener {
             next.setPitch(eye.getPitch());
             pet.teleport(next);
         }
+    }
+
+    private static void applyHover(ItemDisplay pet, float hoverOffset) {
+        Transformation transformation = pet.getTransformation();
+        transformation.getTranslation().set(0.0f, hoverOffset, 0.0f);
+        pet.setTransformation(transformation);
     }
 
     private static boolean isPetInView(Location eye, Location petLocation, boolean wasInView) {
