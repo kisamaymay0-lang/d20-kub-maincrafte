@@ -20,9 +20,13 @@ public class PetManager implements Listener {
 
     /** Клиент сглаживает позицию и поворот между серверными обновлениями. */
     private static final int MOVEMENT_INTERPOLATION_TICKS = 2;
+    /** Разные углы входа и выхода не дают режиму дёргаться на границе взгляда. */
+    private static final double LOOK_ENTER_DOT = Math.cos(Math.toRadians(25.0));
+    private static final double LOOK_EXIT_DOT = Math.cos(Math.toRadians(35.0));
 
     private final AdaptationPlugin plugin;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
+    private final Set<UUID> petsFacingPlayer = new HashSet<>();
 
     public PetManager(AdaptationPlugin plugin) {
         this.plugin = plugin;
@@ -34,8 +38,10 @@ public class PetManager implements Listener {
         if (current != null) {
             current.remove();
             pets.remove(uuid);
+            petsFacingPlayer.remove(uuid);
             return;
         }
+        petsFacingPlayer.remove(uuid);
         spawn(player);
     }
 
@@ -72,10 +78,20 @@ public class PetManager implements Listener {
                     pet.remove();
                 }
                 pets.remove(uuid);
+                petsFacingPlayer.remove(uuid);
                 continue;
             }
 
             Location eye = player.getEyeLocation();
+            Location current = pet.getLocation();
+            boolean facingPlayer = petsFacingPlayer.contains(uuid);
+
+            if (isPetInView(eye, current, facingPlayer)) {
+                petsFacingPlayer.add(uuid);
+                facePlayer(pet, eye, current);
+                continue;
+            }
+            petsFacingPlayer.remove(uuid);
 
             Vector forward = eye.getDirection().clone().setY(0).normalize();
             Vector right = forward.crossProduct(new Vector(0, 1, 0)).normalize();
@@ -85,7 +101,6 @@ public class PetManager implements Listener {
                     .add(right.clone().multiply(0.55))
                     .add(0, -0.1, 0);
 
-            Location current = pet.getLocation();
             Location next = current.add(
                     (target.getX() - current.getX()) * 0.12,
                     (target.getY() - current.getY()) * 0.12,
@@ -98,11 +113,36 @@ public class PetManager implements Listener {
         }
     }
 
+    private static boolean isPetInView(Location eye, Location petLocation, boolean wasInView) {
+        if (!eye.getWorld().equals(petLocation.getWorld())) {
+            return false;
+        }
+
+        Vector toPet = petLocation.toVector().subtract(eye.toVector());
+        if (toPet.lengthSquared() < 1.0E-6) {
+            return wasInView;
+        }
+
+        double alignment = eye.getDirection().dot(toPet.normalize());
+        double threshold = wasInView ? LOOK_EXIT_DOT : LOOK_ENTER_DOT;
+        return alignment >= threshold;
+    }
+
+    private static void facePlayer(ItemDisplay pet, Location eye, Location current) {
+        Location facing = current.clone();
+        Vector toPlayer = eye.toVector().subtract(current.toVector());
+        if (toPlayer.lengthSquared() >= 1.0E-6) {
+            facing.setDirection(toPlayer);
+        }
+        pet.teleport(facing);
+    }
+
     public void stopAll() {
         for (ItemDisplay pet : pets.values()) {
             pet.remove();
         }
         pets.clear();
+        petsFacingPlayer.clear();
     }
 
     @EventHandler
@@ -113,5 +153,6 @@ public class PetManager implements Listener {
             pet.remove();
             pets.remove(uuid);
         }
+        petsFacingPlayer.remove(uuid);
     }
 }
