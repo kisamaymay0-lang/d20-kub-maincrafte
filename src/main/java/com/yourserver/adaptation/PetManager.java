@@ -1,5 +1,6 @@
 package com.yourserver.adaptation;
 
+import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -7,10 +8,12 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Interaction;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.TextDisplay;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -39,6 +42,10 @@ public class PetManager implements Listener {
     private static final double[] ROTATION_STRENGTHS = {0.065, 0.095};
     /** Остановка включается после 0,2 секунды непрерывного наведения. */
     private static final int GAZE_DURATION_TICKS = 4;
+    private static final int HELP_GAZE_DELAY_TICKS = 60;
+    private static final int HELP_VISIBLE_TICKS = 80;
+    private static final double HELP_HEIGHT = 0.7;
+    private static final Component HELP_TEXT = Component.text("Могу ли я чем нибудь тебе помочь?");
     /** Во время возвращения взгляд игрока полностью игнорируется. */
     private static final int RETURN_DURATION_TICKS = 20;
     /** На таком расстоянии питомец прекращает стоять и возвращается к игроку. */
@@ -56,8 +63,12 @@ public class PetManager implements Listener {
     private final AdaptationPlugin plugin;
     private final NamespacedKey petMarkerKey;
     private final NamespacedKey hitboxMarkerKey;
+    private final NamespacedKey helpMarkerKey;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
     private final Map<UUID, Interaction> hitboxes = new HashMap<>();
+    private final Map<UUID, TextDisplay> helpTexts = new HashMap<>();
+    private final Map<UUID, Integer> helpTextAges = new HashMap<>();
+    private final Set<UUID> helpShownThisGaze = new HashSet<>();
     private final Set<UUID> petsFacingPlayer = new HashSet<>();
     private final Map<UUID, ReturnMovement> petsReturning = new HashMap<>();
     private final Map<UUID, Integer> gazeTicks = new HashMap<>();
@@ -70,6 +81,7 @@ public class PetManager implements Listener {
         this.plugin = plugin;
         this.petMarkerKey = new NamespacedKey(plugin, "test_pet_display");
         this.hitboxMarkerKey = new NamespacedKey(plugin, "test_pet_hitbox");
+        this.helpMarkerKey = new NamespacedKey(plugin, "test_pet_help_text");
     }
 
     public void toggle(Player player) {
@@ -176,7 +188,10 @@ public class PetManager implements Listener {
                 boolean playerWalkedAway = eye.getWorld().equals(current.getWorld())
                         && eye.distanceSquared(current) >= RETURN_DISTANCE_SQUARED;
                 if (!playerWalkedAway && isPetInView(eye, current, true)) {
+                    int continuousTicks = gazeTicks.getOrDefault(uuid, 0) + 1;
+                    gazeTicks.put(uuid, continuousTicks);
                     facePlayer(pet, eye, current, rotationStrength);
+                    updateHelpText(uuid, pet, continuousTicks, hoverOffset);
                     return;
                 }
 
@@ -190,18 +205,17 @@ public class PetManager implements Listener {
 
             if (isPetInView(eye, current, false)) {
                 int ticks = gazeTicks.getOrDefault(uuid, 0) + 1;
+                gazeTicks.put(uuid, ticks);
                 if (ticks >= GAZE_DURATION_TICKS) {
-                    gazeTicks.remove(uuid);
                     petsFacingPlayer.add(uuid);
                     rotationStrength = randomRotationStrength();
                     rotationStrengths.put(uuid, rotationStrength);
                     facePlayer(pet, eye, current, rotationStrength);
                     return;
                 }
-                gazeTicks.put(uuid, ticks);
             } else {
                 // Время должно быть непрерывным: мимолётный взгляд ничего не включает.
-                gazeTicks.remove(uuid);
+                resetGaze(uuid);
             }
 
             follow(pet, current, followPose(eye, homeSlots.getOrDefault(uuid, 0)), rotationStrength);
@@ -238,8 +252,87 @@ public class PetManager implements Listener {
         }
     }
 
-    private void beginReturn(UUID uuid, Location current, Location eye) {
+    private void updateHelpText(UUID uuid, ItemDisplay pet, int continuousTicks, float hoverOffset) {
+        TextDisplay text = helpTexts.get(uuid);
+        if (text != null && !text.isValid()) {
+            helpTexts.remove(uuid);
+            helpTextAges.remove(uuid);
+            text = null;
+        }
+
+        if (text == null && !helpShownThisGaze.contains(uuid) && continuousTicks >= HELP_GAZE_DELAY_TICKS) {
+            text = spawnHelpText(pet.getLocation(), hoverOffset);
+            helpTexts.put(uuid, text);
+            helpTextAges.put(uuid, 0);
+            helpShownThisGaze.add(uuid);
+            return;
+        }
+        if (text == null) {
+            return;
+        }
+
+        int age = helpTextAges.getOrDefault(uuid, 0) + 1;
+        if (age >= HELP_VISIBLE_TICKS) {
+            // Пока взгляд не прерван, после исчезновения надпись не появляется заново.
+            removeHelpText(uuid);
+            return;
+        }
+        helpTextAges.put(uuid, age);
+        syncHelpText(text, pet.getLocation(), hoverOffset);
+    }
+
+    private TextDisplay spawnHelpText(Location petLocation, float hoverOffset) {
+        Location at = helpLocation(petLocation, hoverOffset);
+        return at.getWorld().spawn(at, TextDisplay.class, display -> {
+            display.text(HELP_TEXT);
+            display.setPersistent(false);
+            display.setGravity(false);
+            display.setInvulnerable(true);
+            display.setSilent(true);
+            display.setBillboard(Display.Billboard.CENTER);
+            display.setSeeThrough(false);
+            display.setShadowed(true);
+            display.setDefaultBackground(false);
+            display.setTextOpacity((byte) 255);
+            display.setLineWidth(300);
+            display.setAlignment(TextDisplay.TextAlignment.CENTER);
+            display.setTeleportDuration(MOVEMENT_INTERPOLATION_TICKS);
+            display.setInterpolationDuration(0);
+            display.getPersistentDataContainer().set(helpMarkerKey, PersistentDataType.BYTE, (byte) 1);
+        });
+    }
+
+    private static void syncHelpText(TextDisplay text, Location petLocation, float hoverOffset) {
+        Location target = helpLocation(petLocation, hoverOffset);
+        if (!text.getWorld().equals(target.getWorld())
+                || text.getLocation().distanceSquared(target) > 1.0E-6) {
+            text.teleport(target);
+        }
+    }
+
+    private static Location helpLocation(Location petLocation, float hoverOffset) {
+        Location target = petLocation.clone().add(0.0, HELP_HEIGHT + hoverOffset, 0.0);
+        target.setYaw(0.0f);
+        target.setPitch(0.0f);
+        return target;
+    }
+
+    private void removeHelpText(UUID uuid) {
+        TextDisplay text = helpTexts.remove(uuid);
+        if (text != null) {
+            text.remove();
+        }
+        helpTextAges.remove(uuid);
+    }
+
+    private void resetGaze(UUID uuid) {
         gazeTicks.remove(uuid);
+        helpShownThisGaze.remove(uuid);
+        removeHelpText(uuid);
+    }
+
+    private void beginReturn(UUID uuid, Location current, Location eye) {
+        resetGaze(uuid);
         int slot = ThreadLocalRandom.current().nextInt(HOME_SLOTS.length);
         homeSlots.put(uuid, slot);
         rotationStrengths.put(uuid, randomRotationStrength());
@@ -370,6 +463,9 @@ public class PetManager implements Listener {
         for (Interaction hitbox : hitboxes.values()) {
             removeEntity(hitbox, removed);
         }
+        for (TextDisplay text : helpTexts.values()) {
+            removeEntity(text, removed);
+        }
 
         for (World world : Bukkit.getWorlds()) {
             for (ItemDisplay display : world.getEntitiesByClass(ItemDisplay.class)) {
@@ -382,10 +478,16 @@ public class PetManager implements Listener {
                     removeEntity(hitbox, removed);
                 }
             }
+            for (TextDisplay text : world.getEntitiesByClass(TextDisplay.class)) {
+                if (text.getPersistentDataContainer().has(helpMarkerKey, PersistentDataType.BYTE)) {
+                    removeEntity(text, removed);
+                }
+            }
         }
 
         pets.clear();
         hitboxes.clear();
+        helpTexts.clear();
         clearAllStates();
         return removed.size();
     }
@@ -415,6 +517,7 @@ public class PetManager implements Listener {
         if (hitbox != null) {
             hitbox.remove();
         }
+        removeHelpText(uuid);
         clearState(uuid);
     }
 
@@ -425,6 +528,8 @@ public class PetManager implements Listener {
         homeSlots.remove(uuid);
         rotationStrengths.remove(uuid);
         lastHitTimestamps.remove(uuid);
+        helpTextAges.remove(uuid);
+        helpShownThisGaze.remove(uuid);
     }
 
     private void clearAllStates() {
@@ -434,6 +539,8 @@ public class PetManager implements Listener {
         homeSlots.clear();
         rotationStrengths.clear();
         lastHitTimestamps.clear();
+        helpTextAges.clear();
+        helpShownThisGaze.clear();
     }
 
     public void stopAll() {
