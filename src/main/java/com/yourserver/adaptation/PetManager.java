@@ -37,13 +37,10 @@ public class PetManager implements Listener {
     private static final int RETURN_DURATION_TICKS = 30;
     /** На таком расстоянии питомец прекращает стоять и возвращается к игроку. */
     private static final double RETURN_DISTANCE_SQUARED = 3.0 * 3.0;
-    /** Смещения {вперёд, вправо}; первый слот — исходная позиция у взгляда. */
+    /** Только спереди и по бокам: смещения {вперёд, вправо}, без позиций за спиной. */
     private static final double[][] HOME_SLOTS = {
             {0.45, 0.55},
             {0.0, 0.85},
-            {-0.55, 0.65},
-            {-0.85, 0.0},
-            {-0.55, -0.65},
             {0.0, -0.85},
             {0.45, -0.55}
     };
