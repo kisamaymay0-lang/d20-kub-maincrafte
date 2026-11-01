@@ -1,5 +1,6 @@
 package com.yourserver.adaptation;
 
+import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -46,8 +47,16 @@ public class PetManager implements Listener {
     private static final int HELP_VISIBLE_TICKS = 80;
     private static final int HELP_FADE_TICKS = 20;
     private static final float HELP_SCALE = 0.5f;
-    private static final double HELP_HEIGHT = 0.7;
+    private static final double HELP_HEIGHT = 0.45;
     private static final Component HELP_TEXT = Component.text("Могу ли я чем нибудь тебе помочь?");
+    private static final String PET_TALK_SOUND = "f8resurs:pet-talking1";
+    private static final Component[] PET_CHAT_PHRASES = {
+            Component.text("Это ты мне?"),
+            Component.text("Думаю да!"),
+            Component.text("Я не знаю("),
+            Component.text("НЕТ! Не за что!"),
+            Component.text("Не думай об этом...")
+    };
     /** Во время возвращения взгляд игрока полностью игнорируется. */
     private static final int RETURN_DURATION_TICKS = 20;
     /** На таком расстоянии питомец прекращает стоять и возвращается к игроку. */
@@ -263,10 +272,36 @@ public class PetManager implements Listener {
             return;
         }
 
-        TextDisplay text = spawnHelpText(pet.getLocation(), hoverOffset);
+        showPetText(uuid, pet, HELP_TEXT, hoverOffset);
+        helpShownThisGaze.add(uuid);
+    }
+
+    private void respondToChat(UUID uuid) {
+        Player player = Bukkit.getPlayer(uuid);
+        ItemDisplay pet = pets.get(uuid);
+        if (player == null || !player.isOnline() || pet == null || pet.isDead()
+                || !petsFacingPlayer.contains(uuid) || petsReturning.containsKey(uuid)) {
+            return;
+        }
+
+        Location eye = player.getEyeLocation();
+        Location current = pet.getLocation();
+        if (!isPetInView(eye, current, true)
+                || (eye.getWorld().equals(current.getWorld())
+                && eye.distanceSquared(current) >= RETURN_DISTANCE_SQUARED)) {
+            return;
+        }
+
+        Component phrase = PET_CHAT_PHRASES[ThreadLocalRandom.current().nextInt(PET_CHAT_PHRASES.length)];
+        float hoverOffset = pet.getTransformation().getTranslation().y;
+        showPetText(uuid, pet, phrase, hoverOffset);
+    }
+
+    private void showPetText(UUID uuid, ItemDisplay pet, Component content, float hoverOffset) {
+        removeHelpText(uuid);
+        TextDisplay text = spawnHelpText(pet.getLocation(), hoverOffset, content);
         helpTexts.put(uuid, text);
         helpTextAges.put(uuid, 0);
-        helpShownThisGaze.add(uuid);
     }
 
     private void tickHelpText(UUID uuid, ItemDisplay pet, float hoverOffset) {
@@ -302,10 +337,10 @@ public class PetManager implements Listener {
         syncHelpText(text, pet.getLocation(), hoverOffset);
     }
 
-    private TextDisplay spawnHelpText(Location petLocation, float hoverOffset) {
+    private TextDisplay spawnHelpText(Location petLocation, float hoverOffset, Component content) {
         Location at = helpLocation(petLocation, hoverOffset);
-        return at.getWorld().spawn(at, TextDisplay.class, display -> {
-            display.text(HELP_TEXT);
+        TextDisplay text = at.getWorld().spawn(at, TextDisplay.class, display -> {
+            display.text(content);
             display.setPersistent(false);
             display.setGravity(false);
             display.setInvulnerable(true);
@@ -324,6 +359,8 @@ public class PetManager implements Listener {
             display.setInterpolationDuration(0);
             display.getPersistentDataContainer().set(helpMarkerKey, PersistentDataType.BYTE, (byte) 1);
         });
+        at.getWorld().playSound(at, PET_TALK_SOUND, SoundCategory.NEUTRAL, 0.8f, 1.0f);
+        return text;
     }
 
     private static byte helpOpacity(int age) {
@@ -601,6 +638,17 @@ public class PetManager implements Listener {
 
     public void stopAll() {
         killAll();
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onChat(AsyncChatEvent event) {
+        UUID uuid = event.getPlayer().getUniqueId();
+        try {
+            // Сущности и их состояние трогаем только на основном серверном потоке.
+            Bukkit.getScheduler().runTask(plugin, () -> respondToChat(uuid));
+        } catch (org.bukkit.plugin.IllegalPluginAccessException ignored) {
+            // Плагин уже выключается.
+        }
     }
 
     @EventHandler
