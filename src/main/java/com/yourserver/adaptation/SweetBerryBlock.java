@@ -56,8 +56,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Топтание:
  * <ul>
- *   <li>Shift стоя на блоке: слабый топ, зелёные частицы; после 8 топов выпадают «Помятые сладкие ягоды».</li>
- *   <li>Падение на блок: сильный топ, зелёные частицы; после 8 топов выпадают «Продавленные сладкие ягоды».</li>
+ *   <li>Shift стоя на дне внутри блока: слабый топ, зелёные частицы; после 8 топов выпадают «Помятые сладкие ягоды».</li>
+ *   <li>Приземление на дно внутри блока: сильный топ, зелёные частицы; после 8 топов выпадают «Продавленные сладкие ягоды».</li>
  * </ul>
  */
 public class SweetBerryBlock implements Listener {
@@ -66,6 +66,10 @@ public class SweetBerryBlock implements Listener {
     public static final int REQUIRED_STAMPS = 8;
     public static final int CRUSHED_BERRIES_DROP = 4;
     public static final long CRUSH_DELAY_TICKS = 10L; // 0.5 секунды (10 тиков)
+
+    /** Небольшой допуск для координаты ступней на нижней границе блока. */
+    private static final double BLOCK_BOTTOM_TOLERANCE = 0.05;
+    private static final double STAMP_PARTICLE_HEIGHT = 0.5;
 
     private static final NamespacedKey LOW_BERRY_KEY = new NamespacedKey("f8resurs", "low_sweetie_berry");
     private static final NamespacedKey HARD_BERRY_KEY = new NamespacedKey("f8resurs", "hard_sweetie_berry");
@@ -286,21 +290,19 @@ public class SweetBerryBlock implements Listener {
     // ===== ТОПТАНИЕ =====
 
     private Block getStandingBerryBlock(Player player) {
-        Location loc = player.getLocation();
-        Block down = loc.getBlock().getRelative(BlockFace.DOWN);
-        if (isSweetBerryBlock(down)) {
-            return down;
-        }
+        return getStandingBerryBlock(player.getLocation());
+    }
+
+    private Block getStandingBerryBlock(Location loc) {
         Block at = loc.getBlock();
-        if (isSweetBerryBlock(at)) {
-            return at;
+        if (!isSweetBerryBlock(at)) {
+            return null;
         }
-        Location footLoc = loc.clone().subtract(0, 0.2, 0);
-        Block foot = footLoc.getBlock();
-        if (isSweetBerryBlock(foot)) {
-            return foot;
-        }
-        return null;
+
+        // У блока нет коллизии: топать можно только стоя внутри него на дне,
+        // а не на верхней границе и не пролетая мимо его середины.
+        double feetAboveBottom = loc.getY() - at.getY();
+        return Math.abs(feetAboveBottom) <= BLOCK_BOTTOM_TOLERANCE ? at : null;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -334,8 +336,9 @@ public class SweetBerryBlock implements Listener {
 
         World world = block.getWorld();
         Location top = block.getLocation().add(0.5, 1.05, 0.5);
+        Location effect = block.getLocation().add(0.5, STAMP_PARTICLE_HEIGHT, 0.5);
 
-        world.spawnParticle(Particle.HAPPY_VILLAGER, top, 8, 0.25, 0.05, 0.25, 0.05);
+        world.spawnParticle(Particle.HAPPY_VILLAGER, effect, 8, 0.25, 0.05, 0.25, 0.05);
         world.playSound(top, Sound.BLOCK_SWEET_BERRY_BUSH_PICK_BERRIES, SoundCategory.BLOCKS, 0.9f, 1.2f);
 
         if (data.weakStamps >= REQUIRED_STAMPS && breakingBlocks.add(key)) {
@@ -346,7 +349,7 @@ public class SweetBerryBlock implements Listener {
                 removeSweetBerryBlock(block);
                 block.setType(Material.AIR);
                 world.playSound(top, Sound.BLOCK_SWEET_BERRY_BUSH_BREAK, SoundCategory.BLOCKS, 1.0f, 0.8f);
-                world.spawnParticle(Particle.HAPPY_VILLAGER, top, 16, 0.3, 0.2, 0.3, 0.08);
+                world.spawnParticle(Particle.HAPPY_VILLAGER, effect, 16, 0.3, 0.2, 0.3, 0.08);
                 world.dropItemNaturally(top, createLowSweetieBerry(CRUSHED_BERRIES_DROP));
             }, CRUSH_DELAY_TICKS);
         }
@@ -362,7 +365,7 @@ public class SweetBerryBlock implements Listener {
         float fallDistance = player.getFallDistance();
 
         if (fallDistance >= 0.75f && (player.isOnGround() || to.getY() <= from.getY())) {
-            Block berryBlock = getStandingBerryBlock(player);
+            Block berryBlock = getStandingBerryBlock(to);
             if (berryBlock != null) {
                 long now = System.currentTimeMillis();
                 Long last = fallDebounce.get(player.getUniqueId());
@@ -403,8 +406,9 @@ public class SweetBerryBlock implements Listener {
 
         World world = block.getWorld();
         Location top = block.getLocation().add(0.5, 1.05, 0.5);
+        Location effect = block.getLocation().add(0.5, STAMP_PARTICLE_HEIGHT, 0.5);
 
-        world.spawnParticle(Particle.HAPPY_VILLAGER, top, 14, 0.3, 0.1, 0.3, 0.08);
+        world.spawnParticle(Particle.HAPPY_VILLAGER, effect, 14, 0.3, 0.1, 0.3, 0.08);
         world.playSound(top, Sound.BLOCK_SWEET_BERRY_BUSH_BREAK, SoundCategory.BLOCKS, 0.9f, 1.4f);
 
         if (data.strongStamps >= REQUIRED_STAMPS && breakingBlocks.add(key)) {
@@ -415,7 +419,7 @@ public class SweetBerryBlock implements Listener {
                 removeSweetBerryBlock(block);
                 block.setType(Material.AIR);
                 world.playSound(top, Sound.BLOCK_SWEET_BERRY_BUSH_BREAK, SoundCategory.BLOCKS, 1.0f, 0.7f);
-                world.spawnParticle(Particle.HAPPY_VILLAGER, top, 20, 0.35, 0.3, 0.35, 0.1);
+                world.spawnParticle(Particle.HAPPY_VILLAGER, effect, 20, 0.35, 0.3, 0.35, 0.1);
                 world.dropItemNaturally(top, createHardSweetieBerry(CRUSHED_BERRIES_DROP));
             }, CRUSH_DELAY_TICKS);
         }
