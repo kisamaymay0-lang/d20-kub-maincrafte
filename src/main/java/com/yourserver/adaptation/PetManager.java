@@ -27,10 +27,16 @@ public class PetManager implements Listener {
     /** ±4 см, полный цикл вверх–вниз занимает 120 тиков (6 секунд). */
     private static final double HOVER_AMPLITUDE_BLOCKS = 0.04;
     private static final double HOVER_RADIANS_PER_TICK = Math.PI * 2.0 / 120.0;
+    private static final double FOLLOW_STRENGTH = 0.12;
+    /** Поворот идёт с инерцией, а не мгновенно вслед за камерой. */
+    private static final double ROTATION_STRENGTH = 0.08;
+    /** Во время возвращения взгляд игрока полностью игнорируется. */
+    private static final int RETURN_DURATION_TICKS = 30;
 
     private final AdaptationPlugin plugin;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
     private final Set<UUID> petsFacingPlayer = new HashSet<>();
+    private final Map<UUID, ReturnMovement> petsReturning = new HashMap<>();
     private long hoverTicks;
 
     public PetManager(AdaptationPlugin plugin) {
@@ -43,10 +49,10 @@ public class PetManager implements Listener {
         if (current != null) {
             current.remove();
             pets.remove(uuid);
-            petsFacingPlayer.remove(uuid);
+            clearState(uuid);
             return;
         }
-        petsFacingPlayer.remove(uuid);
+        clearState(uuid);
         spawn(player);
     }
 
@@ -87,7 +93,7 @@ public class PetManager implements Listener {
                     pet.remove();
                 }
                 pets.remove(uuid);
-                petsFacingPlayer.remove(uuid);
+                clearState(uuid);
                 continue;
             }
 
@@ -95,33 +101,105 @@ public class PetManager implements Listener {
 
             Location eye = player.getEyeLocation();
             Location current = pet.getLocation();
-            boolean facingPlayer = petsFacingPlayer.contains(uuid);
 
-            if (isPetInView(eye, current, facingPlayer)) {
+            ReturnMovement returning = petsReturning.get(uuid);
+            if (returning != null) {
+                updateReturning(pet, current, returning);
+                if (returning.isFinished()) {
+                    petsReturning.remove(uuid);
+                }
+                continue;
+            }
+
+            boolean facingPlayer = petsFacingPlayer.contains(uuid);
+            if (facingPlayer) {
+                if (isPetInView(eye, current, true)) {
+                    facePlayer(pet, eye, current);
+                    continue;
+                }
+
+                // Позиция и поворот запоминаются один раз: до конца возвращения
+                // камера не двигает цель и не может снова включить режим взгляда.
+                petsFacingPlayer.remove(uuid);
+                petsReturning.put(uuid, new ReturnMovement(current, followPose(eye)));
+                continue;
+            }
+
+            if (isPetInView(eye, current, false)) {
                 petsFacingPlayer.add(uuid);
                 facePlayer(pet, eye, current);
                 continue;
             }
-            petsFacingPlayer.remove(uuid);
 
-            Vector forward = eye.getDirection().clone().setY(0).normalize();
-            Vector right = forward.crossProduct(new Vector(0, 1, 0)).normalize();
-
-            Location target = eye.clone()
-                    .add(forward.clone().multiply(0.45))
-                    .add(right.clone().multiply(0.55))
-                    .add(0, -0.1, 0);
-
-            Location next = current.add(
-                    (target.getX() - current.getX()) * 0.12,
-                    (target.getY() - current.getY()) * 0.12,
-                    (target.getZ() - current.getZ()) * 0.12
-            );
-
-            next.setYaw(eye.getYaw());
-            next.setPitch(eye.getPitch());
-            pet.teleport(next);
+            follow(pet, current, followPose(eye));
         }
+    }
+
+    private static Location followPose(Location eye) {
+        Vector forward = eye.getDirection().clone().setY(0);
+        if (forward.lengthSquared() < 1.0E-6) {
+            double yaw = Math.toRadians(eye.getYaw());
+            forward = new Vector(-Math.sin(yaw), 0.0, Math.cos(yaw));
+        } else {
+            forward.normalize();
+        }
+        Vector right = forward.clone().crossProduct(new Vector(0, 1, 0)).normalize();
+
+        Location target = eye.clone()
+                .add(forward.clone().multiply(0.45))
+                .add(right.clone().multiply(0.55))
+                .add(0, -0.1, 0);
+        target.setYaw(eye.getYaw());
+        target.setPitch(eye.getPitch());
+        return target;
+    }
+
+    private static void follow(ItemDisplay pet, Location current, Location target) {
+        Location next = current.clone();
+        next.setX(current.getX() + (target.getX() - current.getX()) * FOLLOW_STRENGTH);
+        next.setY(current.getY() + (target.getY() - current.getY()) * FOLLOW_STRENGTH);
+        next.setZ(current.getZ() + (target.getZ() - current.getZ()) * FOLLOW_STRENGTH);
+        rotateTowards(current, next, target.getYaw(), target.getPitch());
+        pet.teleport(next);
+    }
+
+    private static void updateReturning(ItemDisplay pet, Location current, ReturnMovement movement) {
+        movement.ticks++;
+        double progress = Math.min(1.0, movement.ticks / (double) RETURN_DURATION_TICKS);
+        // Smoothstep: спокойный старт, небольшой разгон и мягкое завершение.
+        double eased = progress * progress * (3.0 - 2.0 * progress);
+
+        Location start = movement.start;
+        Location target = movement.target;
+        Location next = start.clone();
+        next.setX(start.getX() + (target.getX() - start.getX()) * eased);
+        next.setY(start.getY() + (target.getY() - start.getY()) * eased);
+        next.setZ(start.getZ() + (target.getZ() - start.getZ()) * eased);
+        rotateTowards(current, next, target.getYaw(), target.getPitch());
+        pet.teleport(next);
+    }
+
+    private static void facePlayer(ItemDisplay pet, Location eye, Location current) {
+        Location facing = current.clone();
+        Vector toPlayer = eye.toVector().subtract(current.toVector());
+        if (toPlayer.lengthSquared() >= 1.0E-6) {
+            Location desired = current.clone();
+            desired.setDirection(toPlayer);
+            rotateTowards(current, facing, desired.getYaw(), desired.getPitch());
+        }
+        pet.teleport(facing);
+    }
+
+    private static void rotateTowards(Location current, Location next, float targetYaw, float targetPitch) {
+        float yawDelta = (targetYaw - current.getYaw()) % 360.0f;
+        if (yawDelta > 180.0f) {
+            yawDelta -= 360.0f;
+        } else if (yawDelta < -180.0f) {
+            yawDelta += 360.0f;
+        }
+
+        next.setYaw(current.getYaw() + (float) (yawDelta * ROTATION_STRENGTH));
+        next.setPitch(current.getPitch() + (float) ((targetPitch - current.getPitch()) * ROTATION_STRENGTH));
     }
 
     private static void applyHover(ItemDisplay pet, float hoverOffset) {
@@ -145,13 +223,9 @@ public class PetManager implements Listener {
         return alignment >= threshold;
     }
 
-    private static void facePlayer(ItemDisplay pet, Location eye, Location current) {
-        Location facing = current.clone();
-        Vector toPlayer = eye.toVector().subtract(current.toVector());
-        if (toPlayer.lengthSquared() >= 1.0E-6) {
-            facing.setDirection(toPlayer);
-        }
-        pet.teleport(facing);
+    private void clearState(UUID uuid) {
+        petsFacingPlayer.remove(uuid);
+        petsReturning.remove(uuid);
     }
 
     public void stopAll() {
@@ -160,6 +234,7 @@ public class PetManager implements Listener {
         }
         pets.clear();
         petsFacingPlayer.clear();
+        petsReturning.clear();
     }
 
     @EventHandler
@@ -170,6 +245,21 @@ public class PetManager implements Listener {
             pet.remove();
             pets.remove(uuid);
         }
-        petsFacingPlayer.remove(uuid);
+        clearState(uuid);
+    }
+
+    private static final class ReturnMovement {
+        private final Location start;
+        private final Location target;
+        private int ticks;
+
+        private ReturnMovement(Location start, Location target) {
+            this.start = start.clone();
+            this.target = target.clone();
+        }
+
+        private boolean isFinished() {
+            return ticks >= RETURN_DURATION_TICKS;
+        }
     }
 }
