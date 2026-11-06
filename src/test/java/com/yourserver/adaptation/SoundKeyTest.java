@@ -23,14 +23,21 @@ class SoundKeyTest {
     }
 
     @Test
-    void sampleSoundsJsonUsesPlainKeysAndBothEntries() throws IOException {
+    void sampleSoundsJsonUsesPlainKeysAndNamespacedNames() throws IOException {
         Path file = Path.of("docs", "sounds.json");
         assertTrue(Files.isRegularFile(file), "образец должен лежать в docs/sounds.json");
         String json = Files.readString(file, StandardCharsets.UTF_8);
+
         assertFalse(json.startsWith("\uFEFF"), "BOM ломает чтение sounds.json");
-        assertTrue(json.contains("\"pet-talking1\""), "ключ первого питомца");
-        assertTrue(json.contains("\"pet-talking2\""), "ключ короны");
-        assertFalse(json.contains("\"f8resurs:"), "в ключах и name не должно быть неймспейса");
+        // Ключ события — без неймспейса, он берётся из папки assets/<namespace>/.
+        assertTrue(json.contains("\"pet-talking1\": {"), "ключ первого питомца без неймспейса");
+        assertTrue(json.contains("\"pet-talking2\": {"), "ключ короны без неймспейса");
+        // А вот name без неймспейса уедет в minecraft: и звук не найдётся.
+        assertTrue(json.contains("\"name\": \"f8resurs:pet-talking1\""),
+                "в name обязателен неймспейс f8resurs");
+        assertTrue(json.contains("\"name\": \"f8resurs:pet-talking2\""),
+                "в name обязателен неймспейс f8resurs");
         assertFalse(json.contains(".ogg"), "name указывается без расширения");
+        assertFalse(json.contains("sounds/"), "name указывается без папки sounds/");
     }
 }

@@ -1,25 +1,21 @@
 {
   "pet-talking1": {
-    "category": "neutral",
+    "category": "master",
     "sounds": [
       {
-        "name": "pet-talking1",
+        "name": "f8resurs:pet-talking1",
         "stream": false,
-        "volume": 1.0,
-        "pitch": 1.0,
-        "weight": 1
+        "preload": true
       }
     ]
   },
   "pet-talking2": {
-    "category": "neutral",
+    "category": "master",
     "sounds": [
       {
-        "name": "pet-talking2",
+        "name": "f8resurs:pet-talking2",
         "stream": false,
-        "volume": 1.0,
-        "pitch": 1.0,
-        "weight": 1
+        "preload": true
       }
     ]
   }
