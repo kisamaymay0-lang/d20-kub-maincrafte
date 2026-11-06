@@ -52,6 +52,7 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
     private PetManager petManager;
+    private CatBattleManager catBattleManager;
     private Apvsh apvsh;
     private SweetBerryBlock sweetBerryBlock;
     private Shaker shaker;
@@ -146,6 +147,10 @@ public void onEnable() {
     petManager = new PetManager(this);
     getServer().getPluginManager().registerEvents(petManager, this);
 
+    // Дикие коты: дуэли тикаются вместе с питомцами, но не связаны с их сущностями.
+    catBattleManager = new CatBattleManager(this);
+    getServer().getPluginManager().registerEvents(catBattleManager, this);
+
     // АПВШ — аппарат для создания и наполнения сигарет и другого.
     apvsh = new Apvsh(this, dataWriter);
     getServer().getPluginManager().registerEvents(apvsh, this);
@@ -225,6 +230,7 @@ public void onEnable() {
         @Override
         public void run() {
             petManager.tick();
+            if (catBattleManager != null) catBattleManager.tick();
         }
     }.runTaskTimer(this, 0L, 1L);
 
@@ -279,6 +285,9 @@ public void onEnable() {
         if (petManager != null) {
             petManager.stopAll();
         }
+        if (catBattleManager != null) {
+            catBattleManager.disable();
+        }
         if (apvsh != null) {
             apvsh.disable();
         }
@@ -300,8 +309,9 @@ public void onEnable() {
      * Перечитать config.yml и настройки подсистем (/f8 reload).
      * Настройки миниигры и кувшина читаются на ходу, поэтому им reload не нужен;
      * созвездия и зацеп изморози держат копию настроек в памяти — их просим перечитаться.
-     * Префиксы и паки префиксов живут в своих файлах, поэтому их тоже перечитываем:
-     * без этого правки prefixes.yml и prefixpacks/ до перезапуска не доходили.
+     * Префиксы, косметика и паки живут в своих файлах, поэтому их тоже перечитываем:
+     * без этого правки YAML и новые файлы до перезапуска не доходили.
+     * Шанс дуэлей диких котов также применяется здесь.
      */
     public String reloadPluginSettings() {
         ConfigSync.sync(this);   // /f8 reload тоже доводит файлы до полного вида
@@ -315,10 +325,20 @@ public void onEnable() {
         if (bambooBarrel != null) {
             bambooBarrel.reloadSettings();
         }
-        String prefixes = profileManager == null ? "" : profileManager.reloadPrefixes();
-        if (prefixes.isBlank()) return specialCatch == null ? "" : specialCatch.describe();
-        if (specialCatch == null || specialCatch.describe().isBlank()) return prefixes;
-        return prefixes + "\n" + specialCatch.describe();
+        if (catBattleManager != null) {
+            catBattleManager.reloadSettings();
+        }
+        List<String> summaries = new ArrayList<>();
+        if (profileManager != null) {
+            summaries.add(profileManager.reloadPrefixes());
+            // Косметика живёт в отдельных YAML: /f8 reload тоже обязан
+            // перечитать их и заметить новые файлы без рестарта.
+            summaries.add(profileManager.reloadCosmetics());
+        }
+        if (catBattleManager != null) summaries.add(catBattleManager.describe());
+        if (specialCatch != null && !specialCatch.describe().isBlank()) summaries.add(specialCatch.describe());
+        summaries.removeIf(String::isBlank);
+        return String.join("\n", summaries);
     }
 
     public void breakAdaptation(Player player) {

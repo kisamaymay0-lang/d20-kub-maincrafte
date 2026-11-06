@@ -144,6 +144,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private final Path medalConfig;
     private final Path prefixConfig;
     private final Path cosmeticConfig;
+    /** Дополнительные каталоги: plugins/f8-plugin/cosmetics/*.yml. */
+    private final Path cosmeticFolder;
     private volatile PrefixCatalog prefixes;
     private volatile CosmeticCatalog cosmetics;
     /** Папка с паками префиксов: plugins/f8-plugin/prefixpacks/. */
@@ -196,15 +198,22 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         plugin.getLogger().info("Префиксы профиля: " + prefixes.size() + " шт., файл " + prefixConfig
                 + ", паков " + packs.size());
         cosmeticConfig = plugin.getDataFolder().toPath().resolve("cosmetics.yml");
+        cosmeticFolder = plugin.getDataFolder().toPath().resolve("cosmetics");
         if (!Files.exists(cosmeticConfig)) {
             plugin.saveResource("cosmetics.yml", false);
-            plugin.getLogger().info("Создан файл косметики: " + cosmeticConfig + " (правьте его и применяйте через /profile cosmetic reload)");
+            plugin.getLogger().info("Создан файл косметики: " + cosmeticConfig + " (правьте его и применяйте через /f8 reload)");
         }
+        try { Files.createDirectories(cosmeticFolder); }
+        catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не удалось создать папку дополнительной косметики", ex); }
         CosmeticCatalog loadedCosmetics = CosmeticCatalog.defaults();
-        try { loadedCosmetics = CosmeticCatalog.load(cosmeticConfig); }
-        catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка cosmetics.yml; используется стандартная косметика", ex); }
+        try { loadedCosmetics = CosmeticCatalog.load(cosmeticConfig, cosmeticFolder); }
+        catch (Exception ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING,
+                    "Ошибка cosmetics.yml или дополнительного файла; используется стандартная косметика", ex);
+        }
         cosmetics = loadedCosmetics;
-        plugin.getLogger().info("Косметика профиля: " + cosmetics.size() + " шт., файл " + cosmeticConfig);
+        plugin.getLogger().info("Косметика профиля: " + cosmetics.size() + " шт., файлы " + cosmeticConfig
+                + " и " + cosmeticFolder + "/*.yml");
         storage = new ProfileStorage(plugin.getDataFolder().toPath().resolve("profiles"),
                 plugin.getDataFolder().toPath().resolve("medals/players"), writer, plugin.getLogger(), medal -> medalSettings.migrate(medal));
         ZoneId zone = ZoneId.systemDefault();
@@ -636,6 +645,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         caseRuns.remove(run.owner);
         Player player = Bukkit.getPlayer(run.owner);
         String winner = run.survivor();
+        // Каталог мог измениться во время анимации: не выдаём удалённый id,
+        // а выбираем запасного победителя из актуального каталога ниже.
+        if (run.cosmetic ? cosmetics.get(winner) == null : prefixes.get(winner) == null) winner = null;
         try {
             ProfileData data = profile(run.owner, player == null ? run.owner.toString() : player.getName());
             if (!addWon(run.cosmetic, data, winner)) {
@@ -1967,6 +1979,54 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     /**
+     * Перечитать основной каталог и заново обнаружить дополнительные файлы.
+     * Снапшот каталога меняется только после успешного разбора всех файлов,
+     * поэтому опечатка в новом YAML не снимает косметику с игроков.
+     * Этим методом пользуются и /profile cosmetic reload, и /f8 reload.
+     */
+    public String reloadCosmetics() {
+        CosmeticCatalog previous = cosmetics;
+        CosmeticCatalog next;
+        try {
+            next = CosmeticCatalog.load(cosmeticConfig, cosmeticFolder);
+        } catch (Exception ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING,
+                    "Не перечитана косметика: прежний каталог сохранён (" + ex.getMessage() + ")", ex);
+            return "Косметика не перечитана: ошибка в YAML (причина в журнале сервера)."
+                    + " По-прежнему доступно " + previous.size() + ".";
+        }
+
+        int added = 0;
+        for (CosmeticCatalog.Cosmetic cosmetic : next.list()) {
+            if (previous.get(cosmetic.id()) == null) added++;
+        }
+        cosmetics = next;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            try {
+                ProfileData data = profile(player);
+                // Если запись удалили, не оставляем надетый предмет-призрак.
+                // При ошибке сохранения возвращаем выбор в ProfileData.
+                String equipped = data.equippedCosmetic();
+                if (equipped != null && next.get(equipped) == null && data.equipCosmetic(null)) {
+                    try {
+                        savePrefix(data);
+                    } catch (RuntimeException ex) {
+                        data.equipCosmetic(equipped);
+                        throw ex;
+                    }
+                }
+                applyCosmetic(player, data);
+            } catch (RuntimeException ex) {
+                plugin.getLogger().log(java.util.logging.Level.WARNING,
+                        "Не применена косметика после reload: " + player.getName(), ex);
+            }
+        }
+        for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
+        return "Косметика перезагружена: " + next.size() + " (№1–" + next.size() + "), новых: " + added
+                + ". Файлы: " + cosmeticConfig + " и " + cosmeticFolder + "/*.yml";
+    }
+
+    /**
      * /profile cosmetic give|take <игрок или UUID> <номер|all>,
      * /profile cosmetic list <игрок>, /profile cosmetic reload.
      * Устройство ровно как у /profile prefix.
@@ -1974,22 +2034,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private void cosmeticCommand(CommandSender sender, String[] args) throws Exception {
         if (args.length == 1) { help(sender); return; }
         if (args.length == 2 && args[1].equalsIgnoreCase("reload")) {
-            CosmeticCatalog next = CosmeticCatalog.load(cosmeticConfig); // Сначала проверяем файл.
-            cosmetics = next;
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                try {
-                    ProfileData data = profile(player);
-                    // Надетая косметика исчезла из файла: снимаем её с головы.
-                    String equipped = data.equippedCosmetic();
-                    if (equipped != null && cosmetics.get(equipped) == null && data.equipCosmetic(null)) savePrefix(data);
-                    applyCosmetic(player, data);
-                } catch (RuntimeException ex) {
-                    plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применена косметика после reload: " + player.getName(), ex);
-                }
-            }
-            for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
-            sender.sendMessage(ProfileItems.text("Косметика перезагружена: " + cosmetics.size()
-                    + " (№1–" + cosmetics.size() + "). Файл: " + cosmeticConfig, NamedTextColor.GREEN));
+            String result = reloadCosmetics();
+            sender.sendMessage(ProfileItems.text(result,
+                    result.startsWith("Косметика не") ? NamedTextColor.RED : NamedTextColor.GREEN));
             return;
         }
         if (args.length == 2 && args[1].equalsIgnoreCase("test")) {

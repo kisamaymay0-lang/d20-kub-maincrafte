@@ -61,6 +61,61 @@ class CosmeticCatalogTest {
     }
 
     @Test
+    void reloadDiscoversAdditionalYamlFilesWithoutChangingExistingNumbers() throws Exception {
+        Path primary = directory.resolve("cosmetics.yml");
+        Path additional = directory.resolve("cosmetics");
+        Files.createDirectories(additional);
+        Files.writeString(primary, """
+                cosmetics:
+                  base:
+                    name: 'Базовая'
+                    color: '#8FE3F5'
+                    file: kosmetika1
+                """);
+        Files.writeString(additional.resolve("02-new.yml"), """
+                cosmetics:
+                  new_hat:
+                    name: 'Новая шапка'
+                    color: '#E6B94B'
+                    file: new_hat
+                """);
+
+        CosmeticCatalog first = CosmeticCatalog.load(primary, additional);
+        assertEquals(2, first.size());
+        assertEquals(1, first.get("base").number());
+        assertEquals(2, first.get("new_hat").number());
+
+        // Файл появился уже после первой загрузки: следующий reload обязан его увидеть.
+        Files.writeString(additional.resolve("03-later.yaml"), """
+                cosmetics:
+                  later:
+                    name: 'Добавленная в игре'
+                    color: '#C79BF0'
+                """);
+        CosmeticCatalog reloaded = CosmeticCatalog.load(primary, additional);
+        assertEquals(3, reloaded.size());
+        assertEquals(1, reloaded.get("base").number());
+        assertEquals("later", reloaded.byNumber(3).id());
+        assertEquals("later", reloaded.get("later").file());
+    }
+
+    @Test
+    void duplicateIdsInAdditionalFilesAreRejectedAsOneTransaction() throws Exception {
+        Path primary = directory.resolve("cosmetics.yml");
+        Path additional = directory.resolve("cosmetics");
+        Files.createDirectories(additional);
+        String yaml = """
+                cosmetics:
+                  same:
+                    name: 'Одна'
+                    color: '#8FE3F5'
+                """;
+        Files.writeString(primary, yaml);
+        Files.writeString(additional.resolve("duplicate.yml"), yaml);
+        assertThrows(IllegalArgumentException.class, () -> CosmeticCatalog.load(primary, additional));
+    }
+
+    @Test
     void fileDefaultsToIdAndMissingFieldsAreConfigErrors() throws Exception {
         CosmeticCatalog catalog = load("""
                 cosmetics:

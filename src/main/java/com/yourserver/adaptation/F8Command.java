@@ -168,7 +168,7 @@ public class F8Command implements CommandExecutor, Listener {
         }
 
         if (!(sender instanceof Player player)) {
-            sender.sendMessage("§7Использование: /f8 reload — перечитать config.yml");
+            sender.sendMessage("§7Использование: /f8 reload — перечитать config.yml, косметику и новые YAML-файлы");
             return true;
         }
 

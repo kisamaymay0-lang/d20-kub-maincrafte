@@ -6,14 +6,18 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
- * Неизменяемый список косметики из cosmetics.yml. Устройство ровно как у
- * {@link PrefixCatalog}: порядок записей в конфиге задаёт «номер» косметики
+ * Неизменяемый список косметики из cosmetics.yml и дополнительных
+ * {@code cosmetics/*.yml}. Устройство ровно как у {@link PrefixCatalog}:
+ * порядок записей в конфиге задаёт «номер» косметики
  * (1, 2, 3, …), по нему косметику выдают и забирают командой.
  *
  * Отличие от префикса только в том, КАК косметика показывается: префикс — это
@@ -47,21 +51,59 @@ final class CosmeticCatalog {
     }
 
     static CosmeticCatalog load(Path path) throws Exception {
-        YamlConfiguration yaml = new YamlConfiguration();
-        yaml.loadFromString(Files.readString(path));
-        ConfigurationSection section = yaml.getConfigurationSection("cosmetics");
-        if (section == null) throw new IllegalArgumentException("В cosmetics.yml нет раздела cosmetics");
+        return loadFiles(List.of(path));
+    }
+
+    /**
+     * Загрузить основной файл и все дополнительные {@code cosmetics/*.yml}.
+     * Папка перечисляется заново при каждом вызове, поэтому новый файл не
+     * требует перезапуска сервера. Основной файл всегда идёт первым — его
+     * старые номера не сдвигаются при добавлении дополнительного файла.
+     */
+    static CosmeticCatalog load(Path primary, Path additionalFolder) throws Exception {
+        List<Path> files = new ArrayList<>();
+        files.add(primary);
+        if (additionalFolder != null && Files.isDirectory(additionalFolder)) {
+            try (Stream<Path> stream = Files.list(additionalFolder)) {
+                stream.filter(Files::isRegularFile)
+                        .filter(CosmeticCatalog::isYaml)
+                        .sorted(Comparator.comparing((Path path) -> path.getFileName().toString(),
+                                String.CASE_INSENSITIVE_ORDER).thenComparing(path -> path.getFileName().toString()))
+                        .forEach(files::add);
+            }
+        }
+        return loadFiles(files);
+    }
+
+    private static boolean isYaml(Path path) {
+        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+        return name.endsWith(".yml") || name.endsWith(".yaml");
+    }
+
+    private static CosmeticCatalog loadFiles(List<Path> paths) throws Exception {
         Map<String, Cosmetic> byId = new LinkedHashMap<>();
         int number = 1;
-        for (String id : section.getKeys(false)) {
-            String cleanId = ProfileText.clean(id);
-            if (cleanId.isEmpty()) continue;
-            String name = ProfileText.clean(section.getString(id + ".name", ""));
-            String file = ProfileText.clean(section.getString(id + ".file", cleanId));
-            if (name.isEmpty() || file.isEmpty()) throw new IllegalArgumentException("Не заполнена косметика " + cleanId);
-            TextColor color = TextColor.fromHexString(section.getString(id + ".color", "#E6B94B"));
-            if (color == null) throw new IllegalArgumentException("Неверный цвет косметики " + cleanId);
-            byId.put(cleanId, new Cosmetic(cleanId, name, color, file, number++));
+        for (Path path : paths) {
+            YamlConfiguration yaml = new YamlConfiguration();
+            yaml.loadFromString(Files.readString(path));
+            ConfigurationSection section = yaml.getConfigurationSection("cosmetics");
+            if (section == null) throw new IllegalArgumentException("В " + path + " нет раздела cosmetics");
+            for (String id : section.getKeys(false)) {
+                String cleanId = ProfileText.clean(id);
+                if (cleanId.isEmpty()) continue;
+                String name = ProfileText.clean(section.getString(id + ".name", ""));
+                String file = ProfileText.clean(section.getString(id + ".file", cleanId));
+                if (name.isEmpty() || file.isEmpty()) {
+                    throw new IllegalArgumentException("Не заполнена косметика " + cleanId + " в " + path);
+                }
+                TextColor color = TextColor.fromHexString(section.getString(id + ".color", "#E6B94B"));
+                if (color == null) throw new IllegalArgumentException("Неверный цвет косметики " + cleanId + " в " + path);
+                Cosmetic cosmetic = new Cosmetic(cleanId, name, color, file, number);
+                if (byId.putIfAbsent(cleanId, cosmetic) != null) {
+                    throw new IllegalArgumentException("Повторяется id косметики " + cleanId + " в " + path);
+                }
+                number++;
+            }
         }
         if (byId.isEmpty()) throw new IllegalArgumentException("Список косметики пуст");
         return new CosmeticCatalog(byId);
