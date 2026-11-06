@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -70,6 +71,49 @@ class CrownPetTest {
         assertEquals(255, opacity(lifetime / 2, lifetime), "в середине текст полностью виден");
         assertTrue(opacity(lifetime - 1, lifetime) < 255, "перед исчезновением текст тускнеет");
         assertTrue(opacity(lifetime - 1, lifetime) >= 4, "минимум 4, иначе клиент считает текст непрозрачным");
+    }
+
+    /** «Живость»: волна не выходит за -1..1 и меняется плавно, а не рывками. */
+    @Test
+    void idleWaveIsSmoothAndReachesItsFullRange() {
+        long period = 130L;
+        double min = Double.MAX_VALUE;
+        double max = -Double.MAX_VALUE;
+        double maxStep = 0.0D;
+        double previous = CrownPet.wave(0L, period, 0.0D);
+        for (long tick = 1L; tick <= period * 4L; tick++) {
+            double value = CrownPet.wave(tick, period, 0.0D);
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+            maxStep = Math.max(maxStep, Math.abs(value - previous));
+            previous = value;
+        }
+        assertEquals(-1.0D, min, 0.01D, "волна доходит до нижней точки");
+        assertEquals(1.0D, max, 0.01D, "волна доходит до верхней точки");
+        assertTrue(maxStep < 0.06D, "между тиками движение остаётся плавным");
+        assertTrue(maxStep > 0.01D, "и заметным, иначе корона просто стоит");
+    }
+
+    /** Сумма двух волн: покачивание живое, но остаётся в пределах пары сантиметров. */
+    @Test
+    void idleLiftStaysWithinAFewCentimetres() {
+        double biggest = 0.0D;
+        double smallest = Double.MAX_VALUE;
+        for (long tick = 0L; tick < 2_000L; tick++) {
+            double lift = CrownPet.idleLift(tick, 1.1D);
+            biggest = Math.max(biggest, Math.abs(lift));
+            smallest = Math.min(smallest, Math.abs(lift));
+        }
+        assertTrue(biggest <= 0.067D + 1.0E-9D, "корона не улетает выше, чем на ~6 см");
+        assertTrue(biggest > 0.03D, "но и не стоит на месте");
+        assertTrue(smallest < 0.01D, "в движении есть и почти нулевые точки — оно не дёрганое");
+    }
+
+    /** У каждой короны своя фаза, и разные оси не двигаются синхронно. */
+    @Test
+    void eachCrownSwingsWithItsOwnPhase() {
+        assertNotEquals(CrownPet.wave(120L, 130L, 0.0D), CrownPet.wave(120L, 130L, 2.1D), 0.01D);
+        assertNotEquals(CrownPet.wave(200L, 130L, 0.0D), CrownPet.wave(200L, 47L, 0.0D), 0.01D);
     }
 
     @Test

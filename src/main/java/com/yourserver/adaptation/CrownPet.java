@@ -38,11 +38,18 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Второй тестовый питомец — «живая корона» из /f8 pet 2.
  *
- * <p>Корона висит над макушкой игрока, а при беге сползает к левому или
- * правому плечу. Голова игрока не тащит её за собой: позиция считается от
- * тела игрока, поэтому наклон камеры вверх/вниз ничего не меняет. Поворот
- * тоже только горизонтальный — корона разворачивается по взгляду игрока, но
- * никогда не задирается по вертикали.</p>
+ * <p>Корона всегда висит над макушкой игрока: при беге она не сползает к
+ * плечу, а просто чуть отстаёт и плавно возвращается на своё место. Голова
+ * игрока не тащит её за собой: позиция считается от тела игрока, поэтому
+ * наклон камеры вверх/вниз ничего не меняет. Поворот тоже только
+ * горизонтальный — корона разворачивается по взгляду игрока, но никогда не
+ * задирается по вертикали.</p>
+ *
+ * <p>Чтобы корона не выглядела идеально приклеенной, у неё есть собственное
+ * «дыхание»: две медленные волны по высоте, лёгкий боковой и передний дрейф,
+ * неспешное покачивание по горизонтали, едва заметное изменение масштаба и
+ * редкое «встрепенулась» — короткий плавный подъём. Смещения измеряются
+ * сантиметрами и не мешают ей оставаться над головой.</p>
  *
  * <p>За короной остаётся редкий след из частиц цвета #ef3059: одна частица в
  * секунду, плавно опускающаяся вниз. Если игрок смотрит на корону или бьёт
@@ -56,17 +63,36 @@ final class CrownPet implements Listener {
     private static final float HITBOX_HEIGHT = 0.4f;
     /** Низ модели всегда чуть выше макушки игрока (можно поправить в config.yml). */
     private static final double DEFAULT_CROWN_GAP = 0.35D;
-    /** В беге корона уходит к плечу и летит сбоку. */
-    private static final double DEFAULT_SHOULDER_OFFSET = 0.40D;
-    private static final double SHOULDER_DROP = 0.42D;
-    /** Плавное отставание: доля пути к цели за один тик. */
-    private static final double HOVER_FOLLOW = 0.30D;
-    private static final double RUN_FOLLOW = 0.42D;
-    private static final double YAW_FOLLOW = 0.18D;
-    private static final double HOVER_AMPLITUDE = 0.05D;
-    private static final double HOVER_RADIANS_PER_TICK = Math.PI * 2.0 / 110.0;
-    /** Спринт или быстрое смещение за тик считаются бегом. */
-    private static final double RUN_MOVE_SQUARED = 0.06D;
+    /** Плавное отставание: доля пути к цели за тик. */
+    private static final double HOVER_FOLLOW = 0.32D;
+    private static final double YAW_FOLLOW = 0.14D;
+    /*
+     * «Живость»: корона не стоит идеально ровно. Все смещения — сантиметры,
+     * а не второй полёт: медленное покачивание, лёгкий боковой дрейф,
+     * едва заметное «дыхание» и редкое «встрепенулась».
+     */
+    private static final double IDLE_LIFT_SLOW = 0.055D;
+    private static final long IDLE_LIFT_SLOW_PERIOD = 130L;
+    private static final double IDLE_LIFT_FAST = 0.012D;
+    private static final long IDLE_LIFT_FAST_PERIOD = 47L;
+    private static final double IDLE_SIDE = 0.032D;
+    private static final long IDLE_SIDE_PERIOD = 173L;
+    private static final double IDLE_FORWARD = 0.022D;
+    private static final long IDLE_FORWARD_PERIOD = 227L;
+    /** Медленное «оглядывание» вокруг направления взгляда игрока, в градусах. */
+    private static final double IDLE_YAW_MIN_DEGREES = 2.5D;
+    private static final double IDLE_YAW_MAX_DEGREES = 5.0D;
+    private static final int IDLE_YAW_MIN_PERIOD = 80;
+    private static final int IDLE_YAW_MAX_PERIOD = 140;
+    /** Едва заметное «дыхание» масштаба: ±1,2%. */
+    private static final double IDLE_SCALE = 0.012D;
+    private static final long IDLE_SCALE_PERIOD = 141L;
+    /** Редкое «встрепенулась»: короткий плавный подъём и обратно. */
+    private static final int PERK_MIN_DELAY_TICKS = 100;
+    private static final int PERK_MAX_DELAY_TICKS = 260;
+    private static final int PERK_DURATION_TICKS = 20;
+    private static final double PERK_LIFT = 0.07D;
+    private static final double PERK_SCALE = 0.02D;
     /** 0,2 секунды непрерывного взгляда останавливают корону. */
     private static final int GAZE_FREEZE_TICKS = 4;
     /** 4 секунды взгляда — первая фраза. */
@@ -113,7 +139,6 @@ final class CrownPet implements Listener {
     private final Map<UUID, Crown> crowns = new HashMap<>();
     private NamespacedKey modelKey = parseModel(DEFAULT_MODEL);
     private double crownGap = DEFAULT_CROWN_GAP;
-    private double shoulderOffset = DEFAULT_SHOULDER_OFFSET;
 
     CrownPet(AdaptationPlugin plugin) {
         this.plugin = plugin;
@@ -129,9 +154,6 @@ final class CrownPet implements Listener {
         modelKey = parsed != null ? parsed : parseModel(DEFAULT_MODEL);
         crownGap = finiteOrDefault(plugin.getConfig().getDouble("pets.crown-gap", DEFAULT_CROWN_GAP),
                 DEFAULT_CROWN_GAP);
-        shoulderOffset = finiteOrDefault(
-                plugin.getConfig().getDouble("pets.shoulder-offset", DEFAULT_SHOULDER_OFFSET),
-                DEFAULT_SHOULDER_OFFSET);
         for (Crown crown : crowns.values()) {
             ItemDisplay display = crown.display;
             if (display != null && display.isValid()) display.setItemStack(modelItem());
@@ -179,7 +201,7 @@ final class CrownPet implements Listener {
     private void spawn(Player player) {
         UUID uuid = player.getUniqueId();
         int interpolationTicks = clientInterpolationTicks(player);
-        Location at = crownAnchor(player, false, 1);
+        Location at = spawnAnchor(player);
         World world = player.getWorld();
 
         ItemDisplay display = world.spawn(at, ItemDisplay.class, entity -> {
@@ -196,8 +218,15 @@ final class CrownPet implements Listener {
 
         Crown crown = new Crown(display, interpolationTicks);
         crown.hitbox = spawnHitbox(at);
-        crown.lastPlayerLocation = player.getLocation().clone();
-        crown.shoulderSide = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
+        // У каждой короны своя фаза и свой период «оглядывания», чтобы две
+        // короны рядом не двигались синхронно, как на рельсах.
+        crown.phase = ThreadLocalRandom.current().nextDouble(0.0D, Math.PI * 2.0D);
+        crown.yawAmplitude = IDLE_YAW_MIN_DEGREES
+                + ThreadLocalRandom.current().nextDouble(IDLE_YAW_MAX_DEGREES - IDLE_YAW_MIN_DEGREES);
+        crown.yawPeriod = IDLE_YAW_MIN_PERIOD
+                + ThreadLocalRandom.current().nextInt(IDLE_YAW_MAX_PERIOD - IDLE_YAW_MIN_PERIOD + 1);
+        crown.perkCooldown = PERK_MIN_DELAY_TICKS / 2
+                + ThreadLocalRandom.current().nextInt(PERK_MAX_DELAY_TICKS);
         crowns.put(uuid, crown);
         syncHitbox(crown);
     }
@@ -237,7 +266,6 @@ final class CrownPet implements Listener {
             crown.lastHitTimestamp = 0L;
         }
 
-        updateMovementMode(player, crown);
         updateGaze(player, crown);
         processHit(crown);
 
@@ -251,6 +279,7 @@ final class CrownPet implements Listener {
         }
         if (!frozen) {
             moveCrown(player, crown);
+            applyBreathing(crown);
         } else {
             rotateCrown(player, crown);
         }
@@ -265,24 +294,6 @@ final class CrownPet implements Listener {
     private static boolean tooFarFromPlayer(Player player, Location petLocation) {
         return !player.getWorld().equals(petLocation.getWorld())
                 || player.getLocation().distanceSquared(petLocation) > MAX_FROZEN_DISTANCE_SQUARED;
-    }
-
-    private void updateMovementMode(Player player, Crown crown) {
-        Location previous = crown.lastPlayerLocation;
-        double movedSquared = 0.0D;
-        if (previous != null && previous.getWorld().equals(player.getWorld())) {
-            double dx = player.getX() - previous.getX();
-            double dz = player.getZ() - previous.getZ();
-            movedSquared = dx * dx + dz * dz;
-        }
-        crown.lastPlayerLocation = player.getLocation().clone();
-
-        boolean running = player.isSprinting() || movedSquared > RUN_MOVE_SQUARED;
-        if (running && !crown.running) {
-            // Сторону плеча выбираем один раз за пробежку.
-            crown.shoulderSide = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
-        }
-        crown.running = running;
     }
 
     private void updateGaze(Player player, Crown crown) {
@@ -318,22 +329,29 @@ final class CrownPet implements Listener {
         world.playSound(at, Sound.ENTITY_PLAYER_ATTACK_CRIT, 0.45f, 1.3f);
     }
 
-    /** Корона летит над макушкой или сбоку у плеча, плавно догоняя игрока. */
+    /** Корона всегда летит над макушкой, плавно догоняя игрока и покачиваясь. */
     private void moveCrown(Player player, Crown crown) {
         Location current = crown.display.getLocation();
-        Location target = crownAnchor(player, crown.running, crown.shoulderSide);
+        Location target = crownAnchor(player, crown);
         if (!current.getWorld().equals(target.getWorld())) {
             crown.display.teleport(target);
             return;
         }
 
-        double follow = crown.running ? RUN_FOLLOW : HOVER_FOLLOW;
         Location next = current.clone();
-        next.setX(current.getX() + (target.getX() - current.getX()) * follow);
-        next.setY(current.getY() + (target.getY() - current.getY()) * follow);
-        next.setZ(current.getZ() + (target.getZ() - current.getZ()) * follow);
-        applyYawOnly(current, next, player.getYaw());
+        next.setX(current.getX() + (target.getX() - current.getX()) * HOVER_FOLLOW);
+        next.setY(current.getY() + (target.getY() - current.getY()) * HOVER_FOLLOW);
+        next.setZ(current.getZ() + (target.getZ() - current.getZ()) * HOVER_FOLLOW);
+        applyYawOnly(current, next, player.getYaw() + yawSway(crown));
         teleport(crown.display, next);
+    }
+
+    /** Стартовая точка до первого тика: над головой, без покачивания. */
+    private Location spawnAnchor(Player player) {
+        Location at = player.getLocation().clone();
+        at.setY(player.getBoundingBox().getMaxY() + crownGap);
+        at.setPitch(0.0f);
+        return at;
     }
 
     private void rotateCrown(Player player, Crown crown) {
@@ -347,28 +365,88 @@ final class CrownPet implements Listener {
      * Целевая точка короны. Считается от тела игрока (не от камеры), поэтому
      * взгляд вверх или вниз положение не меняет.
      */
-    private Location crownAnchor(Player player, boolean running, int shoulderSide) {
+    private Location crownAnchor(Player player, Crown crown) {
+        long tick = Bukkit.getCurrentTick();
+        double phase = crown.phase;
+
         Location target = player.getLocation().clone();
         double top = player.getBoundingBox().getMaxY();
-        if (running) {
-            Vector right = rightVector(target.getYaw());
-            target.add(right.multiply(shoulderOffset * shoulderSide));
-            target.setY(top - SHOULDER_DROP);
-        } else {
-            target.setY(top + crownGap);
-        }
+        target.setY(top + crownGap + idleLift(tick, phase));
 
-        double bob = Math.sin(Bukkit.getCurrentTick() * HOVER_RADIANS_PER_TICK) * HOVER_AMPLITUDE;
-        target.add(0.0D, bob, 0.0D);
+        // Дрейф считается относительно взгляда игрока: корона смещается вбок
+        // и чуть вперёд, а не просто вверх-вниз по одной линии.
+        target.add(rightVector(target.getYaw()).multiply(IDLE_SIDE * wave(tick, IDLE_SIDE_PERIOD, phase * 1.7D)));
+        target.add(forwardVector(target.getYaw())
+                .multiply(IDLE_FORWARD * wave(tick, IDLE_FORWARD_PERIOD, phase * 2.9D)));
+        target.add(0.0D, perkLift(crown), 0.0D);
+
         // Yaw берётся у тела игрока, pitch всегда нулевой: вертикального
         // вращения у короны нет.
         target.setPitch(0.0f);
         return target;
     }
 
+    /** Сумма двух волн разной длины: покачивание не выглядит механическим. */
+    static double idleLift(long tick, double phase) {
+        return IDLE_LIFT_SLOW * wave(tick, IDLE_LIFT_SLOW_PERIOD, phase)
+                + IDLE_LIFT_FAST * wave(tick, IDLE_LIFT_FAST_PERIOD, phase * 2.3D);
+    }
+
+    /**
+     * Единая волна от -1 до 1. Периоды у всех движений разные, поэтому
+     * корона не замирает в одной точке и не повторяет рисунок слишком быстро.
+     */
+    static double wave(long tick, long period, double phase) {
+        return Math.sin(tick * (Math.PI * 2.0D / period) + phase);
+    }
+
+    /** Медленное «оглядывание» вокруг направления взгляда игрока, в градусах. */
+    private static double yawSway(Crown crown) {
+        // Во время «встрепенулась» корона оглядывается чуть активнее.
+        double amplitude = crown.perkAge >= 0 ? crown.yawAmplitude * 1.8D : crown.yawAmplitude;
+        return amplitude * wave(Bukkit.getCurrentTick(), crown.yawPeriod, crown.phase * 1.3D);
+    }
+
+    /**
+     * Редкое «встрепенулась»: короткий плавный подъём и мягкий возврат.
+     * Состояние перка двигается здесь, потому что метод вызывается раз в тик.
+     */
+    private static double perkLift(Crown crown) {
+        if (crown.perkAge < 0) {
+            if (--crown.perkCooldown > 0) return 0.0D;
+            crown.perkAge = 0;
+        }
+        int age = crown.perkAge++;
+        if (age >= PERK_DURATION_TICKS) {
+            crown.perkAge = -1;
+            crown.perkCooldown = PERK_MIN_DELAY_TICKS
+                    + ThreadLocalRandom.current().nextInt(PERK_MAX_DELAY_TICKS - PERK_MIN_DELAY_TICKS);
+            return 0.0D;
+        }
+        return PERK_LIFT * Math.sin(Math.PI * (age / (double) PERK_DURATION_TICKS));
+    }
+
+    /** «Дыхание» масштаба: корона чуть увеличивается и сжимается, как живая. */
+    private void applyBreathing(Crown crown) {
+        long tick = Bukkit.getCurrentTick();
+        double scale = 1.0D + IDLE_SCALE * wave(tick, IDLE_SCALE_PERIOD, crown.phase * 0.7D);
+        if (crown.perkAge >= 0) {
+            double progress = Math.min(1.0D, crown.perkAge / (double) PERK_DURATION_TICKS);
+            scale += PERK_SCALE * Math.sin(Math.PI * progress);
+        }
+        Transformation transformation = crown.display.getTransformation();
+        transformation.getScale().set((float) scale, (float) scale, (float) scale);
+        crown.display.setTransformation(transformation);
+    }
+
     private static Vector rightVector(float yaw) {
         double radians = Math.toRadians(yaw);
-        return new Vector(-Math.cos(radians), 0.0D, -Math.sin(radians)).normalize();
+        return new Vector(-Math.cos(radians), 0.0D, -Math.sin(radians));
+    }
+
+    private static Vector forwardVector(float yaw) {
+        double radians = Math.toRadians(yaw);
+        return new Vector(-Math.sin(radians), 0.0D, Math.cos(radians));
     }
 
     /** Только горизонтальный поворот: вертикальное вращение у короны заблокировано. */
@@ -631,9 +709,12 @@ final class CrownPet implements Listener {
         private final ItemDisplay display;
         private final int interpolationTicks;
         private Interaction hitbox;
-        private boolean running;
-        private int shoulderSide = 1;
-        private Location lastPlayerLocation;
+        /** Личная фаза и период покачивания: у каждой короны свой рисунок движения. */
+        private double phase;
+        private double yawAmplitude = IDLE_YAW_MIN_DEGREES;
+        private int yawPeriod = IDLE_YAW_MIN_PERIOD;
+        private int perkCooldown = PERK_MIN_DELAY_TICKS;
+        private int perkAge = -1;
         private int gazeTicks;
         private boolean speechShownForGaze;
         private int hitFreezeTicks;
