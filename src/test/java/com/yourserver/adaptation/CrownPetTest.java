@@ -109,16 +109,26 @@ class CrownPetTest {
         assertTrue(smallest < 0.01D, "в движении есть и почти нулевые точки — оно не дёрганое");
     }
 
+    /** Углы сравниваем по кратчайшей дуге: -180° и 180° — одно направление. */
+    private static void assertYawEquals(double expected, double actual) {
+        double delta = (actual - expected) % 360.0D;
+        if (delta > 180.0D) delta -= 360.0D;
+        if (delta < -180.0D) delta += 360.0D;
+        assertTrue(Math.abs(delta) < 0.001D,
+                "ожидался разворот " + expected + "°, получили " + actual + "°");
+    }
+
     /** Когда на корону смотрят, она разворачивается лицом к игроку. */
     @Test
     void gazeTurnsTheCrownTowardsThePlayer() {
         // Игрок смотрит на север (yaw 0), корона перед ним: лицом к игроку — юг.
-        assertEquals(180.0D, CrownPet.facingYaw(0.0D, -1.0D, 0.0F), 0.001D);
+        assertYawEquals(180.0D, CrownPet.facingYaw(0.0D, -1.0D, 0.0F));
         // Игрок смотрит на восток (yaw -90), корона восточнее него.
-        assertEquals(90.0D, CrownPet.facingYaw(-1.0D, 0.0D, -90.0F), 0.001D);
-        // Корона сбоку: разворот идёт на реальное положение игрока.
-        assertEquals(0.0D, CrownPet.facingYaw(0.0D, 1.0D, 90.0F), 0.001D);
-        assertEquals(-90.0D, CrownPet.facingYaw(1.0D, 0.0D, 0.0F), 0.001D);
+        assertYawEquals(90.0D, CrownPet.facingYaw(-1.0D, 0.0D, -90.0F));
+        // Корона сбоку: разворот идёт на реальное положение игрока, а не по взгляду.
+        assertYawEquals(180.0D, CrownPet.facingYaw(0.0D, -1.0D, -90.0F));
+        assertYawEquals(0.0D, CrownPet.facingYaw(0.0D, 1.0D, 90.0F));
+        assertYawEquals(-90.0D, CrownPet.facingYaw(1.0D, 0.0D, 0.0F));
     }
 
     /**
@@ -127,10 +137,10 @@ class CrownPetTest {
      */
     @Test
     void crownDirectlyOverheadFacesThePlayerInsteadOfSpinning() {
-        assertEquals(215.0D, CrownPet.facingYaw(0.01D, 0.01D, 35.0F), 0.001D);
-        assertEquals(0.0D, CrownPet.facingYaw(0.0D, 0.0D, -180.0F), 0.001D);
+        assertYawEquals(215.0D, CrownPet.facingYaw(0.01D, 0.01D, 35.0F));
+        assertYawEquals(0.0D, CrownPet.facingYaw(0.0D, 0.0D, -180.0F));
         // Взгляд вверх не должен разворачивать корону по вертикали — только yaw.
-        assertEquals(270.0D, CrownPet.facingYaw(0.05D, -0.02D, 90.0F), 0.001D);
+        assertYawEquals(270.0D, CrownPet.facingYaw(0.05D, -0.02D, 90.0F));
     }
 
     /** У каждой короны своя фаза, и разные оси не двигаются синхронно. */
