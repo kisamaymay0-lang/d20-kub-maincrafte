@@ -44,8 +44,12 @@ final class CatBattleManager implements Listener {
     private static final double START_DISTANCE = 6.0D;
     private static final double ATTACK_DISTANCE = 1.9D;
     private static final double STALK_DISTANCE = 2.6D;
-    private static final double ATTACK_DAMAGE = 2.0D;
-    private static final double LOW_HEALTH_RATIO = 0.30D;
+    /** Небольшой урон: один успешный удар не снимает больше 0.5 HP. */
+    private static final double ATTACK_DAMAGE = 0.5D;
+    /** Четверть замахов видна, но проходит без урона — дуэль не превращается в обмен одним ударом. */
+    private static final double NO_DAMAGE_CHANCE = 0.25D;
+    /** Уходим заранее, пока у кота остаётся запас здоровья для погони. */
+    private static final double LOW_HEALTH_RATIO = 0.50D;
     private static final int STALK_MIN_TICKS = 30;
     private static final int STALK_MAX_TICKS = 70;
     private static final int POUNCE_TICKS = 8;
@@ -318,6 +322,9 @@ final class CatBattleManager implements Listener {
     private void hit(Battle battle, Cat attacker, Cat victim) {
         battle.setCooldown(attacker, ATTACK_INTERVAL_TICKS);
         attacker.swingMainHand();
+        // Замах остаётся видимым, но часть ударов не наносит урон вообще:
+        // не вызываем damage и не делаем отброс, чтобы это был именно пустой удар.
+        if (ThreadLocalRandom.current().nextDouble() < NO_DAMAGE_CHANCE) return;
         victim.damage(ATTACK_DAMAGE, attacker);
         // Смерть может синхронно вызвать EntityDeathEvent: не трогаем уже
         // удалённую сущность ради отброса и не даём второму коту ударить труп.
