@@ -35,9 +35,9 @@ import java.util.concurrent.ThreadLocalRandom;
  * Пары не заканчиваются таймером «ничьей»: если преследование застряло, по
  * истечении длительного лимита более слабый кот проигрывает дуэль.</p>
  *
- * <p>На время боя коты становятся silent, включая ambient-мурлыканье; после
- * боя исходный флаг восстанавливается. Своих звуков менеджер не проигрывает,
- * а ванильные частицы прыжков и ударов не требуют ресурспака.</p>
+ * <p>Звуки котов не отключаются: мурлыканье и ванильные звуки остаются как
+ * есть, своих звуков менеджер не проигрывает. Ванильные частицы прыжков и
+ * ударов не требуют ресурспака.</p>
  */
 final class CatBattleManager implements Listener {
     private static final double DEFAULT_CHANCE_PER_TICK = 0.001D;
@@ -151,8 +151,6 @@ final class CatBattleManager implements Listener {
     private void prepare(Cat cat, Cat opponent) {
         cat.setPersistent(true);
         cat.setRemoveWhenFarAway(false);
-        // В частности, отключаем ambient-мурлыканье на всю дуэль.
-        cat.setSilent(true);
         cat.setAI(true);
         cat.setAware(true);
         cat.setSitting(false);
@@ -572,7 +570,6 @@ final class CatBattleManager implements Listener {
         private final boolean headUp;
         private final boolean ai;
         private final boolean aware;
-        private final boolean silent;
         private final boolean persistent;
         private final boolean removeWhenFarAway;
         private final LivingEntity target;
@@ -586,7 +583,6 @@ final class CatBattleManager implements Listener {
             headUp = cat.isHeadUp();
             ai = cat.hasAI();
             aware = cat.isAware();
-            silent = cat.isSilent();
             persistent = cat.isPersistent();
             removeWhenFarAway = cat.getRemoveWhenFarAway();
             target = cat.getTarget();
@@ -601,7 +597,6 @@ final class CatBattleManager implements Listener {
             cat.setHeadUp(headUp);
             cat.setAI(ai);
             cat.setAware(aware);
-            cat.setSilent(silent);
             cat.setPersistent(persistent);
             cat.setRemoveWhenFarAway(removeWhenFarAway);
             cat.setTarget(target != null && target.isValid() && !target.isDead() ? target : null);
