@@ -342,7 +342,7 @@ final class CrownPet implements Listener {
         next.setX(current.getX() + (target.getX() - current.getX()) * HOVER_FOLLOW);
         next.setY(current.getY() + (target.getY() - current.getY()) * HOVER_FOLLOW);
         next.setZ(current.getZ() + (target.getZ() - current.getZ()) * HOVER_FOLLOW);
-        applyYawOnly(current, next, player.getYaw() + yawSway(crown));
+        applyYawOnly(current, next, (float) (player.getYaw() + yawSway(crown)));
         teleport(crown.display, next);
     }
 
