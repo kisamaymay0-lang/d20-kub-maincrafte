@@ -319,16 +319,18 @@ final class CatBattleManager implements Listener {
         battle.setCooldown(attacker, ATTACK_INTERVAL_TICKS);
         attacker.swingMainHand();
         victim.damage(ATTACK_DAMAGE, attacker);
+        // Смерть может синхронно вызвать EntityDeathEvent: не трогаем уже
+        // удалённую сущность ради отброса и не даём второму коту ударить труп.
+        if (victim.isDead() || victim.getHealth() <= 0.0D) {
+            finish(battle, attacker, victim, true);
+            return;
+        }
         // Лёгкий отброс помогает прочитать удар, но не разрывает погоню.
         Vector direction = horizontalDirection(attacker, victim);
         if (direction.lengthSquared() > 0.0001D) {
             victim.knockback(0.12D, -direction.getX(), -direction.getZ());
         }
-        if (victim.isDead() || victim.getHealth() <= 0.0D) {
-            finish(battle, attacker, victim, true);
-        } else {
-            updateFleeing(battle);
-        }
+        updateFleeing(battle);
     }
 
     /** Страховка от непроходимой геометрии/отменённого сторонним плагином урона. */
