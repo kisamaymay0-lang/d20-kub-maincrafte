@@ -32,8 +32,10 @@ import java.util.concurrent.ThreadLocalRandom;
 public class PetManager implements Listener {
 
     private static final NamespacedKey PET_MODEL = new NamespacedKey("f8resurs", "test-pets");
-    /** Клиент сглаживает позицию и поворот между серверными обновлениями. */
-    private static final int MOVEMENT_INTERPOLATION_TICKS = 2;
+    /** Клиент заполняет промежутки между пакетами; при высоком пинге буфер больше. */
+    private static final int MIN_MOVEMENT_INTERPOLATION_TICKS = 3;
+    private static final int MAX_MOVEMENT_INTERPOLATION_TICKS = 8;
+    private static final int INTERPOLATION_REFRESH_TICKS = 20;
     /** Разные углы входа и выхода не дают режиму дёргаться на границе взгляда. */
     private static final double LOOK_ENTER_DOT = Math.cos(Math.toRadians(25.0));
     private static final double LOOK_EXIT_DOT = Math.cos(Math.toRadians(35.0));
@@ -45,7 +47,7 @@ public class PetManager implements Listener {
     private static final double[] ROTATION_STRENGTHS = {0.065, 0.095};
     /** Остановка включается после 0,2 секунды непрерывного наведения. */
     private static final int GAZE_DURATION_TICKS = 4;
-    /** После удара питомец следит за владельцем 2 секунды, пока тот не посмотрит в ответ. */
+    /** Любой удар владельца останавливает питомца ровно на 2 секунды. */
     private static final int HIT_ATTENTION_TICKS = 40;
     private static final int HELP_GAZE_DELAY_TICKS = 60;
     private static final int HELP_VISIBLE_TICKS = 80;
@@ -92,6 +94,7 @@ public class PetManager implements Listener {
     private final Map<UUID, Integer> gazeTicks = new HashMap<>();
     private final Map<UUID, Integer> hitAttentionTicks = new HashMap<>();
     private final Map<UUID, Integer> homeSlots = new HashMap<>();
+    private final Map<UUID, Integer> petInterpolationTicks = new HashMap<>();
     private final Map<UUID, Double> rotationStrengths = new HashMap<>();
     private final Map<UUID, Long> lastHitTimestamps = new HashMap<>();
     private long hoverTicks;
@@ -117,6 +120,7 @@ public class PetManager implements Listener {
     private void spawn(Player player) {
         UUID uuid = player.getUniqueId();
         Location eye = player.getEyeLocation().clone();
+        int interpolationTicks = clientInterpolationTicks(player);
 
         // Служебный носитель не пересекается с ванильной бумагой и её ресурсами.
         ItemStack item = new ItemStack(Material.BARRIER, 1);
@@ -133,13 +137,14 @@ public class PetManager implements Listener {
             display.setInvulnerable(true);
             display.setSilent(true);
             display.setPersistent(false);
-            display.setTeleportDuration(MOVEMENT_INTERPOLATION_TICKS);
-            display.setInterpolationDuration(MOVEMENT_INTERPOLATION_TICKS);
+            display.setTeleportDuration(interpolationTicks);
+            display.setInterpolationDuration(interpolationTicks);
             display.setInterpolationDelay(0);
             display.getPersistentDataContainer().set(petMarkerKey, PersistentDataType.BYTE, (byte) 1);
         });
 
         pets.put(uuid, pet);
+        petInterpolationTicks.put(uuid, interpolationTicks);
         hitboxes.put(uuid, spawnHitbox(eye));
         rotationStrengths.put(uuid, randomRotationStrength());
         lastHitTimestamps.put(uuid, 0L);
@@ -185,6 +190,9 @@ public class PetManager implements Listener {
     }
 
     private void tickPet(UUID uuid, Player player, ItemDisplay pet, Interaction hitbox, float hoverOffset) {
+        if (hoverTicks % INTERPOLATION_REFRESH_TICKS == 0) {
+            syncClientInterpolation(uuid, player, pet);
+        }
         applyHover(pet, hoverOffset);
         processHits(uuid, pet, hitbox, hoverOffset);
         tickHelpText(uuid, pet, hoverOffset);
@@ -198,11 +206,9 @@ public class PetManager implements Listener {
             if (attentionTicks != null) {
                 if (!eye.getWorld().equals(current.getWorld())) {
                     hitAttentionTicks.remove(uuid);
-                } else if (isPetInView(eye, current, false)) {
-                    // Взаимный взгляд возвращает обычные правила: 0,2 секунды
-                    // на включение, затем удержание и стандартное возвращение.
-                    hitAttentionTicks.remove(uuid);
                 } else if (attentionTicks < HIT_ATTENTION_TICKS) {
+                    // Взгляд владельца не отменяет этот режим: после любого
+                    // удара питомец стоит и смотрит на него полные 2 секунды.
                     facePlayer(pet, eye, current, rotationStrength);
                     hitAttentionTicks.put(uuid, attentionTicks + 1);
                     return;
@@ -273,9 +279,9 @@ public class PetManager implements Listener {
         }
         lastHitTimestamps.put(uuid, timestamp);
 
-        if (attack.getPlayer().getUniqueId().equals(uuid) && !petsFacingPlayer.contains(uuid)) {
-            // Каждый новый удар обновляет двухсекундное внимание. Если питомец
-            // уже смотрит на владельца по обычным правилам, этот режим не нужен.
+        if (attack.getPlayer().getUniqueId().equals(uuid)) {
+            // Даже во время обычного взгляда или возвращения удар даёт
+            // гарантированные 2 секунды неподвижного внимания к владельцу.
             resetGaze(uuid);
             hitAttentionTicks.put(uuid, 0);
             rotationStrengths.put(uuid, randomRotationStrength());
@@ -330,7 +336,8 @@ public class PetManager implements Listener {
 
     private void showPetText(UUID uuid, ItemDisplay pet, Component content, float hoverOffset) {
         removeHelpText(uuid);
-        TextDisplay text = spawnHelpText(pet.getLocation(), hoverOffset, content);
+        TextDisplay text = spawnHelpText(pet.getLocation(), hoverOffset, content,
+                petInterpolationTicks.getOrDefault(uuid, MIN_MOVEMENT_INTERPOLATION_TICKS));
         helpTexts.put(uuid, text);
         helpTextAges.put(uuid, 0);
     }
@@ -368,7 +375,9 @@ public class PetManager implements Listener {
         syncHelpText(text, pet.getLocation(), hoverOffset);
     }
 
-    private TextDisplay spawnHelpText(Location petLocation, float hoverOffset, Component content) {
+    private TextDisplay spawnHelpText(
+            Location petLocation, float hoverOffset, Component content, int interpolationTicks
+    ) {
         Location at = helpLocation(petLocation, hoverOffset);
         TextDisplay text = at.getWorld().spawn(at, TextDisplay.class, display -> {
             display.text(content);
@@ -386,7 +395,7 @@ public class PetManager implements Listener {
             display.setTransformation(transformation);
             display.setLineWidth(300);
             display.setAlignment(TextDisplay.TextAlignment.CENTER);
-            display.setTeleportDuration(MOVEMENT_INTERPOLATION_TICKS);
+            display.setTeleportDuration(interpolationTicks);
             display.setInterpolationDuration(0);
             display.getPersistentDataContainer().set(helpMarkerKey, PersistentDataType.BYTE, (byte) 1);
         });
@@ -402,6 +411,29 @@ public class PetManager implements Listener {
                 listener.playSound(at, PET_TALK_SOUND, SoundCategory.MASTER, 1.0f, 1.0f);
             }
         }
+    }
+
+    private void syncClientInterpolation(UUID uuid, Player player, ItemDisplay pet) {
+        int ticks = clientInterpolationTicks(player);
+        if (petInterpolationTicks.getOrDefault(uuid, -1) == ticks) {
+            return;
+        }
+
+        // Display-entity интерполируется уже на клиенте: при потере/задержке
+        // отдельных пакетов он не дёргается к последней серверной позиции.
+        pet.setTeleportDuration(ticks);
+        pet.setInterpolationDuration(ticks);
+        TextDisplay text = helpTexts.get(uuid);
+        if (text != null && text.isValid()) {
+            text.setTeleportDuration(ticks);
+        }
+        petInterpolationTicks.put(uuid, ticks);
+    }
+
+    private static int clientInterpolationTicks(Player player) {
+        int ping = Math.max(0, player.getPing());
+        return Math.min(MAX_MOVEMENT_INTERPOLATION_TICKS,
+                MIN_MOVEMENT_INTERPOLATION_TICKS + ping / 150);
     }
 
     private static byte helpOpacity(int age) {
@@ -491,7 +523,7 @@ public class PetManager implements Listener {
 
     private static void follow(ItemDisplay pet, Location current, Location target, double rotationStrength) {
         if (!current.getWorld().equals(target.getWorld())) {
-            pet.teleport(target);
+            teleportPet(pet, target);
             return;
         }
 
@@ -500,7 +532,7 @@ public class PetManager implements Listener {
         next.setY(current.getY() + (target.getY() - current.getY()) * FOLLOW_STRENGTH);
         next.setZ(current.getZ() + (target.getZ() - current.getZ()) * FOLLOW_STRENGTH);
         rotateTowards(current, next, target.getYaw(), target.getPitch(), rotationStrength);
-        pet.teleport(next);
+        teleportPet(pet, next);
     }
 
     private static void updateReturning(
@@ -513,7 +545,7 @@ public class PetManager implements Listener {
         Location start = movement.start;
         Location target = movement.target;
         if (!start.getWorld().equals(target.getWorld())) {
-            pet.teleport(target);
+            teleportPet(pet, target);
             movement.ticks = RETURN_DURATION_TICKS;
             return;
         }
@@ -527,7 +559,7 @@ public class PetManager implements Listener {
         next.setY(start.getY() + (target.getY() - start.getY()) * eased);
         next.setZ(start.getZ() + (target.getZ() - start.getZ()) * eased);
         rotateTowards(current, next, target.getYaw(), target.getPitch(), rotationStrength);
-        pet.teleport(next);
+        teleportPet(pet, next);
     }
 
     private static void facePlayer(ItemDisplay pet, Location eye, Location current, double rotationStrength) {
@@ -538,7 +570,17 @@ public class PetManager implements Listener {
             desired.setDirection(toPlayer);
             rotateTowards(current, facing, desired.getYaw(), desired.getPitch(), rotationStrength);
         }
-        pet.teleport(facing);
+        teleportPet(pet, facing);
+    }
+
+    private static void teleportPet(ItemDisplay pet, Location target) {
+        Location current = pet.getLocation();
+        if (!current.getWorld().equals(target.getWorld())
+                || current.distanceSquared(target) > 1.0E-8
+                || Math.abs(current.getYaw() - target.getYaw()) > 0.001f
+                || Math.abs(current.getPitch() - target.getPitch()) > 0.001f) {
+            pet.teleport(target);
+        }
     }
 
     private static void rotateTowards(
@@ -657,6 +699,7 @@ public class PetManager implements Listener {
         gazeTicks.remove(uuid);
         hitAttentionTicks.remove(uuid);
         homeSlots.remove(uuid);
+        petInterpolationTicks.remove(uuid);
         rotationStrengths.remove(uuid);
         lastHitTimestamps.remove(uuid);
         helpTextAges.remove(uuid);
@@ -671,6 +714,7 @@ public class PetManager implements Listener {
         gazeTicks.clear();
         hitAttentionTicks.clear();
         homeSlots.clear();
+        petInterpolationTicks.clear();
         rotationStrengths.clear();
         lastHitTimestamps.clear();
         helpTextAges.clear();
