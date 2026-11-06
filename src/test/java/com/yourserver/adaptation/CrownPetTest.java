@@ -56,22 +56,26 @@ class CrownPetTest {
         assertNull(CrownPet.parseModel(null));
     }
 
+    /** Клиент читает непрозрачность как беззнаковый байт, поэтому сравниваем так же. */
+    private static int opacity(int age, int lifetime) {
+        return Byte.toUnsignedInt(CrownPet.speechOpacity(age, lifetime));
+    }
+
     @Test
     void speechFadesInAndOutInsteadOfPopping() {
         int lifetime = 80;
-        assertEquals(4, CrownPet.speechOpacity(0, lifetime), "первый тик почти прозрачный");
-        assertTrue(CrownPet.speechOpacity(10, lifetime) > CrownPet.speechOpacity(0, lifetime),
-                "текст плавно появляется");
-        assertEquals(255, CrownPet.speechOpacity(lifetime / 2, lifetime), "в середине текст полностью виден");
-        assertTrue(CrownPet.speechOpacity(lifetime - 1, lifetime) < 255, "перед исчезновением текст тускнеет");
-        assertTrue(CrownPet.speechOpacity(lifetime - 1, lifetime) >= 4);
+        assertEquals(4, opacity(0, lifetime), "первый тик почти прозрачный");
+        assertTrue(opacity(10, lifetime) > opacity(0, lifetime), "текст плавно появляется");
+        assertTrue(opacity(15, lifetime) > opacity(10, lifetime));
+        assertEquals(255, opacity(lifetime / 2, lifetime), "в середине текст полностью виден");
+        assertTrue(opacity(lifetime - 1, lifetime) < 255, "перед исчезновением текст тускнеет");
+        assertTrue(opacity(lifetime - 1, lifetime) >= 4, "минимум 4, иначе клиент считает текст непрозрачным");
     }
 
     @Test
     void shortRepliesStillFadeOutBeforeTheyDisappear() {
         int lifetime = 40;
-        assertEquals(255, CrownPet.speechOpacity(lifetime / 2, lifetime));
-        assertTrue(CrownPet.speechOpacity(lifetime - 1, lifetime) < 40,
-                "короткий ответ успевает погаснуть");
+        assertEquals(255, opacity(lifetime / 2, lifetime));
+        assertTrue(opacity(lifetime - 1, lifetime) < 40, "короткий ответ успевает погаснуть");
     }
 }
