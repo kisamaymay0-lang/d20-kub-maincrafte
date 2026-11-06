@@ -4,6 +4,8 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CatBattleManagerTest {
     private YamlConfiguration config(String text) throws Exception {
@@ -39,5 +41,15 @@ class CatBattleManagerTest {
     @Test
     void missingChanceUsesDocumentedDefault() throws Exception {
         assertEquals(0.001, CatBattleManager.readChance(config("cat-battles:\n  enabled: true\n")), 0.0000001);
+    }
+
+    /** На половине здоровья коты в 90% случаев расходятся живыми. */
+    @Test
+    void halfHealthDuelsAreUsuallySpared() {
+        assertTrue(CatBattleManager.sparesInsteadOfKill(0.0));
+        assertTrue(CatBattleManager.sparesInsteadOfKill(0.5));
+        assertTrue(CatBattleManager.sparesInsteadOfKill(0.899_999));
+        assertFalse(CatBattleManager.sparesInsteadOfKill(0.9));
+        assertFalse(CatBattleManager.sparesInsteadOfKill(0.999_999));
     }
 }

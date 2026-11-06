@@ -52,6 +52,8 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
     private PetManager petManager;
+    /** Второй питомец — «живая корона» из /f8 pet 2. */
+    private CrownPet crownPet;
     private CatBattleManager catBattleManager;
     private Apvsh apvsh;
     private SweetBerryBlock sweetBerryBlock;
@@ -147,6 +149,10 @@ public void onEnable() {
     petManager = new PetManager(this);
     getServer().getPluginManager().registerEvents(petManager, this);
 
+    // Второй питомец: корона над головой, /f8 pet 2.
+    crownPet = new CrownPet(this);
+    getServer().getPluginManager().registerEvents(crownPet, this);
+
     // Дикие коты: дуэли тикаются вместе с питомцами, но не связаны с их сущностями.
     catBattleManager = new CatBattleManager(this);
     getServer().getPluginManager().registerEvents(catBattleManager, this);
@@ -212,6 +218,7 @@ public void onEnable() {
                     winterFishing,
                     ancientJug,
                     petManager,
+                    crownPet,
                     apvsh
             );
 
@@ -230,6 +237,7 @@ public void onEnable() {
         @Override
         public void run() {
             petManager.tick();
+            if (crownPet != null) crownPet.tick();
             if (catBattleManager != null) catBattleManager.tick();
         }
     }.runTaskTimer(this, 0L, 1L);
@@ -285,6 +293,9 @@ public void onEnable() {
         if (petManager != null) {
             petManager.stopAll();
         }
+        if (crownPet != null) {
+            crownPet.stopAll();
+        }
         if (catBattleManager != null) {
             catBattleManager.disable();
         }
@@ -328,6 +339,12 @@ public void onEnable() {
         if (catBattleManager != null) {
             catBattleManager.reloadSettings();
         }
+        if (petManager != null) {
+            petManager.reloadSettings();
+        }
+        if (crownPet != null) {
+            crownPet.reloadSettings();
+        }
         List<String> summaries = new ArrayList<>();
         if (profileManager != null) {
             summaries.add(profileManager.reloadPrefixes());
@@ -336,6 +353,7 @@ public void onEnable() {
             summaries.add(profileManager.reloadCosmetics());
         }
         if (catBattleManager != null) summaries.add(catBattleManager.describe());
+        if (crownPet != null) summaries.add(crownPet.describe());
         if (specialCatch != null && !specialCatch.describe().isBlank()) summaries.add(specialCatch.describe());
         summaries.removeIf(String::isBlank);
         return String.join("\n", summaries);

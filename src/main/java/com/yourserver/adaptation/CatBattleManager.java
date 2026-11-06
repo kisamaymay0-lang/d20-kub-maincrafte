@@ -30,10 +30,12 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>Менеджер работает только на главном серверном тике и использует обычный
  * Bukkit/Paper API, без NMS. Коты крадутся, прыгают друг на друга, а между
- * короткими обменами кружат и повторяют прыжок. После перехода на низкое
- * здоровье один кот убегает, а второй продолжает преследование и добивает его.
- * Пары не заканчиваются таймером «ничьей»: если преследование застряло, по
- * истечении длительного лимита более слабый кот проигрывает дуэль.</p>
+ * короткими обменами кружат и повторяют прыжок. Когда у одного из котов
+ * остаётся половина здоровья, дуэль в 90% случаев заканчивается миром:
+ * оба кота расходятся живыми. В оставшихся 10% один кот убегает, второй его
+ * преследует, и дуэль заканчивается одной смертью. Таймер «ничьей» не
+ * используется: если погоня застряла, по длительному лимиту проигрывает
+ * более слабый кот.</p>
  *
  * <p>Звуки котов не отключаются: мурлыканье и ванильные звуки остаются как
  * есть, своих звуков менеджер не проигрывает. Ванильные частицы прыжков и
@@ -52,6 +54,8 @@ final class CatBattleManager implements Listener {
     private static final double NO_DAMAGE_CHANCE = 0.25D;
     /** Уходим заранее, пока у кота остаётся запас здоровья для погони. */
     private static final double LOW_HEALTH_RATIO = 0.50D;
+    /** На половине здоровья коты чаще щадят друг друга: 90% дуэлей без жертвы. */
+    private static final double SPARE_CHANCE = 0.90D;
     private static final int STALK_MIN_TICKS = 30;
     private static final int STALK_MAX_TICKS = 70;
     private static final int CIRCLE_TICKS = 28;
@@ -225,6 +229,7 @@ final class CatBattleManager implements Listener {
 
     private void tickCircle(Battle battle) {
         updateFleeing(battle);
+        if (battle.finished) return;
         if (battle.fleeing != null) {
             battle.phase = Phase.FIGHT;
             battle.phaseTicks = 0;
@@ -332,10 +337,25 @@ final class CatBattleManager implements Listener {
         } else {
             battle.fleeing = firstLow ? battle.first : battle.second;
         }
+        // Как только у одного из котов остаётся половина здоровья, дуэль чаще
+        // заканчивается миром: оба расходятся, никто не умирает.
+        if (sparesInsteadOfKill(ThreadLocalRandom.current().nextDouble())) {
+            Cat spared = battle.fleeing;
+            finish(battle, battle.other(spared), spared, false);
+            return;
+        }
         Cat pursuer = battle.other(battle.fleeing);
         battle.fleeing.setTarget(null);
         battle.fleeing.getPathfinder().stopPathfinding();
         pursuer.setTarget(battle.fleeing);
+    }
+
+    /**
+     * Решение «пощадить» на пороге половины здоровья.
+     * Отдельный метод, чтобы вероятность была явной и покрытой тестом.
+     */
+    static boolean sparesInsteadOfKill(double roll) {
+        return roll < SPARE_CHANCE;
     }
 
     private static boolean lowHealth(Cat cat) {

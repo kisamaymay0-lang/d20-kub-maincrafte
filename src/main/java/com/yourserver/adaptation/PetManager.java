@@ -31,7 +31,10 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public class PetManager implements Listener {
 
-    private static final NamespacedKey PET_MODEL = new NamespacedKey("f8resurs", "test-pets");
+    /** Модели по умолчанию; сервер может переопределить их в config.yml (pets.test-models). */
+    private static final String[] DEFAULT_PET_MODELS = {"f8resurs:test-pets", "f8resurs:test-pets2"};
+    /** Раз в секунду тестовый питомец меняет модель из списка. */
+    private static final int MODEL_SWITCH_TICKS = 20;
     /** Клиент заполняет промежутки между пакетами; при высоком пинге буфер больше. */
     private static final int MIN_MOVEMENT_INTERPOLATION_TICKS = 3;
     private static final int MAX_MOVEMENT_INTERPOLATION_TICKS = 8;
@@ -97,6 +100,8 @@ public class PetManager implements Listener {
     private final Map<UUID, Integer> petInterpolationTicks = new HashMap<>();
     private final Map<UUID, Double> rotationStrengths = new HashMap<>();
     private final Map<UUID, Long> lastHitTimestamps = new HashMap<>();
+    private final Map<UUID, Integer> modelIndexes = new HashMap<>();
+    private NamespacedKey[] petModels = defaultPetModels();
     private long hoverTicks;
 
     public PetManager(AdaptationPlugin plugin) {
@@ -104,6 +109,50 @@ public class PetManager implements Listener {
         this.petMarkerKey = new NamespacedKey(plugin, "test_pet_display");
         this.hitboxMarkerKey = new NamespacedKey(plugin, "test_pet_hitbox");
         this.helpMarkerKey = new NamespacedKey(plugin, "test_pet_help_text");
+        reloadSettings();
+    }
+
+    /** Перечитать список моделей после /f8 reload: уже заспавненные питомцы получат новые. */
+    public void reloadSettings() {
+        List<String> configured = plugin.getConfig().getStringList("pets.test-models");
+        List<NamespacedKey> keys = new ArrayList<>();
+        for (String raw : configured) {
+            NamespacedKey key = parseModel(raw);
+            if (key != null && !keys.contains(key)) keys.add(key);
+        }
+        petModels = keys.isEmpty() ? defaultPetModels() : keys.toArray(new NamespacedKey[0]);
+    }
+
+    private static NamespacedKey[] defaultPetModels() {
+        NamespacedKey[] keys = new NamespacedKey[DEFAULT_PET_MODELS.length];
+        for (int i = 0; i < DEFAULT_PET_MODELS.length; i++) {
+            keys[i] = NamespacedKey.fromString(DEFAULT_PET_MODELS[i]);
+        }
+        return keys;
+    }
+
+    static NamespacedKey parseModel(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return NamespacedKey.fromString(raw.trim().toLowerCase(Locale.ROOT));
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private NamespacedKey modelFor(int index) {
+        return petModels[Math.floorMod(index, petModels.length)];
+    }
+
+    private static ItemStack modelItem(NamespacedKey model) {
+        // Служебный носитель не пересекается с ванильной бумагой и её ресурсами.
+        ItemStack item = new ItemStack(Material.BARRIER, 1);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.setItemModel(model);
+            item.setItemMeta(meta);
+        }
+        return item;
     }
 
     public void toggle(Player player) {
@@ -122,17 +171,9 @@ public class PetManager implements Listener {
         Location eye = player.getEyeLocation().clone();
         int interpolationTicks = clientInterpolationTicks(player);
 
-        // Служебный носитель не пересекается с ванильной бумагой и её ресурсами.
-        ItemStack item = new ItemStack(Material.BARRIER, 1);
-        ItemMeta meta = item.getItemMeta();
-        if (meta != null) {
-            meta.setItemModel(PET_MODEL);
-            item.setItemMeta(meta);
-        }
-
         World world = player.getWorld();
         ItemDisplay pet = world.spawn(eye, ItemDisplay.class, display -> {
-            display.setItemStack(item);
+            display.setItemStack(modelItem(modelFor(0)));
             display.setGravity(false);
             display.setInvulnerable(true);
             display.setSilent(true);
@@ -148,6 +189,7 @@ public class PetManager implements Listener {
         hitboxes.put(uuid, spawnHitbox(eye));
         rotationStrengths.put(uuid, randomRotationStrength());
         lastHitTimestamps.put(uuid, 0L);
+        modelIndexes.put(uuid, 0);
     }
 
     private Interaction spawnHitbox(Location location) {
@@ -190,6 +232,9 @@ public class PetManager implements Listener {
     }
 
     private void tickPet(UUID uuid, Player player, ItemDisplay pet, Interaction hitbox, float hoverOffset) {
+        if (hoverTicks % MODEL_SWITCH_TICKS == 0) {
+            rotateModel(uuid, pet);
+        }
         if (hoverTicks % INTERPOLATION_REFRESH_TICKS == 0) {
             syncClientInterpolation(uuid, player, pet);
         }
@@ -671,7 +716,20 @@ public class PetManager implements Listener {
 
         // Старые питомцы до появления маркера тоже находятся по их item model.
         ItemStack item = display.getItemStack();
-        return item != null && item.hasItemMeta() && PET_MODEL.equals(item.getItemMeta().getItemModel());
+        if (item == null || !item.hasItemMeta()) return false;
+        NamespacedKey model = item.getItemMeta().getItemModel();
+        for (NamespacedKey candidate : petModels) {
+            if (candidate.equals(model)) return true;
+        }
+        return false;
+    }
+
+    /** Раз в секунду меняем модель питомца: test-pets ⇄ test-pets2 (и т.д. по списку). */
+    private void rotateModel(UUID uuid, ItemDisplay pet) {
+        if (petModels.length < 2) return;
+        int next = Math.floorMod(modelIndexes.getOrDefault(uuid, 0) + 1, petModels.length);
+        modelIndexes.put(uuid, next);
+        pet.setItemStack(modelItem(modelFor(next)));
     }
 
     private static void removeEntity(Entity entity, Set<UUID> removed) {
@@ -702,6 +760,7 @@ public class PetManager implements Listener {
         petInterpolationTicks.remove(uuid);
         rotationStrengths.remove(uuid);
         lastHitTimestamps.remove(uuid);
+        modelIndexes.remove(uuid);
         helpTextAges.remove(uuid);
         helpShownThisGaze.remove(uuid);
         helpFadingOut.remove(uuid);
@@ -717,6 +776,7 @@ public class PetManager implements Listener {
         petInterpolationTicks.clear();
         rotationStrengths.clear();
         lastHitTimestamps.clear();
+        modelIndexes.clear();
         helpTextAges.clear();
         helpShownThisGaze.clear();
         helpFadingOut.clear();

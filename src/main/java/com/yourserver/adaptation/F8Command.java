@@ -36,6 +36,7 @@ public class F8Command implements CommandExecutor, Listener {
     private final WinterFishing winterFishing;
     private final AncientJug ancientJug;
     private final PetManager petManager;
+    private final CrownPet crownPet;
     private final Apvsh apvsh;
 
     private final NamespacedKey menuKey;
@@ -50,6 +51,7 @@ public class F8Command implements CommandExecutor, Listener {
             WinterFishing winterFishing,
             AncientJug ancientJug,
             PetManager petManager,
+            CrownPet crownPet,
             Apvsh apvsh
     ) {
         this.plugin = plugin;
@@ -61,6 +63,7 @@ public class F8Command implements CommandExecutor, Listener {
         this.winterFishing = winterFishing;
         this.ancientJug = ancientJug;
         this.petManager = petManager;
+        this.crownPet = crownPet;
         this.apvsh = apvsh;
         this.menuKey = new NamespacedKey(plugin, "f8_menu");
     }
@@ -90,7 +93,7 @@ public class F8Command implements CommandExecutor, Listener {
                 sender.sendMessage("§cНедостаточно прав.");
                 return true;
             }
-            int removed = petManager.killAll();
+            int removed = petManager.killAll() + (crownPet != null ? crownPet.killAll() : 0);
             sender.sendMessage("§aОчистка завершена: удалено сущностей питомцев — §f" + removed + "§a.");
             return true;
         }
@@ -177,6 +180,19 @@ public class F8Command implements CommandExecutor, Listener {
         }
 
         if (args.length > 0 && args[0].equalsIgnoreCase("pet")) {
+            // /f8 pet — первый тестовый питомец, /f8 pet 2 — живая корона.
+            if (args.length > 1 && args[1].equals("2")) {
+                if (crownPet == null) {
+                    player.sendMessage("§cПитомец-корона недоступен.");
+                    return true;
+                }
+                crownPet.toggle(player);
+                return true;
+            }
+            if (args.length > 1 && !args[1].equals("1")) {
+                player.sendMessage("§7Использование: §f/f8 pet [1|2]§7 — 1: тестовый питомец, 2: живая корона.");
+                return true;
+            }
             petManager.toggle(player);
             return true;
         }
