@@ -1,0 +1,26 @@
+{
+  "pet-talking1": {
+    "category": "neutral",
+    "sounds": [
+      {
+        "name": "pet-talking1",
+        "stream": false,
+        "volume": 1.0,
+        "pitch": 1.0,
+        "weight": 1
+      }
+    ]
+  },
+  "pet-talking2": {
+    "category": "neutral",
+    "sounds": [
+      {
+        "name": "pet-talking2",
+        "stream": false,
+        "volume": 1.0,
+        "pitch": 1.0,
+        "weight": 1
+      }
+    ]
+  }
+}

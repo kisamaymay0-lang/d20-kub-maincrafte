@@ -3,6 +3,7 @@ package com.yourserver.adaptation;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.SoundCategory;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -26,6 +27,8 @@ public class F8Command implements CommandExecutor, Listener {
     private static final String ENCHANT_TITLE = "§8Новые чарки";
     private static final String BLOCK_TITLE = "§8Новые блоки";
     private static final String ITEM_TITLE = "§8Новые предметы";
+    /** Ключи, которые плагин просит у пака: их и проверяем по /f8 sound. */
+    static final String[] TEST_SOUND_KEYS = {"f8resurs:pet-talking1", "f8resurs:pet-talking2"};
 
     private final AdaptationPlugin plugin;
     private final DiceRollListener diceRollListener;
@@ -84,6 +87,20 @@ public class F8Command implements CommandExecutor, Listener {
             String summary = plugin.reloadPluginSettings();
             sender.sendMessage("§aНастройки f8-plugin перечитаны из config.yml.");
             if (summary != null && !summary.isBlank()) sender.sendMessage(summary);
+            return true;
+        }
+
+        // /f8 sound — проиграть оба звука пака самому себе (диагностика пака).
+        if (args.length > 0 && args[0].equalsIgnoreCase("sound")) {
+            if (!sender.hasPermission("f8.admin")) {
+                sender.sendMessage("§cНедостаточно прав.");
+                return true;
+            }
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("§cПроверка звука доступна только игроку.");
+                return true;
+            }
+            playTestSounds(player);
             return true;
         }
 
@@ -530,6 +547,28 @@ public class F8Command implements CommandExecutor, Listener {
             pane.setItemMeta(meta);
         }
         return pane;
+    }
+
+    /**
+     * Играет оба ключа пака прямо в ушах игрока, без питомцев и без условий.
+     * Если тут тишина — виноват пак, а не логика питомцев.
+     */
+    void playTestSounds(Player player) {
+        for (int i = 0; i < TEST_SOUND_KEYS.length; i++) {
+            final String key = TEST_SOUND_KEYS[i];
+            final long delay = i * 40L;
+            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+                if (!player.isOnline()) return;
+                player.playSound(player.getLocation(), key, SoundCategory.MASTER, 1.0f, 1.0f);
+                plugin.getLogger().info("Проверка звука: отправлен " + key
+                        + " игроку " + player.getName());
+            }, delay);
+        }
+        player.sendMessage("§7Проверка звуков пака: сейчас §f" + TEST_SOUND_KEYS[0]
+                + "§7, через 2 секунды §f" + TEST_SOUND_KEYS[1] + "§7.");
+        player.sendMessage("§7Тишина? Смотрите клиентский §flogs/latest.log§7: "
+                + "§fUnable to play unknown soundEvent§7 — нет ключа в sounds.json; "
+                + "§fis stereo§7 — ogg должен быть моно.");
     }
 
     private void giveItem(Player player, ItemStack item) {
