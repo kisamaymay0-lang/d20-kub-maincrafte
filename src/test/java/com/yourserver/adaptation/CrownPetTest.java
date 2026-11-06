@@ -57,20 +57,32 @@ class CrownPetTest {
         assertNull(CrownPet.parseModel(null));
     }
 
-    /** Клиент читает непрозрачность как беззнаковый байт, поэтому сравниваем так же. */
-    private static int opacity(int age, int lifetime) {
-        return Byte.toUnsignedInt(CrownPet.speechOpacity(age, lifetime));
+    /**
+     * Двойная надпись только одна: «...», а через две секунды — вторая часть.
+     * Остальные реплики одиночные и говорятся без «...».
+     */
+    @Test
+    void onlyTheLeadingEllipsisIsFollowedByASecondLine() {
+        assertEquals("...", CrownPet.chatLeadIn(), "первая часть двойной надписи — просто «...»");
+
+        List<String> twoPart = List.of(CrownPet.chatTwoPartReplies());
+        assertEquals(List.of("Зачем ты вообще существуешь?", "Нет.", "Отстань"), twoPart);
+
+        List<String> single = List.of(CrownPet.chatSingleReplies());
+        assertTrue(single.contains("Наверное?"), "«Наверное?» остаётся одиночной репликой");
+        assertTrue(single.contains("Зачем ты вообще существуешь?"));
+        assertTrue(single.contains("Нет."), "«Нет.» может звучать и без «...»");
+        assertTrue(single.contains("Отстань"), "«Отстань» может звучать и без «...»");
+        assertTrue(single.stream().noneMatch("..."::equals), "одиночные реплики не начинаются с «...»");
+        assertTrue(twoPart.stream().noneMatch("Наверное?"::equals),
+                "«Наверное?» не дописывается второй частью");
     }
 
     @Test
-    void speechFadesInAndOutInsteadOfPopping() {
-        int lifetime = 80;
-        assertEquals(4, opacity(0, lifetime), "первый тик почти прозрачный");
-        assertTrue(opacity(10, lifetime) > opacity(0, lifetime), "текст плавно появляется");
-        assertTrue(opacity(15, lifetime) > opacity(10, lifetime));
-        assertEquals(255, opacity(lifetime / 2, lifetime), "в середине текст полностью виден");
-        assertTrue(opacity(lifetime - 1, lifetime) < 255, "перед исчезновением текст тускнеет");
-        assertTrue(opacity(lifetime - 1, lifetime) >= 4, "минимум 4, иначе клиент считает текст непрозрачным");
+    void chatRepliesNeverContainTheOldGodPhrase() {
+        List<String> all = new java.util.ArrayList<>(List.of(CrownPet.chatSingleReplies()));
+        all.addAll(List.of(CrownPet.chatTwoPartReplies()));
+        assertTrue(all.stream().noneMatch("Боже..."::equals), "«Боже...» больше не используется");
     }
 
     /** «Живость»: волна не выходит за -1..1 и меняется плавно, а не рывками. */
@@ -150,10 +162,4 @@ class CrownPetTest {
         assertNotEquals(CrownPet.wave(200L, 130L, 0.0D), CrownPet.wave(200L, 47L, 0.0D), 0.01D);
     }
 
-    @Test
-    void shortRepliesStillFadeOutBeforeTheyDisappear() {
-        int lifetime = 40;
-        assertEquals(255, opacity(lifetime / 2, lifetime));
-        assertTrue(opacity(lifetime - 1, lifetime) < 40, "короткий ответ успевает погаснуть");
-    }
 }

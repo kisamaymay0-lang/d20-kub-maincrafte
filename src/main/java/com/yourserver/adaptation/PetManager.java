@@ -1,7 +1,6 @@
 package com.yourserver.adaptation;
 
 import io.papermc.paper.event.player.AsyncChatEvent;
-import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -10,7 +9,6 @@ import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.World;
-import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Interaction;
 import org.bukkit.entity.ItemDisplay;
@@ -53,19 +51,18 @@ public class PetManager implements Listener {
     /** Любой удар владельца останавливает питомца ровно на 2 секунды. */
     private static final int HIT_ATTENTION_TICKS = 40;
     private static final int HELP_GAZE_DELAY_TICKS = 60;
+    /** Сколько живёт надпись вместе с появлением и затуханием. */
     private static final int HELP_VISIBLE_TICKS = 80;
-    private static final int HELP_FADE_TICKS = 20;
-    private static final float HELP_SCALE = 0.5f;
     private static final double HELP_HEIGHT = 0.45;
-    private static final Component HELP_TEXT = Component.text("Могу ли я чем нибудь тебе помочь?");
+    private static final String HELP_TEXT = "Могу ли я чем нибудь тебе помочь?";
     private static final String PET_TALK_SOUND = "f8resurs:pet-talking1";
     private static final double PET_TALK_SOUND_RADIUS_SQUARED = 16.0 * 16.0;
-    private static final Component[] PET_CHAT_PHRASES = {
-            Component.text("Это ты мне?"),
-            Component.text("Думаю да!"),
-            Component.text("Я не знаю("),
-            Component.text("НЕТ! Не за что!"),
-            Component.text("Не думай об этом...")
+    private static final String[] PET_CHAT_PHRASES = {
+            "Это ты мне?",
+            "Думаю да!",
+            "Я не знаю(",
+            "НЕТ! Не за что!",
+            "Не думай об этом..."
     };
     /** Во время возвращения взгляд игрока полностью игнорируется. */
     private static final int RETURN_DURATION_TICKS = 20;
@@ -87,11 +84,8 @@ public class PetManager implements Listener {
     private final NamespacedKey helpMarkerKey;
     private final Map<UUID, ItemDisplay> pets = new HashMap<>();
     private final Map<UUID, Interaction> hitboxes = new HashMap<>();
-    private final Map<UUID, TextDisplay> helpTexts = new HashMap<>();
-    private final Map<UUID, Integer> helpTextAges = new HashMap<>();
+    private final Map<UUID, SpeechText> helpTexts = new HashMap<>();
     private final Set<UUID> helpShownThisGaze = new HashSet<>();
-    private final Set<UUID> helpFadingOut = new HashSet<>();
-    private final Map<UUID, Integer> helpFadeStartOpacities = new HashMap<>();
     private final Set<UUID> petsFacingPlayer = new HashSet<>();
     private final Map<UUID, ReturnMovement> petsReturning = new HashMap<>();
     private final Map<UUID, Integer> gazeTicks = new HashMap<>();
@@ -374,78 +368,29 @@ public class PetManager implements Listener {
             return;
         }
 
-        Component phrase = PET_CHAT_PHRASES[ThreadLocalRandom.current().nextInt(PET_CHAT_PHRASES.length)];
+        String phrase = PET_CHAT_PHRASES[ThreadLocalRandom.current().nextInt(PET_CHAT_PHRASES.length)];
         float hoverOffset = pet.getTransformation().getTranslation().y;
         showPetText(uuid, pet, phrase, hoverOffset);
     }
 
-    private void showPetText(UUID uuid, ItemDisplay pet, Component content, float hoverOffset) {
+    private void showPetText(UUID uuid, ItemDisplay pet, String content, float hoverOffset) {
         removeHelpText(uuid);
-        TextDisplay text = spawnHelpText(pet.getLocation(), hoverOffset, content,
-                petInterpolationTicks.getOrDefault(uuid, MIN_MOVEMENT_INTERPOLATION_TICKS));
-        helpTexts.put(uuid, text);
-        helpTextAges.put(uuid, 0);
+        Location at = helpLocation(pet.getLocation(), hoverOffset);
+        SpeechText speech = SpeechText.spawn(at, content, HELP_VISIBLE_TICKS,
+                petInterpolationTicks.getOrDefault(uuid, MIN_MOVEMENT_INTERPOLATION_TICKS), helpMarkerKey);
+        helpTexts.put(uuid, speech);
+        playPetTalkSound(at);
     }
 
     private void tickHelpText(UUID uuid, ItemDisplay pet, float hoverOffset) {
-        TextDisplay text = helpTexts.get(uuid);
-        if (text == null) {
+        SpeechText speech = helpTexts.get(uuid);
+        if (speech == null) {
             return;
         }
-        if (!text.isValid()) {
+        // Пока взгляд не прерван, после исчезновения надпись не появляется заново.
+        if (!speech.tick(helpLocation(pet.getLocation(), hoverOffset))) {
             removeHelpText(uuid);
-            return;
         }
-
-        int age = helpTextAges.getOrDefault(uuid, 0) + 1;
-        helpTextAges.put(uuid, age);
-
-        if (helpFadingOut.contains(uuid)) {
-            if (age >= HELP_FADE_TICKS) {
-                removeHelpText(uuid);
-                return;
-            }
-            int startOpacity = helpFadeStartOpacities.getOrDefault(uuid, 255);
-            double remaining = 1.0 - age / (double) HELP_FADE_TICKS;
-            int opacity = (int) Math.round(4.0 + (startOpacity - 4.0) * remaining);
-            text.setTextOpacity((byte) Math.max(4, opacity));
-        } else {
-            if (age >= HELP_VISIBLE_TICKS) {
-                // Пока взгляд не прерван, после исчезновения надпись не появляется заново.
-                removeHelpText(uuid);
-                return;
-            }
-            text.setTextOpacity(helpOpacity(age));
-        }
-        syncHelpText(text, pet.getLocation(), hoverOffset);
-    }
-
-    private TextDisplay spawnHelpText(
-            Location petLocation, float hoverOffset, Component content, int interpolationTicks
-    ) {
-        Location at = helpLocation(petLocation, hoverOffset);
-        TextDisplay text = at.getWorld().spawn(at, TextDisplay.class, display -> {
-            display.text(content);
-            display.setPersistent(false);
-            display.setGravity(false);
-            display.setInvulnerable(true);
-            display.setSilent(true);
-            display.setBillboard(Display.Billboard.CENTER);
-            display.setSeeThrough(false);
-            display.setShadowed(true);
-            display.setDefaultBackground(false);
-            display.setTextOpacity(helpOpacity(0));
-            Transformation transformation = display.getTransformation();
-            transformation.getScale().set(HELP_SCALE, HELP_SCALE, HELP_SCALE);
-            display.setTransformation(transformation);
-            display.setLineWidth(300);
-            display.setAlignment(TextDisplay.TextAlignment.CENTER);
-            display.setTeleportDuration(interpolationTicks);
-            display.setInterpolationDuration(0);
-            display.getPersistentDataContainer().set(helpMarkerKey, PersistentDataType.BYTE, (byte) 1);
-        });
-        playPetTalkSound(at);
-        return text;
     }
 
     private static void playPetTalkSound(Location at) {
@@ -468,9 +413,9 @@ public class PetManager implements Listener {
         // отдельных пакетов он не дёргается к последней серверной позиции.
         pet.setTeleportDuration(ticks);
         pet.setInterpolationDuration(ticks);
-        TextDisplay text = helpTexts.get(uuid);
-        if (text != null && text.isValid()) {
-            text.setTeleportDuration(ticks);
+        SpeechText speech = helpTexts.get(uuid);
+        if (speech != null && speech.display().isValid()) {
+            speech.display().setTeleportDuration(ticks);
         }
         petInterpolationTicks.put(uuid, ticks);
     }
@@ -481,29 +426,6 @@ public class PetManager implements Listener {
                 MIN_MOVEMENT_INTERPOLATION_TICKS + ping / 150);
     }
 
-    private static byte helpOpacity(int age) {
-        double progress;
-        if (age < HELP_FADE_TICKS) {
-            progress = age / (double) HELP_FADE_TICKS;
-        } else if (age > HELP_VISIBLE_TICKS - HELP_FADE_TICKS) {
-            progress = (HELP_VISIBLE_TICKS - age) / (double) HELP_FADE_TICKS;
-        } else {
-            progress = 1.0;
-        }
-
-        progress = Math.max(0.0, Math.min(1.0, progress));
-        // Значения 0..3 клиент трактует как непрозрачные, поэтому минимум — 4.
-        return (byte) Math.round(4.0 + 251.0 * progress);
-    }
-
-    private static void syncHelpText(TextDisplay text, Location petLocation, float hoverOffset) {
-        Location target = helpLocation(petLocation, hoverOffset);
-        if (!text.getWorld().equals(target.getWorld())
-                || text.getLocation().distanceSquared(target) > 1.0E-6) {
-            text.teleport(target);
-        }
-    }
-
     private static Location helpLocation(Location petLocation, float hoverOffset) {
         Location target = petLocation.clone().add(0.0, HELP_HEIGHT + hoverOffset, 0.0);
         target.setYaw(0.0f);
@@ -512,24 +434,17 @@ public class PetManager implements Listener {
     }
 
     private void removeHelpText(UUID uuid) {
-        TextDisplay text = helpTexts.remove(uuid);
-        if (text != null) {
-            text.remove();
+        SpeechText speech = helpTexts.remove(uuid);
+        if (speech != null) {
+            speech.remove();
         }
-        helpTextAges.remove(uuid);
-        helpFadingOut.remove(uuid);
-        helpFadeStartOpacities.remove(uuid);
     }
 
     private void fadeHelpText(UUID uuid) {
-        TextDisplay text = helpTexts.get(uuid);
-        if (text == null || helpFadingOut.contains(uuid)) {
-            return;
+        SpeechText speech = helpTexts.get(uuid);
+        if (speech != null) {
+            speech.fadeOut();
         }
-
-        helpFadingOut.add(uuid);
-        helpFadeStartOpacities.put(uuid, Byte.toUnsignedInt(text.getTextOpacity()));
-        helpTextAges.put(uuid, 0);
     }
 
     private void resetGaze(UUID uuid) {
@@ -680,8 +595,8 @@ public class PetManager implements Listener {
         for (Interaction hitbox : hitboxes.values()) {
             removeEntity(hitbox, removed);
         }
-        for (TextDisplay text : helpTexts.values()) {
-            removeEntity(text, removed);
+        for (SpeechText speech : helpTexts.values()) {
+            removeEntity(speech.display(), removed);
         }
 
         for (World world : Bukkit.getWorlds()) {
@@ -761,10 +676,7 @@ public class PetManager implements Listener {
         rotationStrengths.remove(uuid);
         lastHitTimestamps.remove(uuid);
         modelIndexes.remove(uuid);
-        helpTextAges.remove(uuid);
         helpShownThisGaze.remove(uuid);
-        helpFadingOut.remove(uuid);
-        helpFadeStartOpacities.remove(uuid);
     }
 
     private void clearAllStates() {
@@ -777,10 +689,7 @@ public class PetManager implements Listener {
         rotationStrengths.clear();
         lastHitTimestamps.clear();
         modelIndexes.clear();
-        helpTextAges.clear();
         helpShownThisGaze.clear();
-        helpFadingOut.clear();
-        helpFadeStartOpacities.clear();
     }
 
     public void stopAll() {

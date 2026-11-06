@@ -1,7 +1,6 @@
 package com.yourserver.adaptation;
 
 import io.papermc.paper.event.player.AsyncChatEvent;
-import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -10,7 +9,6 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
-import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Interaction;
 import org.bukkit.entity.ItemDisplay;
@@ -102,35 +100,46 @@ final class CrownPet implements Listener {
     private static final double LOOK_EXIT_DOT = Math.cos(Math.toRadians(35.0));
     private static final int HIT_FREEZE_TICKS = 40;
     private static final int TRAIL_INTERVAL_TICKS = 20;
-    private static final int SPEECH_FADE_TICKS = 20;
     private static final int GAZE_SPEECH_LIFETIME_TICKS = 80;
-    private static final int CHAT_REPLY_LIFETIME_TICKS = 40;
+    /** «...» висит ровно две секунды, затем корона дописывает вторую часть. */
+    private static final int CHAT_LEAD_IN_LIFETIME_TICKS = 40;
+    private static final int CHAT_REPLY_LIFETIME_TICKS = 60;
     /** Вторая реплика приходит ровно через 2 секунды после первой. */
     private static final int CHAT_REPLY_DELAY_TICKS = 40;
     private static final int CHAT_FOLLOW_UP_LIFETIME_TICKS = 60;
     private static final int MIN_INTERPOLATION_TICKS = 3;
     private static final int MAX_INTERPOLATION_TICKS = 8;
-    private static final float SPEECH_SCALE = 0.5f;
     private static final double SPEECH_HEIGHT = 0.45D;
-    private static final int SPEECH_LINE_WIDTH = 300;
     /** След: цвет #ef3059, одна плавно падающая частица в секунду. */
     private static final Particle.DustOptions TRAIL_DUST =
             new Particle.DustOptions(Color.fromRGB(0xEF, 0x30, 0x59), 1.1f);
     private static final double TRAIL_FALL_SPEED = 0.06D;
     /** Даже «замороженная» корона догоняет игрока, если он ушёл слишком далеко. */
     private static final double MAX_FROZEN_DISTANCE_SQUARED = 8.0D * 8.0D;
-    private static final String TALK_SOUND = "f8resurs:pet-talking1";
+    /** У короны свой голос, отличный от первого питомца. */
+    private static final String TALK_SOUND = "f8resurs:pet-talking2";
     private static final double TALK_SOUND_RADIUS_SQUARED = 16.0D * 16.0D;
 
-    private static final Component GAZE_SPEECH = Component.text("Я тут не по своей воле...");
-    private static final Component[] CHAT_FIRST_REPLIES = {
-            Component.text("Наверное?"),
-            Component.text("Боже...")
+    private static final String GAZE_SPEECH = "Я тут не по своей воле...";
+    /**
+     * Двойная надпись только одна по смыслу: сначала «...», через две секунды
+     * вторая часть. Вторая часть выбирается из этих трёх фраз.
+     */
+    private static final String CHAT_LEAD_IN = "...";
+    private static final String[] CHAT_TWO_PART_REPLIES = {
+            "Зачем ты вообще существуешь?",
+            "Нет.",
+            "Отстань"
     };
-    private static final Component[] CHAT_FOLLOW_UP_REPLIES = {
-            Component.text("Зачем ты вообще существуешь?"),
-            Component.text("Нет."),
-            Component.text("Отстань")
+    /**
+     * Одиночные реплики: те же фразы, но без «...», плюс «Наверное?».
+     * «Нет.» и «Отстань» тоже могут звучать сами по себе.
+     */
+    private static final String[] CHAT_SINGLE_REPLIES = {
+            "Наверное?",
+            "Зачем ты вообще существуешь?",
+            "Нет.",
+            "Отстань"
     };
 
     private final AdaptationPlugin plugin;
@@ -159,6 +168,13 @@ final class CrownPet implements Listener {
             ItemDisplay display = crown.display;
             if (display != null && display.isValid()) display.setItemStack(modelItem());
         }
+    }
+
+    /** Активна ли корона у игрока — надписи над головой нужно знать, где она висит. */
+    boolean isActive(UUID playerId) {
+        Crown crown = crowns.get(playerId);
+        return crown != null && crown.display != null
+                && crown.display.isValid() && !crown.display.isDead();
     }
 
     String describe() {
@@ -534,72 +550,19 @@ final class CrownPet implements Listener {
     // Реплики короны
     // ------------------------------------------------------------------
 
-    private void showSpeech(Crown crown, Component content, int lifetime) {
+    private void showSpeech(Crown crown, String content, int lifetime) {
         removeSpeech(crown);
         Location at = speechLocation(crown.display.getLocation());
-        int interpolationTicks = crown.interpolationTicks;
-        TextDisplay text = at.getWorld().spawn(at, TextDisplay.class, display -> {
-            display.text(content);
-            display.setPersistent(false);
-            display.setGravity(false);
-            display.setInvulnerable(true);
-            display.setSilent(true);
-            display.setBillboard(Display.Billboard.CENTER);
-            display.setSeeThrough(false);
-            display.setShadowed(true);
-            display.setDefaultBackground(false);
-            display.setTextOpacity(speechOpacity(0, lifetime));
-            Transformation transformation = display.getTransformation();
-            transformation.getScale().set(SPEECH_SCALE, SPEECH_SCALE, SPEECH_SCALE);
-            display.setTransformation(transformation);
-            display.setLineWidth(SPEECH_LINE_WIDTH);
-            display.setAlignment(TextDisplay.TextAlignment.CENTER);
-            display.setTeleportDuration(interpolationTicks);
-            display.setInterpolationDuration(0);
-            display.getPersistentDataContainer().set(speechMarker, PersistentDataType.BYTE, (byte) 1);
-        });
-        crown.speech = text;
-        crown.speechAge = 0;
-        crown.speechLifetime = lifetime;
+        crown.speech = SpeechText.spawn(at, content, lifetime, crown.interpolationTicks, speechMarker);
         playTalkSound(at);
     }
 
     private void tickSpeech(Crown crown) {
-        TextDisplay text = crown.speech;
-        if (text == null) return;
-        if (!text.isValid() || text.isDead()) {
-            crown.speech = null;
-            return;
-        }
-
-        crown.speechAge++;
-        if (crown.speechAge >= crown.speechLifetime) {
+        SpeechText speech = crown.speech;
+        if (speech == null) return;
+        if (!speech.tick(speechLocation(crown.display.getLocation()))) {
             removeSpeech(crown);
-            return;
         }
-        text.setTextOpacity(speechOpacity(crown.speechAge, crown.speechLifetime));
-
-        Location target = speechLocation(crown.display.getLocation());
-        if (!text.getWorld().equals(target.getWorld())
-                || text.getLocation().distanceSquared(target) > 1.0E-6) {
-            text.teleport(target);
-        }
-    }
-
-    /** Прозрачность реплики: секунда появления, полная видимость и секунда затухания. */
-    static byte speechOpacity(int age, int lifetime) {
-        int fade = Math.min(SPEECH_FADE_TICKS, Math.max(1, lifetime / 2));
-        double progress;
-        if (age < fade) {
-            progress = age / (double) fade;
-        } else if (age > lifetime - fade) {
-            progress = (lifetime - age) / (double) fade;
-        } else {
-            progress = 1.0D;
-        }
-        progress = Math.max(0.0D, Math.min(1.0D, progress));
-        // Значения 0..3 клиент трактует как непрозрачные, поэтому минимум — 4.
-        return (byte) Math.round(4.0D + 251.0D * progress);
     }
 
     private static Location speechLocation(Location petLocation) {
@@ -610,10 +573,32 @@ final class CrownPet implements Listener {
     }
 
     private void removeSpeech(Crown crown) {
-        TextDisplay text = crown.speech;
+        SpeechText speech = crown.speech;
         crown.speech = null;
-        crown.speechAge = 0;
-        if (text != null) text.remove();
+        if (speech != null) speech.remove();
+    }
+
+    private static String randomSingleReply() {
+        return CHAT_SINGLE_REPLIES[ThreadLocalRandom.current().nextInt(CHAT_SINGLE_REPLIES.length)];
+    }
+
+    private static String randomTwoPartReply() {
+        return CHAT_TWO_PART_REPLIES[ThreadLocalRandom.current().nextInt(CHAT_TWO_PART_REPLIES.length)];
+    }
+
+    /** «...» — первая часть единственной двойной надписи. */
+    static String chatLeadIn() {
+        return CHAT_LEAD_IN;
+    }
+
+    /** Вторые части двойной надписи. */
+    static String[] chatTwoPartReplies() {
+        return CHAT_TWO_PART_REPLIES.clone();
+    }
+
+    /** Одиночные реплики, которые корона говорит без «...». */
+    static String[] chatSingleReplies() {
+        return CHAT_SINGLE_REPLIES.clone();
     }
 
     private static void playTalkSound(Location at) {
@@ -646,13 +631,17 @@ final class CrownPet implements Listener {
             return;
         }
 
-        Component reply = CHAT_FIRST_REPLIES[ThreadLocalRandom.current().nextInt(CHAT_FIRST_REPLIES.length)];
-        showSpeech(crown, reply, CHAT_REPLY_LIFETIME_TICKS);
-        try {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> followUpReply(uuid), CHAT_REPLY_DELAY_TICKS);
-        } catch (org.bukkit.plugin.IllegalPluginAccessException ignored) {
-            // Плагин уже выключается.
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            // Двойная надпись: сначала «...», через две секунды — вторая часть.
+            showSpeech(crown, CHAT_LEAD_IN, CHAT_LEAD_IN_LIFETIME_TICKS);
+            try {
+                Bukkit.getScheduler().runTaskLater(plugin, () -> followUpReply(uuid), CHAT_REPLY_DELAY_TICKS);
+            } catch (org.bukkit.plugin.IllegalPluginAccessException ignored) {
+                // Плагин уже выключается.
+            }
+            return;
         }
+        showSpeech(crown, randomSingleReply(), CHAT_REPLY_LIFETIME_TICKS);
     }
 
     /** Вторая реплика приходит через две секунды даже если игрок уже отвёл взгляд. */
@@ -661,9 +650,7 @@ final class CrownPet implements Listener {
         if (crown == null) return;
         ItemDisplay display = crown.display;
         if (display == null || display.isDead() || !display.isValid()) return;
-        Component reply = CHAT_FOLLOW_UP_REPLIES[
-                ThreadLocalRandom.current().nextInt(CHAT_FOLLOW_UP_REPLIES.length)];
-        showSpeech(crown, reply, CHAT_FOLLOW_UP_LIFETIME_TICKS);
+        showSpeech(crown, randomTwoPartReply(), CHAT_FOLLOW_UP_LIFETIME_TICKS);
     }
 
     // ------------------------------------------------------------------
@@ -676,7 +663,7 @@ final class CrownPet implements Listener {
         for (Crown crown : crowns.values()) {
             removeEntity(crown.display, removed);
             removeEntity(crown.hitbox, removed);
-            removeEntity(crown.speech, removed);
+            if (crown.speech != null) removeEntity(crown.speech.display(), removed);
         }
         crowns.clear();
 
@@ -742,9 +729,7 @@ final class CrownPet implements Listener {
         private boolean speechShownForGaze;
         private int hitFreezeTicks;
         private long lastHitTimestamp;
-        private TextDisplay speech;
-        private int speechAge;
-        private int speechLifetime;
+        private SpeechText speech;
 
         private Crown(ItemDisplay display, int interpolationTicks) {
             this.display = display;

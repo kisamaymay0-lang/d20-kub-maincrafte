@@ -54,6 +54,8 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private PetManager petManager;
     /** Второй питомец — «живая корона» из /f8 pet 2. */
     private CrownPet crownPet;
+    /** Сообщения игроков над головой: та же надпись, что у питомцев, но без звука. */
+    private ChatBubble chatBubble;
     private CatBattleManager catBattleManager;
     private Apvsh apvsh;
     private SweetBerryBlock sweetBerryBlock;
@@ -153,6 +155,10 @@ public void onEnable() {
     crownPet = new CrownPet(this);
     getServer().getPluginManager().registerEvents(crownPet, this);
 
+    // Сообщения игроков над головой — та же надпись, без звука.
+    chatBubble = new ChatBubble(this, crownPet);
+    getServer().getPluginManager().registerEvents(chatBubble, this);
+
     // Дикие коты: дуэли тикаются вместе с питомцами, но не связаны с их сущностями.
     catBattleManager = new CatBattleManager(this);
     getServer().getPluginManager().registerEvents(catBattleManager, this);
@@ -238,6 +244,7 @@ public void onEnable() {
         public void run() {
             petManager.tick();
             if (crownPet != null) crownPet.tick();
+            if (chatBubble != null) chatBubble.tick();
             if (catBattleManager != null) catBattleManager.tick();
         }
     }.runTaskTimer(this, 0L, 1L);
@@ -295,6 +302,9 @@ public void onEnable() {
         }
         if (crownPet != null) {
             crownPet.stopAll();
+        }
+        if (chatBubble != null) {
+            chatBubble.stopAll();
         }
         if (catBattleManager != null) {
             catBattleManager.disable();
