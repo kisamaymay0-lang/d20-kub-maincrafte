@@ -51,9 +51,23 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private CaviarListener caviarListener;
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
+    private PetManager petManager;
+    /** Второй питомец — «живая корона» из /f8 pet 2. */
+    private CrownPet crownPet;
+    /** Сообщения игроков над головой: та же надпись, что у питомцев, но без звука. */
+    private ChatBubble chatBubble;
+    private CatBattleManager catBattleManager;
+    private Apvsh apvsh;
+    private SweetBerryBlock sweetBerryBlock;
+    private Shaker shaker;
+    private BambooBarrel bambooBarrel;
+    /** Сигарета из /f8: тикает шкалу тяги и дым, поэтому нужен доступ на выключении. */
+    private Cigarette cigarette;
+    /** Политые кораллы: список живёт в файле, поэтому нужен доступ на выключении. */
+    private CoralCare coralCare;
+    private SpecialCatch specialCatch;
     private ConstellationManager constellationManager;
     private ProfileManager profileManager;
-    private ResourcePackPusher resourcePackPusher;
 
     private final Particle.DustOptions meleeDust =
             new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -67,6 +81,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
 @Override
 public void onEnable() {
     saveDefaultConfig();
+    // Файлы настроек держим полными: чего в них нет — дописываем из комплекта (значения владельца
+    // не трогаем), сломанный файл уходит в копию и заменяется новым.
+    ConfigSync.sync(this);
     dataWriter = new AsyncTextWriter(getLogger());
 
     getServer().getPluginManager().registerEvents(
@@ -117,12 +134,57 @@ public void onEnable() {
     winterFishing = new WinterFishing(this);
     getServer().getPluginManager().registerEvents(winterFishing, this);
 
+    // Уход за блоками руками: вода по меди и кораллам, блок света спрятанной
+    // рамкой — всё это шифт + ПКМ, отдельными слушателями.
+    getServer().getPluginManager().registerEvents(new CopperCare(), this);
+
+    coralCare = new CoralCare(this, dataWriter);
+    getServer().getPluginManager().registerEvents(coralCare, this);
+
+    getServer().getPluginManager().registerEvents(new LightBlocks(this), this);
+    getServer().getPluginManager().registerEvents(new FrameVeil(), this);
+    getServer().getPluginManager().registerEvents(new PaintingListener(), this);
+
     ancientJug = new AncientJug(this, dataWriter);
     getServer().getPluginManager().registerEvents(ancientJug, this);
 
-    // Раздача актуального ресурспака клиентам при входе.
-    resourcePackPusher = new ResourcePackPusher(this);
-    getServer().getPluginManager().registerEvents(resourcePackPusher, this);
+    petManager = new PetManager(this);
+    getServer().getPluginManager().registerEvents(petManager, this);
+
+    // Второй питомец: корона над головой, /f8 pet 2.
+    crownPet = new CrownPet(this);
+    getServer().getPluginManager().registerEvents(crownPet, this);
+
+    // Сообщения игроков над головой — та же надпись, без звука.
+    chatBubble = new ChatBubble(this, crownPet);
+    getServer().getPluginManager().registerEvents(chatBubble, this);
+
+    // Дикие коты: дуэли тикаются вместе с питомцами, но не связаны с их сущностями.
+    catBattleManager = new CatBattleManager(this);
+    getServer().getPluginManager().registerEvents(catBattleManager, this);
+
+    // АПВШ — аппарат для создания и наполнения сигарет и другого.
+    apvsh = new Apvsh(this, dataWriter);
+    getServer().getPluginManager().registerEvents(apvsh, this);
+
+    // Блок сладких ягод.
+    sweetBerryBlock = new SweetBerryBlock(this, dataWriter);
+    getServer().getPluginManager().registerEvents(sweetBerryBlock, this);
+
+    // Сигарета: слушает клики сама, поэтому registerEvents внутри конструктора.
+    cigarette = new Cigarette(this);
+
+    // Шейкер — инструмент для смешивания напитков и коктейлей.
+    shaker = new Shaker(this);
+    getServer().getPluginManager().registerEvents(shaker, this);
+    shaker.registerRecipe();
+
+    // Бамбуковая бочка для брожения пиратского рома.
+    bambooBarrel = new BambooBarrel(this);
+    getServer().getPluginManager().registerEvents(bambooBarrel, this);
+    // Миниигра особого предмета биома: вылавливается вместо обычной рыбы.
+    specialCatch = new SpecialCatch(this, ancientJug, winterFishing);
+    getServer().getPluginManager().registerEvents(specialCatch, this);
 
     profileManager = new ProfileManager(this, dataWriter);
     getServer().getPluginManager().registerEvents(profileManager, this);
@@ -160,7 +222,10 @@ public void onEnable() {
                     copperBlockListener,
                     caviarListener,
                     winterFishing,
-                    ancientJug
+                    ancientJug,
+                    petManager,
+                    crownPet,
+                    apvsh
             );
 
     getServer().getPluginManager().registerEvents(
@@ -173,6 +238,16 @@ public void onEnable() {
                 f8Command
         );
     }
+
+    new BukkitRunnable() {
+        @Override
+        public void run() {
+            petManager.tick();
+            if (crownPet != null) crownPet.tick();
+            if (chatBubble != null) chatBubble.tick();
+            if (catBattleManager != null) catBattleManager.tick();
+        }
+    }.runTaskTimer(this, 0L, 1L);
 
     // Регистрируем обработчик команды /d20.
     // Без этого команда из plugin.yml не будет работать.
@@ -216,15 +291,85 @@ public void onEnable() {
         if (winterFishing != null) {
             winterFishing.disable();
         }
+        if (specialCatch != null) {
+            specialCatch.disable();
+        }
         if (ancientJug != null) {
             ancientJug.disable();
         }
-        if (resourcePackPusher != null) {
-            resourcePackPusher.disable();
+        if (petManager != null) {
+            petManager.stopAll();
+        }
+        if (crownPet != null) {
+            crownPet.stopAll();
+        }
+        if (chatBubble != null) {
+            chatBubble.stopAll();
+        }
+        if (catBattleManager != null) {
+            catBattleManager.disable();
+        }
+        if (apvsh != null) {
+            apvsh.disable();
+        }
+        if (sweetBerryBlock != null) {
+            sweetBerryBlock.disable();
+        }
+        if (cigarette != null) {
+            cigarette.disable();
+        }
+        if (coralCare != null) {
+            coralCare.flush();
         }
         if (dataWriter != null) {
             dataWriter.close();
         }
+    }
+
+    /**
+     * Перечитать config.yml и настройки подсистем (/f8 reload).
+     * Настройки миниигры и кувшина читаются на ходу, поэтому им reload не нужен;
+     * созвездия и зацеп изморози держат копию настроек в памяти — их просим перечитаться.
+     * Префиксы, косметика и паки живут в своих файлах, поэтому их тоже перечитываем:
+     * без этого правки YAML и новые файлы до перезапуска не доходили.
+     * Шанс дуэлей диких котов также применяется здесь.
+     */
+    public String reloadPluginSettings() {
+        ConfigSync.sync(this);   // /f8 reload тоже доводит файлы до полного вида
+        reloadConfig();
+        if (constellationManager != null) {
+            constellationManager.reloadSettings();
+        }
+        if (winterFishing != null) {
+            winterFishing.reloadSettings();
+        }
+        if (bambooBarrel != null) {
+            bambooBarrel.reloadSettings();
+        }
+        if (catBattleManager != null) {
+            catBattleManager.reloadSettings();
+        }
+        if (petManager != null) {
+            petManager.reloadSettings();
+        }
+        if (crownPet != null) {
+            crownPet.reloadSettings();
+        }
+        if (chatBubble != null) {
+            chatBubble.reloadSettings();
+        }
+        List<String> summaries = new ArrayList<>();
+        if (profileManager != null) {
+            summaries.add(profileManager.reloadPrefixes());
+            // Косметика живёт в отдельных YAML: /f8 reload тоже обязан
+            // перечитать их и заметить новые файлы без рестарта.
+            summaries.add(profileManager.reloadCosmetics());
+        }
+        if (catBattleManager != null) summaries.add(catBattleManager.describe());
+        if (crownPet != null) summaries.add(crownPet.describe());
+        if (specialCatch != null && !specialCatch.describe().isBlank()) summaries.add(specialCatch.describe());
+        summaries.removeIf(String::isBlank);
+        return String.join("\n", summaries);
     }
 
     public void breakAdaptation(Player player) {
@@ -1373,5 +1518,17 @@ public void onEnable() {
         superDamageCounters.remove(uuid);
 
         damageHitLimiter.remove(uuid);
+    }
+
+    public Apvsh getApvsh() {
+        return apvsh;
+    }
+
+    public SweetBerryBlock getSweetBerryBlock() {
+        return sweetBerryBlock;
+    }
+
+    public Shaker getShaker() {
+        return shaker;
     }
 }
