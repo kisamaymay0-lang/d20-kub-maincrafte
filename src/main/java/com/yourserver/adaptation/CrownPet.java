@@ -42,8 +42,9 @@ import java.util.concurrent.ThreadLocalRandom;
  * плечу, а просто чуть отстаёт и плавно возвращается на своё место. Голова
  * игрока не тащит её за собой: позиция считается от тела игрока, поэтому
  * наклон камеры вверх/вниз ничего не меняет. Поворот тоже только
- * горизонтальный — корона разворачивается по взгляду игрока, но никогда не
- * задирается по вертикали.</p>
+ * горизонтальный — в обычном полёте корона разворачивается по взгляду
+ * игрока, а когда игрок смотрит на неё или бьёт, поворачивается лицом к нему,
+ * но никогда не задирается по вертикали.</p>
  *
  * <p>Чтобы корона не выглядела идеально приклеенной, у неё есть собственное
  * «дыхание»: две медленные волны по высоте, лёгкий боковой и передний дрейф,
@@ -354,11 +355,33 @@ final class CrownPet implements Listener {
         return at;
     }
 
+    /**
+     * Когда на корону смотрят или её ударили, она разворачивается лицом к
+     * игроку. Иначе игрок видел бы её затылок: раньше корона повторяла
+     * направление его взгляда и «отворачивалась».
+     */
     private void rotateCrown(Player player, Crown crown) {
         Location current = crown.display.getLocation();
         Location next = current.clone();
-        applyYawOnly(current, next, player.getYaw());
+        Vector toPlayer = player.getEyeLocation().toVector().subtract(current.toVector());
+        float yaw = (float) (facingYaw(toPlayer.getX(), toPlayer.getZ(), player.getYaw()) + yawSway(crown));
+        applyYawOnly(current, next, yaw);
         teleport(crown.display, next);
+    }
+
+    /**
+     * Горизонтальный разворот к игроку по смещению {@code toPlayerX/Z}.
+     *
+     * <p>Корона висит почти точно над головой, и тогда горизонтальное
+     * направление на игрока вырождено: в этом случае разворачиваемся навстречу
+     * взгляду игрока (ровно лицом к нему), чтобы модель не дёргалась.</p>
+     */
+    static double facingYaw(double toPlayerX, double toPlayerZ, float playerYaw) {
+        double lengthSquared = toPlayerX * toPlayerX + toPlayerZ * toPlayerZ;
+        if (lengthSquared < 0.0625D) {
+            return playerYaw + 180.0D;
+        }
+        return Math.toDegrees(Math.atan2(-toPlayerX, toPlayerZ));
     }
 
     /**

@@ -109,6 +109,30 @@ class CrownPetTest {
         assertTrue(smallest < 0.01D, "в движении есть и почти нулевые точки — оно не дёрганое");
     }
 
+    /** Когда на корону смотрят, она разворачивается лицом к игроку. */
+    @Test
+    void gazeTurnsTheCrownTowardsThePlayer() {
+        // Игрок смотрит на север (yaw 0), корона перед ним: лицом к игроку — юг.
+        assertEquals(180.0D, CrownPet.facingYaw(0.0D, -1.0D, 0.0F), 0.001D);
+        // Игрок смотрит на восток (yaw -90), корона восточнее него.
+        assertEquals(90.0D, CrownPet.facingYaw(-1.0D, 0.0D, -90.0F), 0.001D);
+        // Корона сбоку: разворот идёт на реальное положение игрока.
+        assertEquals(0.0D, CrownPet.facingYaw(0.0D, 1.0D, 90.0F), 0.001D);
+        assertEquals(-90.0D, CrownPet.facingYaw(1.0D, 0.0D, 0.0F), 0.001D);
+    }
+
+    /**
+     * Корона висит почти точно над головой: горизонтальное направление на
+     * игрока вырождено, поэтому берётся разворот навстречу взгляду.
+     */
+    @Test
+    void crownDirectlyOverheadFacesThePlayerInsteadOfSpinning() {
+        assertEquals(215.0D, CrownPet.facingYaw(0.01D, 0.01D, 35.0F), 0.001D);
+        assertEquals(0.0D, CrownPet.facingYaw(0.0D, 0.0D, -180.0F), 0.001D);
+        // Взгляд вверх не должен разворачивать корону по вертикали — только yaw.
+        assertEquals(270.0D, CrownPet.facingYaw(0.05D, -0.02D, 90.0F), 0.001D);
+    }
+
     /** У каждой короны своя фаза, и разные оси не двигаются синхронно. */
     @Test
     void eachCrownSwingsWithItsOwnPhase() {
