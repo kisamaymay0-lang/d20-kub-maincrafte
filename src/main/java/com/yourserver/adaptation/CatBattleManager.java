@@ -2,6 +2,7 @@ package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Particle;
 import org.bukkit.World;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Cat;
@@ -28,14 +29,15 @@ import java.util.concurrent.ThreadLocalRandom;
  * Небольшие дуэли диких котов.
  *
  * <p>Менеджер работает только на главном серверном тике и использует обычный
- * Bukkit/Paper API, без NMS. Коты сначала крадутся, затем одновременно
- * прыгают друг на друга и дерутся. После перехода на низкое здоровье один
- * кот убегает, а второй продолжает преследование и добивает его. Пары не
- * заканчиваются таймером «ничьей»: если преследование застряло, по истечении
- * длительного лимита более слабый кот проигрывает дуэль.</p>
+ * Bukkit/Paper API, без NMS. Коты крадутся, прыгают друг на друга, а между
+ * короткими обменами кружат и повторяют прыжок. После перехода на низкое
+ * здоровье один кот убегает, а второй продолжает преследование и добивает его.
+ * Пары не заканчиваются таймером «ничьей»: если преследование застряло, по
+ * истечении длительного лимита более слабый кот проигрывает дуэль.</p>
  *
- * <p>Своих звуков менеджер не проигрывает. Естественные анимации и урон
- * остаются серверными, поэтому они видны ванильному клиенту без ресурспака.</p>
+ * <p>На время боя коты становятся silent, включая ambient-мурлыканье; после
+ * боя исходный флаг восстанавливается. Своих звуков менеджер не проигрывает,
+ * а ванильные частицы прыжков и ударов не требуют ресурспака.</p>
  */
 final class CatBattleManager implements Listener {
     private static final double DEFAULT_CHANCE_PER_TICK = 0.001D;
@@ -52,6 +54,8 @@ final class CatBattleManager implements Listener {
     private static final double LOW_HEALTH_RATIO = 0.50D;
     private static final int STALK_MIN_TICKS = 30;
     private static final int STALK_MAX_TICKS = 70;
+    private static final int CIRCLE_TICKS = 28;
+    private static final int ATTACKS_PER_ROUND = 6;
     private static final int POUNCE_TICKS = 8;
     private static final int ATTACK_INTERVAL_TICKS = 12;
     private static final int MAX_BATTLE_TICKS = 1200;
@@ -147,6 +151,8 @@ final class CatBattleManager implements Listener {
     private void prepare(Cat cat, Cat opponent) {
         cat.setPersistent(true);
         cat.setRemoveWhenFarAway(false);
+        // В частности, отключаем ambient-мурлыканье на всю дуэль.
+        cat.setSilent(true);
         cat.setAI(true);
         cat.setAware(true);
         cat.setSitting(false);
@@ -184,6 +190,7 @@ final class CatBattleManager implements Listener {
 
         switch (battle.phase) {
             case STALK -> tickStalk(battle);
+            case CIRCLE -> tickCircle(battle);
             case POUNCE -> tickPounce(battle);
             case FIGHT -> tickFight(battle);
         }
@@ -207,6 +214,45 @@ final class CatBattleManager implements Listener {
         }
     }
 
+    /** Небольшой перерыв между схватками: коты кружат и снова выбирают момент для прыжка. */
+    private void beginCircle(Battle battle) {
+        battle.phase = Phase.CIRCLE;
+        battle.phaseTicks = 0;
+        battle.attacksThisRound = 0;
+        battle.first.getPathfinder().stopPathfinding();
+        battle.second.getPathfinder().stopPathfinding();
+        stalkPose(battle.first);
+        stalkPose(battle.second);
+    }
+
+    private void tickCircle(Battle battle) {
+        updateFleeing(battle);
+        if (battle.fleeing != null) {
+            battle.phase = Phase.FIGHT;
+            battle.phaseTicks = 0;
+            return;
+        }
+        stalkPose(battle.first);
+        stalkPose(battle.second);
+        face(battle.first, battle.second);
+        face(battle.second, battle.first);
+        if (battle.phaseTicks == 1 || battle.phaseTicks % 4 == 0) {
+            circleMove(battle.first, battle.second, 1.0D);
+            circleMove(battle.second, battle.first, -1.0D);
+        }
+        if (battle.phaseTicks >= CIRCLE_TICKS) beginPounce(battle);
+    }
+
+    private void circleMove(Cat cat, Cat opponent, double direction) {
+        Vector radial = horizontalDirection(opponent, cat);
+        if (radial.lengthSquared() < 0.0001D) radial = new Vector(1.0D, 0.0D, 0.0D);
+        Vector sideways = new Vector(-radial.getZ() * direction, 0.0D, radial.getX() * direction).normalize();
+        Location destination = opponent.getLocation()
+                .add(radial.multiply(2.6D))
+                .add(sideways.multiply(1.5D));
+        cat.getPathfinder().moveTo(destination, 0.75D);
+    }
+
     private void stalkPose(Cat cat) {
         cat.setSitting(false);
         cat.setLyingDown(false);
@@ -219,8 +265,11 @@ final class CatBattleManager implements Listener {
     private void beginPounce(Battle battle) {
         battle.phase = Phase.POUNCE;
         battle.phaseTicks = 0;
+        battle.attacksThisRound = 0;
         pounce(battle.first, battle.second);
         pounce(battle.second, battle.first);
+        burst(battle.first, Particle.CLOUD, 5);
+        burst(battle.second, Particle.CLOUD, 5);
     }
 
     private void pounce(Cat cat, Cat opponent) {
@@ -246,6 +295,11 @@ final class CatBattleManager implements Listener {
         battle.second.setJumping(false);
         standingPose(battle.first);
         standingPose(battle.second);
+        burst(battle.first, Particle.CLOUD, 3);
+        burst(battle.second, Particle.CLOUD, 3);
+        // Короткая пауза после приземления, чтобы прыжок читался отдельно от ударов.
+        battle.firstCooldown = 4;
+        battle.secondCooldown = 4;
         battle.first.setTarget(battle.second);
         battle.second.setTarget(battle.first);
     }
@@ -259,6 +313,12 @@ final class CatBattleManager implements Listener {
         fightCat(battle, battle.first, battle.second);
         if (!battle.finished && !battle.second.isDead() && battle.second.isValid()) {
             fightCat(battle, battle.second, battle.first);
+        }
+        // После нескольких обменов не даём котам неподвижно «пилить» друг
+        // друга: новый круг, новый прыжок, следующая короткая схватка.
+        if (!battle.finished && battle.phase == Phase.FIGHT && battle.fleeing == null
+                && battle.attacksThisRound >= ATTACKS_PER_ROUND) {
+            beginCircle(battle);
         }
     }
 
@@ -321,10 +381,15 @@ final class CatBattleManager implements Listener {
 
     private void hit(Battle battle, Cat attacker, Cat victim) {
         battle.setCooldown(attacker, ATTACK_INTERVAL_TICKS);
+        battle.attacksThisRound++;
         attacker.swingMainHand();
         // Замах остаётся видимым, но часть ударов не наносит урон вообще:
         // не вызываем damage и не делаем отброс, чтобы это был именно пустой удар.
-        if (ThreadLocalRandom.current().nextDouble() < NO_DAMAGE_CHANCE) return;
+        if (ThreadLocalRandom.current().nextDouble() < NO_DAMAGE_CHANCE) {
+            burst(victim, Particle.SMOKE, 2);
+            return;
+        }
+        burst(victim, Particle.CRIT, 4);
         victim.damage(ATTACK_DAMAGE, attacker);
         // Смерть может синхронно вызвать EntityDeathEvent: не трогаем уже
         // удалённую сущность ради отброса и не даём второму коту ударить труп.
@@ -422,6 +487,11 @@ final class CatBattleManager implements Listener {
         return direction;
     }
 
+    private static void burst(Cat cat, Particle particle, int count) {
+        cat.getWorld().spawnParticle(particle, cat.getLocation().add(0.0D, 0.55D, 0.0D),
+                count, 0.18D, 0.20D, 0.18D, 0.02D);
+    }
+
     private static void standingPose(Cat cat) {
         cat.setSitting(false);
         cat.setLyingDown(false);
@@ -451,7 +521,7 @@ final class CatBattleManager implements Listener {
         cooldowns.clear();
     }
 
-    private enum Phase { STALK, POUNCE, FIGHT }
+    private enum Phase { STALK, CIRCLE, POUNCE, FIGHT }
 
     private static final class Battle {
         private final Cat first;
@@ -463,6 +533,7 @@ final class CatBattleManager implements Listener {
         private int phaseTicks;
         private int firstCooldown;
         private int secondCooldown;
+        private int attacksThisRound;
         private Cat fleeing;
         private boolean finished;
 
@@ -501,6 +572,7 @@ final class CatBattleManager implements Listener {
         private final boolean headUp;
         private final boolean ai;
         private final boolean aware;
+        private final boolean silent;
         private final boolean persistent;
         private final boolean removeWhenFarAway;
         private final LivingEntity target;
@@ -514,6 +586,7 @@ final class CatBattleManager implements Listener {
             headUp = cat.isHeadUp();
             ai = cat.hasAI();
             aware = cat.isAware();
+            silent = cat.isSilent();
             persistent = cat.isPersistent();
             removeWhenFarAway = cat.getRemoveWhenFarAway();
             target = cat.getTarget();
@@ -528,6 +601,7 @@ final class CatBattleManager implements Listener {
             cat.setHeadUp(headUp);
             cat.setAI(ai);
             cat.setAware(aware);
+            cat.setSilent(silent);
             cat.setPersistent(persistent);
             cat.setRemoveWhenFarAway(removeWhenFarAway);
             cat.setTarget(target != null && target.isValid() && !target.isDead() ? target : null);
