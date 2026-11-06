@@ -53,7 +53,9 @@ public class PetManager implements Listener {
     private static final int HELP_GAZE_DELAY_TICKS = 60;
     /** Сколько живёт надпись вместе с появлением и затуханием. */
     private static final int HELP_VISIBLE_TICKS = 80;
-    private static final double HELP_HEIGHT = 0.45;
+    /** Высота и размер реплик берутся из config.yml (pets.speech.*). */
+    private static final double DEFAULT_SPEECH_HEIGHT = 0.45D;
+    private static final float DEFAULT_SPEECH_SCALE = 0.5f;
     private static final String HELP_TEXT = "Могу ли я чем нибудь тебе помочь?";
     private static final String PET_TALK_SOUND = "f8resurs:pet-talking1";
     private static final double PET_TALK_SOUND_RADIUS_SQUARED = 16.0 * 16.0;
@@ -96,6 +98,8 @@ public class PetManager implements Listener {
     private final Map<UUID, Long> lastHitTimestamps = new HashMap<>();
     private final Map<UUID, Integer> modelIndexes = new HashMap<>();
     private NamespacedKey[] petModels = defaultPetModels();
+    private double speechHeight = DEFAULT_SPEECH_HEIGHT;
+    private float speechScale = DEFAULT_SPEECH_SCALE;
     private long hoverTicks;
 
     public PetManager(AdaptationPlugin plugin) {
@@ -115,6 +119,11 @@ public class PetManager implements Listener {
             if (key != null && !keys.contains(key)) keys.add(key);
         }
         petModels = keys.isEmpty() ? defaultPetModels() : keys.toArray(new NamespacedKey[0]);
+
+        double height = plugin.getConfig().getDouble("pets.speech.pet-1-height", DEFAULT_SPEECH_HEIGHT);
+        speechHeight = Double.isFinite(height) ? height : DEFAULT_SPEECH_HEIGHT;
+        double scale = plugin.getConfig().getDouble("pets.speech.pet-1-scale", DEFAULT_SPEECH_SCALE);
+        speechScale = SpeechText.clampScale((float) scale);
     }
 
     private static NamespacedKey[] defaultPetModels() {
@@ -377,7 +386,8 @@ public class PetManager implements Listener {
         removeHelpText(uuid);
         Location at = helpLocation(pet.getLocation(), hoverOffset);
         SpeechText speech = SpeechText.spawn(at, content, HELP_VISIBLE_TICKS,
-                petInterpolationTicks.getOrDefault(uuid, MIN_MOVEMENT_INTERPOLATION_TICKS), helpMarkerKey);
+                petInterpolationTicks.getOrDefault(uuid, MIN_MOVEMENT_INTERPOLATION_TICKS),
+                speechScale, helpMarkerKey);
         helpTexts.put(uuid, speech);
         playPetTalkSound(at);
     }
@@ -426,8 +436,8 @@ public class PetManager implements Listener {
                 MIN_MOVEMENT_INTERPOLATION_TICKS + ping / 150);
     }
 
-    private static Location helpLocation(Location petLocation, float hoverOffset) {
-        Location target = petLocation.clone().add(0.0, HELP_HEIGHT + hoverOffset, 0.0);
+    private Location helpLocation(Location petLocation, float hoverOffset) {
+        Location target = petLocation.clone().add(0.0, speechHeight + hoverOffset, 0.0);
         target.setYaw(0.0f);
         target.setPitch(0.0f);
         return target;

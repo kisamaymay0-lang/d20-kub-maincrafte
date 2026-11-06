@@ -20,7 +20,10 @@ import org.bukkit.util.Transformation;
 final class SpeechText {
     /** Секунда на появление и секунда на затухание. */
     static final int FADE_TICKS = 20;
-    private static final float SCALE = 0.5f;
+    /** Размер берётся из config.yml; здесь только безопасные границы. */
+    static final float MIN_SCALE = 0.05f;
+    static final float MAX_SCALE = 4.0f;
+    static final float DEFAULT_SCALE = 0.5f;
     private static final int LINE_WIDTH = 300;
     /** Ниже этого значения клиент считает текст полностью непрозрачным. */
     private static final int MIN_OPACITY = 4;
@@ -48,6 +51,7 @@ final class SpeechText {
             String content,
             int lifetimeTicks,
             int interpolationTicks,
+            float scale,
             NamespacedKey marker
     ) {
         String text = content == null ? "" : content;
@@ -67,8 +71,9 @@ final class SpeechText {
             entity.setShadowed(true);
             entity.setDefaultBackground(false);
             entity.setTextOpacity(opacityFor(0, lifetime));
+            float size = clampScale(scale);
             Transformation transformation = entity.getTransformation();
-            transformation.getScale().set(SCALE, SCALE, SCALE);
+            transformation.getScale().set(size, size, size);
             entity.setTransformation(transformation);
             entity.setLineWidth(LINE_WIDTH);
             entity.setAlignment(TextDisplay.TextAlignment.CENTER);
@@ -144,6 +149,12 @@ final class SpeechText {
                 || display.getLocation().distanceSquared(target) > 1.0E-6) {
             display.teleport(target);
         }
+    }
+
+    /** Размер надписи всегда остаётся читаемым, даже если в конфиге опечатка. */
+    static float clampScale(float scale) {
+        if (!Float.isFinite(scale)) return DEFAULT_SCALE;
+        return Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
     }
 
     private static Location anchorLocation(Location anchor) {

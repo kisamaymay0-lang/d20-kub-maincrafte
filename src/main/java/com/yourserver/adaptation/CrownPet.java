@@ -109,7 +109,9 @@ final class CrownPet implements Listener {
     private static final int CHAT_FOLLOW_UP_LIFETIME_TICKS = 60;
     private static final int MIN_INTERPOLATION_TICKS = 3;
     private static final int MAX_INTERPOLATION_TICKS = 8;
-    private static final double SPEECH_HEIGHT = 0.45D;
+    /** Высота и размер реплик берутся из config.yml (pets.speech.pet-2-*). */
+    private static final double DEFAULT_SPEECH_HEIGHT = 0.45D;
+    private static final float DEFAULT_SPEECH_SCALE = 0.5f;
     /** След: цвет #ef3059, одна плавно падающая частица в секунду. */
     private static final Particle.DustOptions TRAIL_DUST =
             new Particle.DustOptions(Color.fromRGB(0xEF, 0x30, 0x59), 1.1f);
@@ -149,6 +151,8 @@ final class CrownPet implements Listener {
     private final Map<UUID, Crown> crowns = new HashMap<>();
     private NamespacedKey modelKey = parseModel(DEFAULT_MODEL);
     private double crownGap = DEFAULT_CROWN_GAP;
+    private double speechHeight = DEFAULT_SPEECH_HEIGHT;
+    private float speechScale = DEFAULT_SPEECH_SCALE;
 
     CrownPet(AdaptationPlugin plugin) {
         this.plugin = plugin;
@@ -164,6 +168,12 @@ final class CrownPet implements Listener {
         modelKey = parsed != null ? parsed : parseModel(DEFAULT_MODEL);
         crownGap = finiteOrDefault(plugin.getConfig().getDouble("pets.crown-gap", DEFAULT_CROWN_GAP),
                 DEFAULT_CROWN_GAP);
+        speechHeight = finiteOrDefault(
+                plugin.getConfig().getDouble("pets.speech.pet-2-height", DEFAULT_SPEECH_HEIGHT),
+                DEFAULT_SPEECH_HEIGHT);
+        speechScale = SpeechText.clampScale((float) finiteOrDefault(
+                plugin.getConfig().getDouble("pets.speech.pet-2-scale", DEFAULT_SPEECH_SCALE),
+                DEFAULT_SPEECH_SCALE));
         for (Crown crown : crowns.values()) {
             ItemDisplay display = crown.display;
             if (display != null && display.isValid()) display.setItemStack(modelItem());
@@ -553,7 +563,8 @@ final class CrownPet implements Listener {
     private void showSpeech(Crown crown, String content, int lifetime) {
         removeSpeech(crown);
         Location at = speechLocation(crown.display.getLocation());
-        crown.speech = SpeechText.spawn(at, content, lifetime, crown.interpolationTicks, speechMarker);
+        crown.speech = SpeechText.spawn(at, content, lifetime, crown.interpolationTicks,
+                speechScale, speechMarker);
         playTalkSound(at);
     }
 
@@ -565,8 +576,8 @@ final class CrownPet implements Listener {
         }
     }
 
-    private static Location speechLocation(Location petLocation) {
-        Location target = petLocation.clone().add(0.0D, SPEECH_HEIGHT, 0.0D);
+    private Location speechLocation(Location petLocation) {
+        Location target = petLocation.clone().add(0.0D, speechHeight, 0.0D);
         target.setYaw(0.0f);
         target.setPitch(0.0f);
         return target;

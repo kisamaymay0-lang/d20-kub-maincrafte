@@ -1,8 +1,14 @@
 package com.yourserver.adaptation;
 
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -50,6 +56,34 @@ class SpeechTextTest {
         int typingTicks = (int) Math.ceil(length / (double) perTick);
         assertTrue(typingTicks <= lifetime / 2,
                 "буквы успевают появиться за половину времени жизни: " + typingTicks);
+    }
+
+    /** Размеры и высоты слов должны быть в поставляемом config.yml. */
+    @Test
+    void speechSizesAndHeightsAreDocumentedInConfig() throws Exception {
+        YamlConfiguration config = new YamlConfiguration();
+        try (InputStream stream = SpeechTextTest.class.getClassLoader().getResourceAsStream("config.yml")) {
+            assertNotNull(stream, "config.yml должен лежать в комплекте");
+            config.load(new InputStreamReader(stream, StandardCharsets.UTF_8));
+        }
+
+        assertEquals(1.0D, config.getDouble("pets.speech.player-scale"), 0.0001D,
+                "слова игроков вдвое крупнее прежних 0.5");
+        assertTrue(config.contains("pets.speech.player-height"), "высота слов игрока");
+        assertTrue(config.contains("pets.speech.player-height-with-crown"),
+                "отдельная высота слов игрока, когда надета корона");
+        assertEquals(0.5D, config.getDouble("pets.speech.pet-1-scale"), 0.0001D);
+        assertEquals(0.5D, config.getDouble("pets.speech.pet-2-scale"), 0.0001D);
+        assertTrue(config.contains("pets.speech.pet-1-height"), "своя высота у первого питомца");
+        assertTrue(config.contains("pets.speech.pet-2-height"), "своя высота у короны");
+    }
+
+    @Test
+    void scaleIsClampedSoATypoDoesNotBreakTheText() {
+        assertEquals(SpeechText.DEFAULT_SCALE, SpeechText.clampScale(Float.NaN));
+        assertEquals(SpeechText.MIN_SCALE, SpeechText.clampScale(0.0f), 0.0001f);
+        assertEquals(SpeechText.MAX_SCALE, SpeechText.clampScale(100.0f), 0.0001f);
+        assertEquals(1.0f, SpeechText.clampScale(1.0f), 0.0001f);
     }
 
     @Test

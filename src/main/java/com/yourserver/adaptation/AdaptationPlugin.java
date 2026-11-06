@@ -355,6 +355,9 @@ public void onEnable() {
         if (crownPet != null) {
             crownPet.reloadSettings();
         }
+        if (chatBubble != null) {
+            chatBubble.reloadSettings();
+        }
         List<String> summaries = new ArrayList<>();
         if (profileManager != null) {
             summaries.add(profileManager.reloadPrefixes());

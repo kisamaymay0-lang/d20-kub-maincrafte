@@ -26,10 +26,12 @@ import java.util.UUID;
  */
 final class ChatBubble implements Listener {
     private static final int LIFETIME_TICKS = 60;
+    /** Значения по умолчанию; сервер меняет их в config.yml (pets.speech.*). */
+    private static final float DEFAULT_SCALE = 1.0f;
     /** Обычная высота: сразу над макушкой. */
-    private static final double HEIGHT_ABOVE_HEAD = 0.35D;
-    /** Когда над головой корона, надпись уходит выше её реплики. */
-    private static final double HEIGHT_ABOVE_CROWN = 1.35D;
+    private static final double DEFAULT_HEIGHT = 0.35D;
+    /** С короной слова идут чуть ниже её реплики, а не в стратосфере. */
+    private static final double DEFAULT_HEIGHT_WITH_CROWN = 0.60D;
     /** Слишком длинное сообщение не должно растягиваться на пол-экрана. */
     private static final int MAX_LENGTH = 180;
     private static final int MIN_INTERPOLATION_TICKS = 3;
@@ -39,11 +41,30 @@ final class ChatBubble implements Listener {
     private final CrownPet crownPet;
     private final NamespacedKey markerKey;
     private final Map<UUID, SpeechText> bubbles = new HashMap<>();
+    private float playerScale = DEFAULT_SCALE;
+    private double playerHeight = DEFAULT_HEIGHT;
+    private double playerHeightWithCrown = DEFAULT_HEIGHT_WITH_CROWN;
 
     ChatBubble(AdaptationPlugin plugin, CrownPet crownPet) {
         this.plugin = plugin;
         this.crownPet = crownPet;
         this.markerKey = new NamespacedKey(plugin, "chat_bubble_text");
+        reloadSettings();
+    }
+
+    /** /f8 reload: размер и высоту слов игрока можно менять без перезапуска. */
+    void reloadSettings() {
+        double scale = plugin.getConfig().getDouble("pets.speech.player-scale", DEFAULT_SCALE);
+        playerScale = SpeechText.clampScale(Double.isFinite(scale) ? (float) scale : DEFAULT_SCALE);
+        playerHeight = finiteOrDefault(
+                plugin.getConfig().getDouble("pets.speech.player-height", DEFAULT_HEIGHT), DEFAULT_HEIGHT);
+        playerHeightWithCrown = finiteOrDefault(
+                plugin.getConfig().getDouble("pets.speech.player-height-with-crown", DEFAULT_HEIGHT_WITH_CROWN),
+                DEFAULT_HEIGHT_WITH_CROWN);
+    }
+
+    private static double finiteOrDefault(double value, double fallback) {
+        return Double.isFinite(value) ? value : fallback;
     }
 
     /** Один серверный тик: надписи допечатываются и едут за игроками. */
@@ -65,10 +86,10 @@ final class ChatBubble implements Listener {
         return crownPet != null && crownPet.isActive(uuid);
     }
 
-    private static Location anchor(Player player, boolean hasCrown) {
+    private Location anchor(Player player, boolean hasCrown) {
         Location at = player.getLocation().clone();
         at.setY(player.getBoundingBox().getMaxY()
-                + (hasCrown ? HEIGHT_ABOVE_CROWN : HEIGHT_ABOVE_HEAD));
+                + (hasCrown ? playerHeightWithCrown : playerHeight));
         at.setPitch(0.0f);
         return at;
     }
@@ -96,7 +117,7 @@ final class ChatBubble implements Listener {
         }
         remove(uuid);
         SpeechText speech = SpeechText.spawn(anchor(player, crownsPlayer(uuid)), text, LIFETIME_TICKS,
-                clientInterpolationTicks(player), markerKey);
+                clientInterpolationTicks(player), playerScale, markerKey);
         bubbles.put(uuid, speech);
     }
 
