@@ -3,26 +3,27 @@ package com.yourserver.adaptation;
 import java.util.Random;
 
 /**
- * Как ступень окисления медного нотного блока слышна: высота нот и паузы.
+ * Как ступень окисления медного нотного блока слышна и как называется.
  *
  * <h2>Высота</h2>
  *
- * <p>Чем сильнее окислена медь, тем хуже она держит строй: каждая нота
- * «плывёт» вокруг своей высоты тем сильнее, чем выше ступень —
- * {@code 1s} звучит точно, {@code 2s} расстраивается на десятые доли
- * полутона, {@code 3s} — почти на полутон. У {@code 4s} строя нет вовсе:
- * высота выбирается случайно в пределах нотного блока ({@value #MIN_PITCH}…
- * {@value #MAX_PITCH}, то есть ноты 0…24) каждый раз, когда нота играет.
+ * <p>Чем сильнее окислена медь, тем чаще она «фальшивит»: блок держит ноту, но
+ * иногда выдаёт случайную высоту.
  *
- * <h2>Паузы</h2>
+ * <ul>
+ *   <li>{@code 1s} — обычная медь: строй точный;</li>
+ *   <li>{@code 2s} — потемневшая: высоты те же, но небольшая часть нот
+ *       ({@value #EXPOSED_FALSE_CHANCE}) звучит случайно;</li>
+ *   <li>{@code 3s} — состаренная: фальшивых нот больше
+ *       ({@value #WEATHERED_FALSE_CHANCE}), плюс иногда нота приходит с
+ *       задержкой в 0.1 секунды;</li>
+ *   <li>{@code 4s} — окисленная: строя нет вовсе, каждая нота — случайная
+ *       высота, и перед каждой нотой случайная задержка 0.1 или 0.2 секунды.</li>
+ * </ul>
  *
- * <p>Окисленный блок ещё и «заедает»: у {@code 4s} перед каждой нотой
- * добавляется случайная задержка {@value #LOW_DELAY_TICKS} или
- * {@value #HIGH_DELAY_TICKS} тика — 0.1 или 0.2 секунды. Первые три ступени
- * играют без задержек.
- *
- * <p>Сам номер ноты не хранится: плагин играет ноты сам и берёт высоту из
- * раскладки слота, поэтому «расстройка» — это множитель к ней.
+ * <p>Случайная высота всегда выбирается в пределах нотного блока
+ * ({@value #MIN_PITCH}…{@value #MAX_PITCH}, ноты 0…24), иначе клиент не поймёт
+ * ноту и частица получит чужой цвет.
  */
 final class CopperNoteStages {
 
@@ -32,22 +33,35 @@ final class CopperNoteStages {
     /** Последняя ступень: окисленная медь. */
     static final int LAST = CraftEngineCopper.STAGES;
 
+    /** Состаренная ступень: у неё свои шансы фальши и задержки. */
+    static final int WEATHERED = 3;
+
     /** Пределы высоты нотного блока: ноты 0…24. */
     static final float MIN_PITCH = 0.5f;
     static final float MAX_PITCH = 2.0f;
 
-    /**
-     * Разброс высоты по ступеням 1s…3s в полутонах. У {@code 4s} не
-     * используется: там высота выбирается целиком случайно.
-     */
-    static final double[] SPREAD_SEMITONES = {0.0D, 0.35D, 0.85D};
+    /** Шанс фальшивой ноты у потемневшего блока: редко, но слышно. */
+    static final double EXPOSED_FALSE_CHANCE = 0.15D;
+
+    /** Шанс фальшивой ноты у состаренного блока: вдвое чаще. */
+    static final double WEATHERED_FALSE_CHANCE = 0.35D;
+
+    /** Шанс, что состаренный блок задержит ноту на 0.1 секунды. */
+    static final double WEATHERED_DELAY_CHANCE = 0.30D;
 
     /** Добавочная задержка перед нотой у окисленного блока, тики. */
     static final int LOW_DELAY_TICKS = 2;   // 0.1 секунды
     static final int HIGH_DELAY_TICKS = 4;  // 0.2 секунды
 
     private static final String[] LABELS = {"1s", "2s", "3s", "4s"};
-    private static final String[] TITLES = {"обычный медный", "потемневший", "состаренный", "окисленный"};
+
+    /** Названия предметов: ступень видна в инвентаре без скобок и лишних строк. */
+    private static final String[] NAMES = {
+            "Медный нотный блок",
+            "Потемневший медный нотный блок",
+            "Состаренный медный нотный блок",
+            "Окисленный медный нотный блок",
+    };
 
     private CopperNoteStages() { }
 
@@ -61,9 +75,14 @@ final class CopperNoteStages {
         return LABELS[clamp(stage) - 1];
     }
 
-    /** «обычный медный»…«окисленный». */
-    static String title(int stage) {
-        return TITLES[clamp(stage) - 1];
+    /** Название предмета этой ступени. */
+    static String itemName(int stage) {
+        return NAMES[clamp(stage) - 1];
+    }
+
+    /** Ключ модели предмета: «1s_copper_note_block»…«4s_copper_note_block». */
+    static String itemModel(int stage) {
+        return label(stage) + "_copper_note_block";
     }
 
     /** Следующая ступень окисления; у последней ступени — она же. */
@@ -82,28 +101,50 @@ final class CopperNoteStages {
     }
 
     /**
-     * Высота ноты с учётом ступени. {@code base} — высота из раскладки слота,
-     * результат всегда в пределах нотного блока, иначе клиент не поймёт ноту.
+     * Высота ноты с учётом ступени. {@code base} — высота из раскладки слота.
+     * Точная высота у первых ступеней, иногда случайная — у подгнивших.
      */
     static float detunedPitch(int stage, float base, Random random) {
         int step = clamp(stage);
+
         if (step >= LAST) {
             // Строя нет: каждая нота — случайная высота.
-            return MIN_PITCH + random.nextFloat() * (MAX_PITCH - MIN_PITCH);
+            return randomPitch(random);
         }
-        double spread = SPREAD_SEMITONES[step - 1];
-        if (spread <= 0.0D || !Float.isFinite(base)) {
+
+        if (step == FIRST) {
             return clampPitch(base);
         }
-        // Равномерно в пределах ±spread полутонов вокруг ноты.
-        double semitones = (random.nextDouble() * 2.0D - 1.0D) * spread;
-        return clampPitch((float) (base * Math.pow(2.0D, semitones / 12.0D)));
+
+        return random.nextDouble() < falseChance(step) ? randomPitch(random) : clampPitch(base);
     }
 
-    /** Добавочная задержка перед нотой, тики: есть только у окисленного блока. */
+    /** Шанс фальшивой ноты у ступени: у 1s и 4s он не используется. */
+    static double falseChance(int stage) {
+        int step = clamp(stage);
+        if (step == 2) return EXPOSED_FALSE_CHANCE;
+        if (step >= WEATHERED && step < LAST) return WEATHERED_FALSE_CHANCE;
+        return 0.0D;
+    }
+
+    /** Добавочная задержка перед нотой, тики. */
     static int noteDelayTicks(int stage, Random random) {
-        if (clamp(stage) < LAST) return 0;
-        return random.nextBoolean() ? LOW_DELAY_TICKS : HIGH_DELAY_TICKS;
+        int step = clamp(stage);
+
+        if (step >= LAST) {
+            return random.nextBoolean() ? LOW_DELAY_TICKS : HIGH_DELAY_TICKS;
+        }
+
+        if (step == WEATHERED && random.nextDouble() < WEATHERED_DELAY_CHANCE) {
+            return LOW_DELAY_TICKS;
+        }
+
+        return 0;
+    }
+
+    /** Случайная высота в пределах нотного блока. */
+    static float randomPitch(Random random) {
+        return MIN_PITCH + random.nextFloat() * (MAX_PITCH - MIN_PITCH);
     }
 
     /** Высота всегда остаётся в пределах нотного блока. */

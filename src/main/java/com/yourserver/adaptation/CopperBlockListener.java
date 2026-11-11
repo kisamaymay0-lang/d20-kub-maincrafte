@@ -254,18 +254,15 @@ public class CopperBlockListener implements Listener {
         ItemMeta meta = item.getItemMeta();
 
         if (meta != null) {
-            meta.itemName(Component.text("Медный нотный блок", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
+            meta.itemName(Component.text(CopperNoteStages.itemName(step), NamedTextColor.GOLD)
+                    .decoration(TextDecoration.ITALIC, false));
             meta.lore(List.of(
-                    Component.text("Поставьте и нажмите ПКМ, чтобы настроить ноты", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
-                    Component.text("Ступень: " + CopperNoteStages.label(step)
-                            + " — " + CopperNoteStages.title(step), NamedTextColor.GRAY)
-                            .decoration(TextDecoration.ITALIC, false),
-                    Component.text(waxed ? "Вощёный: не окисляется" : "Окисляется со временем",
-                            NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)
+                    Component.text("Поставьте и нажмите ПКМ, чтобы настроить ноты", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)
             ));
+            // У каждой ступени своя модель предмета: 1s…4s_copper_note_block.
             meta.setItemModel(new NamespacedKey(
                     "f8resurs",
-                    "copper_note_block"
+                    CopperNoteStages.itemModel(step)
             ));
             meta.getPersistentDataContainer().set(
                     copperBlockKey,
@@ -1379,6 +1376,9 @@ public class CopperBlockListener implements Listener {
         setWaxed(block, true);
         ageEffects(block, Particle.WAX_ON, Sound.ITEM_HONEYCOMB_WAX_ON);
         consumeItem(player, hand, item);
+        // Клиент не предсказывает действие по нашему блоку, поэтому взмах руки
+        // посылаем сами: без него инструмент в руке «не двигается».
+        swing(player, hand);
         return true;
     }
 
@@ -1409,6 +1409,7 @@ public class CopperBlockListener implements Listener {
 
         if (changed) {
             damageTool(player, hand, item);
+            swing(player, hand);
         }
 
         return changed;
@@ -1459,6 +1460,15 @@ public class CopperBlockListener implements Listener {
         }
 
         return false;
+    }
+
+    /** Взмах руки — та же анимация, что клиент проигрывает при работе инструментом. */
+    private static void swing(Player player, EquipmentSlot hand) {
+        if (hand == EquipmentSlot.OFF_HAND) {
+            player.swingOffHand();
+        } else {
+            player.swingMainHand();
+        }
     }
 
     private static void consumeItem(Player player, EquipmentSlot hand, ItemStack item) {

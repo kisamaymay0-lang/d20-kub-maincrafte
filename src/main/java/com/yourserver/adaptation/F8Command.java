@@ -338,11 +338,8 @@ public class F8Command implements CommandExecutor, Listener {
                     9 + stage,
                     createMenuItem(
                             Material.NOTE_BLOCK,
-                            "§6Медный нотный блок §7(" + CopperNoteStages.label(stage) + ")",
-                            List.of(
-                                    "§7" + CopperNoteStages.title(stage) + " медный блок",
-                                    "§7Нажмите, чтобы получить блок"
-                            ),
+                            "§6" + CopperNoteStages.itemName(stage),
+                            List.of("§7Нажмите, чтобы получить блок"),
                             "copper_note_" + stage
                     )
             );

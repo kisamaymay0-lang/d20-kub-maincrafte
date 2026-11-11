@@ -8,13 +8,13 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Ступени окисления медного нотного блока: подписи, воск, расстройка и паузы. */
+/** Ступени окисления медного нотного блока: названия, воск, фальшь и паузы. */
 class CopperNoteStagesTest {
 
-    private static final double BASE_PITCH = 0.79D;
+    private static final float BASE_PITCH = 0.79f;
+    private static final int SAMPLES = 4000;
 
     @Test
     void stagesAreLabelledLikeTheModels() {
@@ -22,13 +22,23 @@ class CopperNoteStagesTest {
         assertEquals("2s", CopperNoteStages.label(2));
         assertEquals("3s", CopperNoteStages.label(3));
         assertEquals("4s", CopperNoteStages.label(4));
-        assertEquals("обычный медный", CopperNoteStages.title(1));
-        assertEquals("потемневший", CopperNoteStages.title(2));
-        assertEquals("состаренный", CopperNoteStages.title(3));
-        assertEquals("окисленный", CopperNoteStages.title(4));
+        assertEquals("1s_copper_note_block", CopperNoteStages.itemModel(1));
+        assertEquals("4s_copper_note_block", CopperNoteStages.itemModel(4));
         // Обе функции обязаны пережить мусор на входе, а не упасть на индексе.
         assertEquals("1s", CopperNoteStages.label(-5));
         assertEquals("4s", CopperNoteStages.label(99));
+    }
+
+    @Test
+    void itemNamesSayTheStageWithoutBrackets() {
+        assertEquals("Медный нотный блок", CopperNoteStages.itemName(1));
+        assertEquals("Потемневший медный нотный блок", CopperNoteStages.itemName(2));
+        assertEquals("Состаренный медный нотный блок", CopperNoteStages.itemName(3));
+        assertEquals("Окисленный медный нотный блок", CopperNoteStages.itemName(4));
+        for (int stage = 1; stage <= CopperNoteStages.LAST; stage++) {
+            assertFalse(CopperNoteStages.itemName(stage).contains("("),
+                    "скобок в названии быть не должно");
+        }
     }
 
     @Test
@@ -49,19 +59,44 @@ class CopperNoteStagesTest {
     }
 
     @Test
-    void theCleanerTheCopperTheTighterTheTuning() {
-        Random random = new Random(42L);
-        double plain = maxDeviation(1, random);
-        double exposed = maxDeviation(2, random);
-        double weathered = maxDeviation(3, random);
+    void plainCopperNeverFalsifies() {
+        Random random = new Random(1L);
+        for (int i = 0; i < SAMPLES; i++) {
+            assertEquals(BASE_PITCH, CopperNoteStages.detunedPitch(1, BASE_PITCH, random), 0.0f,
+                    "обычная медь держит строй точно");
+        }
+        assertEquals(0.0D, CopperNoteStages.falseChance(1), 0.0D);
+    }
 
-        // Ровно ноль не получить: полутона считаются через логарифм, и на
-        // одинаковых float остаётся пыль порядка 1e-7 полутона.
-        assertEquals(0.0D, plain, 1e-4, "обычная медь держит строй точно");
-        assertTrue(exposed > 0.0D, "потемневшая медь уже расстроена");
-        assertTrue(weathered > exposed, "состаренная расстроена сильнее потемневшей");
-        assertTrue(weathered <= CopperNoteStages.SPREAD_SEMITONES[2] + 1e-9,
-                "разброс не должен выходить за свой предел");
+    @Test
+    void exposedCopperKeepsTheTuningButSometimesMisses() {
+        Random random = new Random(2L);
+        Set<Float> distinct = new HashSet<>();
+        int falseNotes = 0;
+
+        for (int i = 0; i < SAMPLES; i++) {
+            float pitch = CopperNoteStages.detunedPitch(2, BASE_PITCH, random);
+            distinct.add(pitch);
+            if (pitch != BASE_PITCH) falseNotes++;
+        }
+
+        double rate = falseNotes / (double) SAMPLES;
+        assertEquals(CopperNoteStages.EXPOSED_FALSE_CHANCE, rate, 0.03D,
+                "потемневший блок фальшивит редко, но слышно");
+        assertTrue(distinct.size() > 100, "фальшивая нота — случайная высота, а не одна и та же");
+        assertTrue(distinct.contains(BASE_PITCH), "остальные ноты звучат точно");
+    }
+
+    @Test
+    void weatheredCopperFalsifiesMoreOftenThanExposed() {
+        Random exposed = new Random(3L);
+        Random weathered = new Random(4L);
+        double exposedRate = falseRate(2, exposed);
+        double weatheredRate = falseRate(3, weathered);
+
+        assertEquals(CopperNoteStages.WEATHERED_FALSE_CHANCE, weatheredRate, 0.03D);
+        assertTrue(weatheredRate > exposedRate + 0.1D,
+                "состаренный блок фальшивит заметно чаще: " + weatheredRate + " против " + exposedRate);
     }
 
     @Test
@@ -70,30 +105,38 @@ class CopperNoteStagesTest {
         Set<Float> pitches = new HashSet<>();
 
         for (int i = 0; i < 500; i++) {
-            float pitch = CopperNoteStages.detunedPitch(4, (float) BASE_PITCH, random);
+            float pitch = CopperNoteStages.detunedPitch(4, BASE_PITCH, random);
             assertTrue(pitch >= CopperNoteStages.MIN_PITCH && pitch <= CopperNoteStages.MAX_PITCH,
                     "высота обязана оставаться в пределах нотного блока: " + pitch);
             pitches.add(pitch);
         }
 
         assertTrue(pitches.size() > 400, "каждая нота — новая случайная высота");
-        assertNotEquals(Set.of((float) BASE_PITCH), pitches, "строгого строя у окисленного нет");
+        assertFalse(pitches.contains(BASE_PITCH), "строгого строя у окисленного нет");
     }
 
     @Test
-    void onlyTheOxidizedBlockDelaysItsNotes() {
-        Random random = new Random(3L);
-        Set<Integer> delays = new HashSet<>();
+    void delaysGrowWithOxidation() {
+        Random random = new Random(5L);
 
-        for (int i = 0; i < 200; i++) {
-            assertEquals(0, CopperNoteStages.noteDelayTicks(1, random));
-            assertEquals(0, CopperNoteStages.noteDelayTicks(2, random));
-            assertEquals(0, CopperNoteStages.noteDelayTicks(3, random));
-            delays.add(CopperNoteStages.noteDelayTicks(4, random));
+        for (int i = 0; i < 2000; i++) {
+            assertEquals(0, CopperNoteStages.noteDelayTicks(1, random), "обычная медь не тормозит");
+            assertEquals(0, CopperNoteStages.noteDelayTicks(2, random), "потемневший не тормозит");
         }
 
-        assertEquals(Set.of(CopperNoteStages.LOW_DELAY_TICKS, CopperNoteStages.HIGH_DELAY_TICKS), delays,
-                "у окисленного блока задержка 0.1 или 0.2 секунды");
+        Set<Integer> weathered = new HashSet<>();
+        for (int i = 0; i < 2000; i++) {
+            weathered.add(CopperNoteStages.noteDelayTicks(3, random));
+        }
+        assertEquals(Set.of(0, CopperNoteStages.LOW_DELAY_TICKS), weathered,
+                "состаренный иногда задерживает ноту на 0.1 секунды");
+
+        Set<Integer> oxidized = new HashSet<>();
+        for (int i = 0; i < 200; i++) {
+            oxidized.add(CopperNoteStages.noteDelayTicks(4, random));
+        }
+        assertEquals(Set.of(CopperNoteStages.LOW_DELAY_TICKS, CopperNoteStages.HIGH_DELAY_TICKS),
+                oxidized, "у окисленного задержка 0.1 или 0.2 секунды");
         assertEquals(2, CopperNoteStages.LOW_DELAY_TICKS);
         assertEquals(4, CopperNoteStages.HIGH_DELAY_TICKS);
     }
@@ -117,14 +160,13 @@ class CopperNoteStagesTest {
         assertEquals(CopperNoteStages.MIN_PITCH, CopperNoteStages.clampPitch(0.0f));
     }
 
-    /** Наибольший уход от базовой высоты в полутонах за 2000 нот. */
-    private static double maxDeviation(int stage, Random random) {
-        double max = 0.0D;
-        for (int i = 0; i < 2000; i++) {
-            float pitch = CopperNoteStages.detunedPitch(stage, (float) BASE_PITCH, random);
-            double semitones = 12.0D * (Math.log(pitch / BASE_PITCH) / Math.log(2.0D));
-            max = Math.max(max, Math.abs(semitones));
+    private static double falseRate(int stage, Random random) {
+        int falseNotes = 0;
+        for (int i = 0; i < SAMPLES; i++) {
+            if (CopperNoteStages.detunedPitch(stage, BASE_PITCH, random) != BASE_PITCH) {
+                falseNotes++;
+            }
         }
-        return max;
+        return falseNotes / (double) SAMPLES;
     }
 }
