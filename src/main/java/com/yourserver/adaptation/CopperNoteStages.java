@@ -89,7 +89,13 @@ final class CopperNoteStages {
      */
     static String itemName(int stage, boolean waxed) {
         String name = NAMES[clamp(stage) - 1];
-        return waxed ? WAXED_PREFIX + name : name;
+
+        if (!waxed) {
+            return name;
+        }
+
+        // «Вощёный» + «медный…»: первая буква ступени становится строчной.
+        return WAXED_PREFIX + Character.toLowerCase(name.charAt(0)) + name.substring(1);
     }
 
     /** Ключ модели предмета: «1s_copper_note_block»…«4s_copper_note_block». */
