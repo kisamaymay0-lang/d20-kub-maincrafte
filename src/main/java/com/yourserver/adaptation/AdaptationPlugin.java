@@ -136,7 +136,7 @@ public void onEnable() {
 
     // Уход за блоками руками: вода по меди и кораллам, блок света спрятанной
     // рамкой — всё это шифт + ПКМ, отдельными слушателями.
-    getServer().getPluginManager().registerEvents(new CopperCare(), this);
+    getServer().getPluginManager().registerEvents(new CopperCare(copperBlockListener), this);
 
     coralCare = new CoralCare(this, dataWriter);
     getServer().getPluginManager().registerEvents(coralCare, this);
@@ -348,6 +348,10 @@ public void onEnable() {
         }
         if (catBattleManager != null) {
             catBattleManager.reloadSettings();
+        }
+        if (copperBlockListener != null) {
+            // Время окисления медного нотного блока.
+            copperBlockListener.reloadSettings();
         }
         if (petManager != null) {
             petManager.reloadSettings();

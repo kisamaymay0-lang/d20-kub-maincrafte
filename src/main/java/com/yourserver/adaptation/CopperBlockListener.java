@@ -10,6 +10,7 @@ import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -32,6 +33,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.RecipeChoice;
 import org.bukkit.inventory.ShapelessRecipe;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.persistence.PersistentDataType;
@@ -57,7 +59,8 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Медный нотный блок.
  *
- * Блок — кастомный блок CraftEngine {@code f8resurs:copper_note_block}:
+ * Блок — кастомный блок CraftEngine {@code f8resurs:1s_copper_note_block}
+ * (ступени 1s…4s, см. {@link CraftEngineCopper}):
  *  - запуск ТОЛЬКО по изменению физического питания с 0 на 1;
  *  - Paper не посылает BlockRedstoneEvent для самого блока, поэтому
  *    заполненные блоки проверяются раз в тик (без загрузки чанков);
@@ -73,6 +76,11 @@ import java.util.concurrent.ThreadLocalRandom;
 public class CopperBlockListener implements Listener {
 
     private static final int TIMER_SLOT = 10;
+    /** Ванильное окисление меди — примерно 50–80 минут на ступень. */
+    private static final long DEFAULT_OXIDATION_MINUTES = 60L;
+    private static final int DEFAULT_OXIDATION_TICKS = (int) (DEFAULT_OXIDATION_MINUTES * 60L * 20L);
+    /** Период проверки старения: раз в секунду, как случайные тики у ванили. */
+    private static final long AGING_INTERVAL_TICKS = 20L;
     private static final double DISC_RANGE = 65.0;
     private static final long DEBOUNCE_MS = 400L;
 
@@ -97,9 +105,22 @@ public class CopperBlockListener implements Listener {
             new HashSet<>();
 
     private final NamespacedKey copperBlockKey;
+    /** Ступень окисления в предмете: сломанный блок возвращается той же ступенью. */
+    private final NamespacedKey stageKey;
+    /** Воск в предмете: вощёный блок и ломается вощёным. */
+    private final NamespacedKey waxedKey;
     /** Сказали ли уже, почему блок не ставится. */
     private boolean placeWarned;
     private final Map<String, Location> powerTrackedBlocks = new HashMap<>();
+    /** Блоки, которые стареют сами: ключ места -> позиция. */
+    private final Map<String, Location> agingBlocks = new HashMap<>();
+    /** Сколько тиков осталось до следующей ступени (у незагруженных чанков время стоит). */
+    private final Map<String, Integer> agingTicksLeft = new HashMap<>();
+    /** О каких ступенях уже предупредили: не спамим в лог на каждое старение. */
+    private final Set<String> missingStageWarned = new HashSet<>();
+    private BukkitTask agingTask;
+    /** Время одной ступени окисления, тики; 0 — окисление выключено. */
+    private int oxidationTicks = DEFAULT_OXIDATION_TICKS;
     private final PowerEdgeTracker powerEdges = new PowerEdgeTracker();
     private BukkitTask powerTask;
 
@@ -108,6 +129,10 @@ public class CopperBlockListener implements Listener {
 
         this.copperBlockKey =
                 new NamespacedKey(plugin, "copper_block");
+        this.stageKey =
+                new NamespacedKey(plugin, "copper_stage");
+        this.waxedKey =
+                new NamespacedKey(plugin, "copper_waxed");
 
         this.configFile =
                 new File(plugin.getDataFolder(), "blocks.yml");
@@ -145,8 +170,20 @@ public class CopperBlockListener implements Listener {
         blockedSlots.add(35);
 
         loadAllBlocksFromFile();
+        reloadSettings();
+        loadAgingFromFile();
         registerRecipe();
         powerTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickRedstone, 1L, 1L);
+        if (CraftEngineCopper.available()) {
+            // Старение работает только с загруженными чанками: как случайные
+            // тики ванили, вне загруженных чанков медь не стареет.
+            agingTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickOxidation,
+                    AGING_INTERVAL_TICKS, AGING_INTERVAL_TICKS);
+            String stageProblem = CraftEngineCopper.stageDiagnosis();
+            if (!stageProblem.isEmpty()) {
+                plugin.getLogger().warning(stageProblem);
+            }
+        }
         if (!CraftEngineCopper.available()) {
             plugin.getLogger().warning("CraftEngine не найден: медный нотный блок — кастомный "
                     + "блок, и без CraftEngine он не ставится вовсе. Поставьте CraftEngine с "
@@ -201,7 +238,17 @@ public class CopperBlockListener implements Listener {
 
     // ===== ПРЕДМЕТ БЛОКА =====
 
+    /** Предмет первой ступени: так его выдаёт крафт. */
     public ItemStack createCopperBlockItem() {
+        return createCopperBlockItem(CopperNoteStages.FIRST, false);
+    }
+
+    /**
+     * Предмет нужной ступени. Ступень и воск едут в предмете, поэтому
+     * сломанный блок ставится обратно таким, каким был.
+     */
+    public ItemStack createCopperBlockItem(int stage, boolean waxed) {
+        int step = CopperNoteStages.clamp(stage);
         ItemStack item = new ItemStack(Material.NOTE_BLOCK);
 
         ItemMeta meta = item.getItemMeta();
@@ -209,7 +256,12 @@ public class CopperBlockListener implements Listener {
         if (meta != null) {
             meta.itemName(Component.text("Медный нотный блок", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
             meta.lore(List.of(
-                    Component.text("Поставьте и нажмите ПКМ, чтобы настроить ноты", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)
+                    Component.text("Поставьте и нажмите ПКМ, чтобы настроить ноты", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                    Component.text("Ступень: " + CopperNoteStages.label(step)
+                            + " — " + CopperNoteStages.title(step), NamedTextColor.GRAY)
+                            .decoration(TextDecoration.ITALIC, false),
+                    Component.text(waxed ? "Вощёный: не окисляется" : "Окисляется со временем",
+                            NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)
             ));
             meta.setItemModel(new NamespacedKey(
                     "f8resurs",
@@ -220,10 +272,37 @@ public class CopperBlockListener implements Listener {
                     PersistentDataType.BYTE,
                     (byte) 1
             );
+            meta.getPersistentDataContainer().set(
+                    stageKey,
+                    PersistentDataType.BYTE,
+                    (byte) step
+            );
+            if (waxed) {
+                meta.getPersistentDataContainer().set(
+                        waxedKey,
+                        PersistentDataType.BYTE,
+                        (byte) 1
+                );
+            }
             item.setItemMeta(meta);
         }
 
         return item;
+    }
+
+    /** Ступень из предмета: у старых предметов её нет — считаем первой. */
+    private int itemStage(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return CopperNoteStages.FIRST;
+        Byte stage = item.getItemMeta().getPersistentDataContainer()
+                .get(stageKey, PersistentDataType.BYTE);
+        return stage == null ? CopperNoteStages.FIRST : CopperNoteStages.clamp(stage);
+    }
+
+    /** Воск из предмета: вощёный блок ставится вощёным. */
+    private boolean itemWaxed(ItemStack item) {
+        return item != null && item.hasItemMeta()
+                && item.getItemMeta().getPersistentDataContainer()
+                        .has(waxedKey, PersistentDataType.BYTE);
     }
 
     // ===== ОПРЕДЕЛЕНИЕ "НАШЕГО" БЛОКА =====
@@ -299,13 +378,22 @@ public class CopperBlockListener implements Listener {
             return;
         }
 
-        if (!CraftEngineCopper.ready() || !CraftEngineCopper.place(block)) {
+        ItemStack held = event.getItemInHand();
+        int stage = itemStage(held);
+
+        if (!CraftEngineCopper.ready() || !CraftEngineCopper.place(block, stage)) {
             event.setCancelled(true);
             event.getPlayer().sendMessage(org.bukkit.ChatColor.RED
                     + "Медный нотный блок не ставится: CraftEngine не зарегистрировал блок "
-                    + CraftEngineCopper.ID + ". Причина — в консоли сервера.");
+                    + CraftEngineCopper.idFor(stage) + ". Причина — в консоли сервера.");
             warnOnce();
             return;
+        }
+
+        // Блок теперь под присмотром старения: ступень видна по id, воск — в blocks.yml.
+        registerAging(block);
+        if (itemWaxed(held)) {
+            setWaxed(block, true);
         }
 
         // Клиент предсказал нотный блок. Возвращаем ему настоящее состояние,
@@ -320,6 +408,9 @@ public class CopperBlockListener implements Listener {
         }
         placeWarned = true;
         String diagnosis = CraftEngineCopper.diagnosis();
+        if (diagnosis.isEmpty()) {
+            diagnosis = CraftEngineCopper.stageDiagnosis();
+        }
         plugin.getLogger().warning("CraftEngine не принял блок " + CraftEngineCopper.ID + ". "
                 + (diagnosis.isEmpty()
                 ? "Проверьте консоль CraftEngine; блоки, которые нужны плагину, описаны в "
@@ -342,6 +433,14 @@ public class CopperBlockListener implements Listener {
         }
 
         Player player = event.getPlayer();
+
+        // Воск и топор — ванильные действия по меди: они важнее меню и работают
+        // в том числе с зажатым шифтом. Ступень меняется на самом блоке.
+        if (event.getHand() == EquipmentSlot.HAND && handleWaxOrScrape(player, block, event)) {
+            event.setCancelled(true);
+            return;
+        }
+
         if (ContainerInteraction.bypassMenu(player.isSneaking(),
                 player.getInventory().getItemInMainHand().getType().isAir(),
                 player.getInventory().getItemInOffHand().getType().isAir())) {
@@ -609,6 +708,8 @@ public class CopperBlockListener implements Listener {
 
         delayTicks = Math.clamp(delayTicks, 2, 100);
 
+        // Ступень окисления: чем она выше, тем сильнее расстроен блок.
+        final int stage = Math.max(CopperNoteStages.FIRST, CraftEngineCopper.stageAt(block));
         final int finalDelay = delayTicks;
         final ItemStack[] finalItems = items;
         final Location particleLoc =
@@ -662,32 +763,9 @@ public class CopperBlockListener implements Listener {
                     float volume,
                     float pitch
             ) {
-                ItemStack it = getSlot(arr, slot);
-
-                if (it == null) {
-                    return false;
-                }
-
-                block.getWorld().playSound(
-                        block.getLocation(),
-                        getInstrumentByMaterial(it.getType()),
-                        volume,
-                        pitch
+                return CopperBlockListener.this.playNote(
+                        block, arr, slot, volume, pitch, stage, particleLoc
                 );
-
-                // Как у ванильного нотного блока: одна нота — одна частица,
-                // цвет частицы — нота (смещение note / 24 при count = 0).
-                block.getWorld().spawnParticle(
-                        Particle.NOTE,
-                        particleLoc,
-                        0,
-                        NoteTones.offset(pitch),
-                        0.0,
-                        0.0,
-                        1.0
-                );
-
-                return true;
             }
 
         }.runTaskTimer(plugin, 0L, finalDelay);
@@ -1056,6 +1134,7 @@ public class CopperBlockListener implements Listener {
             powerTrackedBlocks.remove(key);
             powerEdges.remove(key);
             blockData.set("blocks." + key, null);
+            forgetAging(key);
             block.removeMetadata("copper_playing", plugin);
             block.removeMetadata("last_copper_trigger", plugin);
             // Поршень перемещает блок вместе с его состоянием. Данных в новом
@@ -1064,6 +1143,364 @@ public class CopperBlockListener implements Listener {
         }
         if (changed) {
             saveBlockData();
+        }
+    }
+
+    // ===== НОТЫ С УЧЁТОМ СТУПЕНИ =====
+
+    /**
+     * Одна нота раскладки. Высоту расстраивает ступень, а у окисленного блока
+     * нота ещё и приходит с задержкой — четыре голоса «расползаются» во времени,
+     * как у настоящего ржавого механизма.
+     */
+    private boolean playNote(
+            Block block,
+            ItemStack[] arr,
+            int slot,
+            float volume,
+            float basePitch,
+            int stage,
+            Location particleLoc
+    ) {
+        ItemStack it = getSlot(arr, slot);
+
+        if (it == null) {
+            return false;
+        }
+
+        int delay = CopperNoteStages.noteDelayTicks(stage, ThreadLocalRandom.current());
+
+        if (delay <= 0) {
+            emitNote(block, it, volume, basePitch, stage, particleLoc);
+            return true;
+        }
+
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (!isCopperBlock(block)) return;
+            if (!block.getWorld().isChunkLoaded(block.getX() >> 4, block.getZ() >> 4)) return;
+            emitNote(block, it, volume, basePitch, stage, particleLoc);
+        }, delay);
+
+        return true;
+    }
+
+    private void emitNote(
+            Block block,
+            ItemStack instrument,
+            float volume,
+            float basePitch,
+            int stage,
+            Location particleLoc
+    ) {
+        float pitch = CopperNoteStages.detunedPitch(stage, basePitch, ThreadLocalRandom.current());
+
+        block.getWorld().playSound(
+                block.getLocation(),
+                getInstrumentByMaterial(instrument.getType()),
+                volume,
+                pitch
+        );
+
+        // Как у ванильного нотного блока: одна нота — одна частица, цвет
+        // частицы — нота (смещение note / 24 при count = 0).
+        block.getWorld().spawnParticle(
+                Particle.NOTE,
+                particleLoc,
+                0,
+                NoteTones.offset(pitch),
+                0.0,
+                0.0,
+                1.0
+        );
+    }
+
+    // ===== СТАРЕНИЕ: ВОСК, ТОПОР, ВОДА И ВРЕМЯ =====
+
+    /** /f8 reload: время окисления можно менять без перезапуска. */
+    void reloadSettings() {
+        long minutes = plugin.getConfig()
+                .getLong("copper-note-block.oxidation-minutes", DEFAULT_OXIDATION_MINUTES);
+        long ticks = minutes <= 0 ? 0L : minutes * 60L * 20L;
+        oxidationTicks = ticks <= 0L ? 0 : (int) Math.min(ticks, Integer.MAX_VALUE);
+    }
+
+    /** Кто уже под присмотром старения: содержимое blocks.yml, раздел stages. */
+    private void loadAgingFromFile() {
+        ConfigurationSection stages = blockData.getConfigurationSection("stages");
+        if (stages == null) {
+            return;
+        }
+        for (String key : stages.getKeys(false)) {
+            Location location = locationFromKey(key);
+            if (location == null) continue;
+            agingBlocks.put(key, location);
+            agingTicksLeft.put(key, randomOxidationTicks());
+        }
+    }
+
+    /** Сколько ждать до следующей ступени: ±25 %, чтобы блоки не старели хором. */
+    private int randomOxidationTicks() {
+        if (oxidationTicks <= 0) return Integer.MAX_VALUE;
+        double factor = 0.75D + ThreadLocalRandom.current().nextDouble() * 0.5D;
+        return (int) Math.min(Integer.MAX_VALUE, Math.round(oxidationTicks * factor));
+    }
+
+    private void registerAging(Block block) {
+        String key = getBlockKey(block);
+        agingBlocks.put(key, block.getLocation().clone());
+        agingTicksLeft.put(key, randomOxidationTicks());
+        if (!blockData.contains("stages." + key)) {
+            blockData.set("stages." + key, Boolean.FALSE);
+        }
+        saveBlockData();
+    }
+
+    /** Блок ушёл из мира или уехал поршнем: данные старения больше не нужны. */
+    private void forgetAging(String key) {
+        agingBlocks.remove(key);
+        agingTicksLeft.remove(key);
+        blockData.set("stages." + key, null);
+    }
+
+    private boolean isWaxed(String key) {
+        return blockData.getBoolean("stages." + key, false);
+    }
+
+    private void setWaxed(Block block, boolean waxed) {
+        String key = getBlockKey(block);
+        agingBlocks.putIfAbsent(key, block.getLocation().clone());
+        agingTicksLeft.putIfAbsent(key, randomOxidationTicks());
+        blockData.set("stages." + key, waxed);
+        saveBlockData();
+    }
+
+    /**
+     * Окисление временем. Ваниль старит медь случайными тиками в загруженных
+     * чанках, поэтому и здесь счётчик идёт только у загруженных чанков: пока
+     * чанк выгружен, медь не стареет. Воск останавливает счёт.
+     */
+    private void tickOxidation() {
+        if (oxidationTicks <= 0 || agingBlocks.isEmpty() || shuttingDown) {
+            return;
+        }
+
+        boolean changed = false;
+        var iterator = agingBlocks.entrySet().iterator();
+
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            String key = entry.getKey();
+            Location location = entry.getValue();
+            World world = location.isWorldLoaded() ? location.getWorld() : null;
+
+            if (world == null
+                    || !world.isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
+                continue;
+            }
+
+            Block block = world.getBlockAt(location);
+            int stage = CraftEngineCopper.stageAt(block);
+
+            if (stage <= 0) {
+                // Блок убрали не нашим способом (или он уже не наш) — забываем.
+                iterator.remove();
+                agingTicksLeft.remove(key);
+                blockData.set("stages." + key, null);
+                changed = true;
+                continue;
+            }
+
+            if (!CopperNoteStages.canOxidize(stage, isWaxed(key))) {
+                continue;
+            }
+
+            int left = agingTicksLeft.getOrDefault(key, oxidationTicks) - (int) AGING_INTERVAL_TICKS;
+
+            if (left > 0) {
+                agingTicksLeft.put(key, left);
+                continue;
+            }
+
+            if (advanceStage(block, stage + 1)) {
+                changed = true;
+            }
+            agingTicksLeft.put(key, randomOxidationTicks());
+        }
+
+        if (changed) {
+            saveBlockData();
+        }
+    }
+
+    /** Поставить следующую ступень на то же место. */
+    private boolean advanceStage(Block block, int stage) {
+        int target = CopperNoteStages.clamp(stage);
+
+        if (CraftEngineCopper.stageAt(block) == target) {
+            return false;
+        }
+
+        if (!CraftEngineCopper.place(block, target)) {
+            warnMissingStage(CraftEngineCopper.idFor(target));
+            return false;
+        }
+
+        return true;
+    }
+
+    private void warnMissingStage(String id) {
+        if (!missingStageWarned.add(id)) {
+            return;
+        }
+        plugin.getLogger().warning("CraftEngine не зарегистрировал ступень " + id
+                + ": медный нотный блок не стареет дальше. Список блоков и образец конфига: "
+                + CraftEngineSupport.CONFIG_DOC + ".");
+    }
+
+    private void ageEffects(Block block, Particle particle, Sound sound) {
+        Location at = block.getLocation().add(0.5, 0.5, 0.5);
+        block.getWorld().spawnParticle(particle, at, 18, 0.35, 0.35, 0.35, 0.0);
+        block.getWorld().playSound(at, sound, SoundCategory.BLOCKS, 0.8f, 1.0f);
+    }
+
+    /** Мёд: воск останавливает окисление, как у ванильной меди. */
+    private boolean wax(Block block, Player player, ItemStack item, EquipmentSlot hand) {
+        String key = getBlockKey(block);
+
+        if (isWaxed(key)) {
+            // Ваниль на уже вощёный блок не реагирует вовсе.
+            return false;
+        }
+
+        setWaxed(block, true);
+        ageEffects(block, Particle.WAX_ON, Sound.ITEM_HONEYCOMB_WAX_ON);
+        consumeItem(player, hand, item);
+        return true;
+    }
+
+    /** Топор: сначала снимает воск, потом окисление — по ступени за раз. */
+    private boolean scrape(Block block, Player player, ItemStack item, EquipmentSlot hand) {
+        String key = getBlockKey(block);
+        int stage = CraftEngineCopper.stageAt(block);
+
+        if (stage <= 0) {
+            return false;
+        }
+
+        boolean changed;
+
+        if (isWaxed(key)) {
+            setWaxed(block, false);
+            ageEffects(block, Particle.WAX_OFF, Sound.ITEM_AXE_WAX_OFF);
+            changed = true;
+        } else if (stage > CopperNoteStages.FIRST) {
+            changed = advanceStage(block, stage - 1);
+            if (changed) {
+                ageEffects(block, Particle.SCRAPE, Sound.ITEM_AXE_SCRAPE);
+            }
+        } else {
+            // Обычная медь без воска: снимать нечего, как и в ванили.
+            return false;
+        }
+
+        if (changed) {
+            damageTool(player, hand, item);
+        }
+
+        return changed;
+    }
+
+    /** Вода по блоку: снимает воск, а обычную медь старит на ступень. */
+    boolean ageWithWater(Block block) {
+        int stage = CraftEngineCopper.stageAt(block);
+
+        if (stage <= 0) {
+            return false;
+        }
+
+        if (isWaxed(getBlockKey(block))) {
+            setWaxed(block, false);
+            ageEffects(block, Particle.WAX_OFF, Sound.ITEM_BOTTLE_FILL);
+            return true;
+        }
+
+        if (stage >= CopperNoteStages.LAST) {
+            return false;
+        }
+
+        if (!advanceStage(block, stage + 1)) {
+            return false;
+        }
+
+        ageEffects(block, Particle.WAX_OFF, Sound.ITEM_BOTTLE_FILL);
+        return true;
+    }
+
+    /** ПКМ мёдом или топором по блоку. */
+    private boolean handleWaxOrScrape(Player player, Block block, PlayerInteractEvent event) {
+        ItemStack item = event.getItem();
+
+        if (item == null) {
+            return false;
+        }
+
+        Material type = item.getType();
+
+        if (type == Material.HONEYCOMB) {
+            return wax(block, player, item, EquipmentSlot.HAND);
+        }
+
+        if (type.name().endsWith("_AXE")) {
+            return scrape(block, player, item, EquipmentSlot.HAND);
+        }
+
+        return false;
+    }
+
+    private static void consumeItem(Player player, EquipmentSlot hand, ItemStack item) {
+        if (player.getGameMode() == GameMode.CREATIVE) {
+            return;
+        }
+
+        item.setAmount(Math.max(0, item.getAmount() - 1));
+
+        if (hand == EquipmentSlot.OFF_HAND) {
+            player.getInventory().setItemInOffHand(item);
+        } else {
+            player.getInventory().setItemInMainHand(item);
+        }
+    }
+
+    /** Как ваниль: одно действие топора — единица прочности. */
+    private static void damageTool(Player player, EquipmentSlot hand, ItemStack item) {
+        if (player.getGameMode() == GameMode.CREATIVE) {
+            return;
+        }
+
+        if (!(item.getItemMeta() instanceof Damageable damageable)) {
+            return;
+        }
+
+        int max = item.getType().getMaxDurability();
+
+        if (max <= 0) {
+            return;
+        }
+
+        int next = damageable.getDamage() + 1;
+
+        if (next >= max) {
+            item.setAmount(0);
+            player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.8f, 1.0f);
+        } else {
+            damageable.setDamage(next);
+            item.setItemMeta(damageable);
+        }
+
+        if (hand == EquipmentSlot.OFF_HAND) {
+            player.getInventory().setItemInOffHand(item);
+        } else {
+            player.getInventory().setItemInMainHand(item);
         }
     }
 
@@ -1111,17 +1548,23 @@ public class CopperBlockListener implements Listener {
             }
         }
 
+        // Ступень и воск запоминаем до того, как блок уйдёт из мира: дроп
+        // возвращается таким же, как в ванили у медных блоков.
+        int stage = Math.max(CopperNoteStages.FIRST, CraftEngineCopper.stageAt(block));
+        boolean waxed = isWaxed(key);
+
         // В творческом режиме ванильный блок не дропается.
         if (event.getPlayer().getGameMode()
                 != GameMode.CREATIVE) {
 
             block.getWorld().dropItemNaturally(
                     block.getLocation(),
-                    createCopperBlockItem()
+                    createCopperBlockItem(stage, waxed)
             );
         }
 
         blockData.set("blocks." + key, null);
+        forgetAging(key);
         saveBlockData();
 
         // Кастомный блок гасим сами: ванильное «поставить воздух» к блоку
@@ -1191,6 +1634,11 @@ public class CopperBlockListener implements Listener {
         if (powerTask != null) {
             powerTask.cancel();
         }
+        if (agingTask != null) {
+            agingTask.cancel();
+        }
+        agingBlocks.clear();
+        agingTicksLeft.clear();
         powerTrackedBlocks.clear();
         powerEdges.clear();
         for (Inventory inventory : new ArrayList<>(openInventories.values())) {

@@ -331,15 +331,22 @@ public class F8Command implements CommandExecutor, Listener {
 
         fill(inventory);
 
-        inventory.setItem(
-                11,
-                createMenuItem(
-                        Material.NOTE_BLOCK,
-                        "§6Медный нотный блок",
-                        List.of("§7Нажмите, чтобы получить блок"),
-                        "copper_note_block"
-                )
-        );
+        // Медный нотный блок — четыре ступени окисления, каждая своим предметом:
+        // поставленная ступень сохраняется, дальше блок стареет сам.
+        for (int stage = CopperNoteStages.FIRST; stage <= CopperNoteStages.LAST; stage++) {
+            inventory.setItem(
+                    9 + stage,
+                    createMenuItem(
+                            Material.NOTE_BLOCK,
+                            "§6Медный нотный блок §7(" + CopperNoteStages.label(stage) + ")",
+                            List.of(
+                                    "§7" + CopperNoteStages.title(stage) + " медный блок",
+                                    "§7Нажмите, чтобы получить блок"
+                            ),
+                            "copper_note_" + stage
+                    )
+            );
+        }
 
         inventory.setItem(
                 15,
@@ -688,6 +695,16 @@ public class F8Command implements CommandExecutor, Listener {
                 giveItem(
                         player,
                         flaskListener.createPoisonFlask()
+                );
+                player.closeInventory();
+            }
+
+            case "copper_note_1", "copper_note_2", "copper_note_3", "copper_note_4" -> {
+                // Ступень — в предмете: поставленный блок сразу нужной ступени.
+                giveItem(
+                        player,
+                        copperBlockListener.createCopperBlockItem(
+                                id.charAt(id.length() - 1) - '0', false)
                 );
                 player.closeInventory();
             }

@@ -63,9 +63,12 @@ class CraftEngineBlocksTest {
     /** Ключи внутри settings.sounds (BlockSounds.fromConfig). */
     private static final Set<String> SOUND_KEYS = Set.of("break", "step", "place", "hit", "fall");
 
-    /** Пять блоков, которые плагин ждёт от CraftEngine. */
+    /** Блоки, которые плагин ждёт от CraftEngine: кувшин (2), медь (4 ступени), АПВШ, ягоды. */
     private static final Set<String> WANTED_IDS =
-            Set.of(CraftEngineJug.EMPTY_ID, CraftEngineJug.FILLED_ID, CraftEngineCopper.ID, CraftEngineApvsh.ID, CraftEngineSweetBerry.ID);
+            Set.of(CraftEngineJug.EMPTY_ID, CraftEngineJug.FILLED_ID,
+                    CraftEngineCopper.STAGE_IDS[0], CraftEngineCopper.STAGE_IDS[1],
+                    CraftEngineCopper.STAGE_IDS[2], CraftEngineCopper.STAGE_IDS[3],
+                    CraftEngineApvsh.ID, CraftEngineSweetBerry.ID);
 
     private static Path repoRoot() {
         Path current = Path.of("").toAbsolutePath();
@@ -112,7 +115,13 @@ class CraftEngineBlocksTest {
         assertEquals("f8resurs:ancient_jug_filled", CraftEngineJug.FILLED_ID);
         assertEquals("f8resurs:ancient_jug_filled", CraftEngineJug.keyName(1));
         assertEquals("f8resurs:ancient_jug", CraftEngineJug.keyName(0));
-        assertEquals("f8resurs:copper_note_block", CraftEngineCopper.ID);
+        assertEquals("f8resurs:1s_copper_note_block", CraftEngineCopper.ID);
+        assertArrayEquals(
+                new String[]{
+                        "f8resurs:1s_copper_note_block", "f8resurs:2s_copper_note_block",
+                        "f8resurs:3s_copper_note_block", "f8resurs:4s_copper_note_block"},
+                CraftEngineCopper.STAGE_IDS,
+                "четыре ступени окисления: 1s — медь, 4s — окисленный");
         assertEquals("f8resurs:apvsh", CraftEngineApvsh.ID);
         assertEquals("f8resurs:sweetie_bery_block", CraftEngineSweetBerry.ID);
     }
@@ -138,7 +147,9 @@ class CraftEngineBlocksTest {
                 "Нужен отдельный файл для медного нотного блока: " + ROOT.relativize(file));
         YamlConfiguration loaded = new YamlConfiguration();
         loaded.loadFromString(Files.readString(file));
-        assertEquals(Set.of(CraftEngineCopper.ID),
+        assertEquals(Set.of(
+                        CraftEngineCopper.STAGE_IDS[0], CraftEngineCopper.STAGE_IDS[1],
+                        CraftEngineCopper.STAGE_IDS[2], CraftEngineCopper.STAGE_IDS[3]),
                 loaded.getConfigurationSection("blocks").getKeys(false),
                 "в файле медного блока должен быть только он: кувшин может быть уже "
                         + "прописан в паке, и дубль id дал бы конфликт");
@@ -267,35 +278,38 @@ class CraftEngineBlocksTest {
 
     @Test
     void copperBlockIsASolidCubeLikeTheNoteBlockItReplaces() throws Exception {
-        // Модель медного блока — cube_all, а питание он читает обычным
+        // Модели ступеней — cube_all, а питание блок читает обычным
         // block.isBlockPowered(): если куб не проводит редстоун, блок перестанет
-        // срабатывать от провода.
-        ConfigurationSection settings = blocks().get(CraftEngineCopper.ID)
-                .getConfigurationSection("settings");
-        assertTrue(settings.getBoolean("is_view_blocking", false), "медный блок — глухой куб");
-        assertTrue(settings.getBoolean("can_occlude", false), "медный блок — глухой куб");
-        assertTrue(settings.getBoolean("is_suffocating", false), "медный блок — глухой куб");
-        assertTrue(settings.getBoolean("is_redstone_conductor", false),
-                "медный блок должен проводить редстоун, иначе он не сработает от провода");
-        assertFalse(settings.getBoolean("propagate_skylight", true),
-                "глухой куб свет не пропускает");
+        // срабатывать от провода. Ступени обязаны вести себя одинаково, иначе
+        // окисленный блок перестал бы играть.
+        for (String id : CraftEngineCopper.STAGE_IDS) {
+            ConfigurationSection settings = blocks().get(id)
+                    .getConfigurationSection("settings");
+            assertTrue(settings.getBoolean("is_view_blocking", false), id + ": глухой куб");
+            assertTrue(settings.getBoolean("can_occlude", false), id + ": глухой куб");
+            assertTrue(settings.getBoolean("is_suffocating", false), id + ": глухой куб");
+            assertTrue(settings.getBoolean("is_redstone_conductor", false),
+                    id + ": должен проводить редстоун, иначе не сработает от провода");
+            assertFalse(settings.getBoolean("propagate_skylight", true),
+                    id + ": глухой куб свет не пропускает");
+        }
     }
 
     @Test
     void copperBlockMinesLikeTheNoteBlockItReplaces() throws Exception {
-        ConfigurationSection settings = blocks().get(CraftEngineCopper.ID)
-                .getConfigurationSection("settings");
-        assertEquals(0.8, settings.getDouble("hardness"), 1e-9,
-                "у ванильного NOTE_BLOCK hardness 0.8");
-        assertEquals(0.8, settings.getDouble("resistance"), 1e-9,
-                "у ванильного NOTE_BLOCK resistance 0.8");
-        assertTrue(settings.getStringList("tags").contains("minecraft:mineable/axe"),
-                "топор должен ускорять копание: нотный блок в ванили в этом теге");
-        assertNull(settings.get("correct_tools"),
-                "correct_tools включил бы require_correct_tools, и без топора блок "
-                        + "не дропал бы вовсе, а нотный блок ломается чем угодно");
-        assertNull(settings.get("require_correct_tools"),
-                "нотный блок ломается чем угодно");
+        for (String id : CraftEngineCopper.STAGE_IDS) {
+            ConfigurationSection settings = blocks().get(id).getConfigurationSection("settings");
+            assertEquals(0.8, settings.getDouble("hardness"), 1e-9,
+                    id + ": у ванильного NOTE_BLOCK hardness 0.8");
+            assertEquals(0.8, settings.getDouble("resistance"), 1e-9,
+                    id + ": у ванильного NOTE_BLOCK resistance 0.8");
+            assertTrue(settings.getStringList("tags").contains("minecraft:mineable/axe"),
+                    id + ": топор должен ускорять копание");
+            assertNull(settings.get("correct_tools"),
+                    id + ": без топора блок обязан ломаться — нотный блок ломается чем угодно");
+            assertNull(settings.get("require_correct_tools"),
+                    id + ": нотный блок ломается чем угодно");
+        }
     }
 
     @Test
@@ -392,7 +406,9 @@ class CraftEngineBlocksTest {
         // выглядеть прежним — и понять это можно только в игре.
         assertTrue(Files.isRegularFile(SHIPPED_PACK), "Нет собранного ресурспака для сверки");
         try (ZipFile zip = new ZipFile(SHIPPED_PACK.toFile())) {
-            for (String name : List.of("ancient_jug", "ancient_jug_filled", "copper_note_block", "apvsh", "sweetie_bery_block")) {
+            for (String name : List.of("ancient_jug", "ancient_jug_filled", "copper_note_block", "apvsh",
+                    "sweetie_bery_block", "1s_copper_note_block", "2s_copper_note_block",
+                    "3s_copper_note_block", "4s_copper_note_block")) {
                 ZipEntry entry = zip.getEntry("assets/f8resurs/models/block/" + name + ".json");
                 assertNotNull(entry, name + ": модели нет в ресурспаке");
                 byte[] expected;
@@ -417,6 +433,12 @@ class CraftEngineBlocksTest {
         assertFalse(CraftEngineJug.isJugId(CraftEngineCopper.ID),
                 "медный нотный блок кувшином не считается");
         assertTrue(CraftEngineCopper.isCopperId(CraftEngineCopper.ID));
+        // Старый id до ступеней считается первой ступенью: уже поставленные
+        // блоки не должны «потеряться» после обновления.
+        assertTrue(CraftEngineCopper.isCopperId(CraftEngineCopper.LEGACY_ID));
+        assertEquals(1, CraftEngineCopper.stageOf(CraftEngineCopper.LEGACY_ID));
+        assertEquals(4, CraftEngineCopper.stageOf("f8resurs:4s_copper_note_block"));
+        assertEquals(0, CraftEngineCopper.stageOf("f8resurs:apvsh"));
         assertFalse(CraftEngineCopper.isCopperId(CraftEngineJug.EMPTY_ID),
                 "кувшин медным блоком не считается");
         assertFalse(CraftEngineCopper.isCopperId("default:topaz_ore"),

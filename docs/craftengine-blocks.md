@@ -1,18 +1,21 @@
 # Блоки плагина в CraftEngine
 
-Плагин ставит в мир четыре кастомных блока. У них нет ванильного id, поэтому
+Плагин ставит в мир восемь кастомных блоков. У них нет ванильного id, поэтому
 встретить их можно только там, где их поставили: ни в генерации, ни у соседей,
 ни в крафте их не бывает.
 
 | id | что это | что рисует | конфиг |
 |---|---|---|---|
-| `f8resurs:copper_note_block` | медный нотный блок | `f8resurs:block/copper_note_block` | [`copper_note_block.yml`](craftengine-blocks/copper_note_block.yml) |
+| `f8resurs:1s_copper_note_block` | медный нотный блок, обычная медь | `f8resurs:block/1s_copper_note_block` | [`copper_note_block.yml`](craftengine-blocks/copper_note_block.yml) |
+| `f8resurs:2s_copper_note_block` | он же, потемневший | `f8resurs:block/2s_copper_note_block` | [`copper_note_block.yml`](craftengine-blocks/copper_note_block.yml) |
+| `f8resurs:3s_copper_note_block` | он же, состаренный | `f8resurs:block/3s_copper_note_block` | [`copper_note_block.yml`](craftengine-blocks/copper_note_block.yml) |
+| `f8resurs:4s_copper_note_block` | он же, окисленный | `f8resurs:block/4s_copper_note_block` | [`copper_note_block.yml`](craftengine-blocks/copper_note_block.yml) |
 | `f8resurs:ancient_jug` | пустой Древний кувшин | `f8resurs:block/ancient_jug` | [`ancient_jug.yml`](craftengine-blocks/ancient_jug.yml) |
 | `f8resurs:ancient_jug_filled` | налитый Древний кувшин | `f8resurs:block/ancient_jug_filled` | [`ancient_jug.yml`](craftengine-blocks/ancient_jug.yml) |
 | `f8resurs:apvsh` | АПВШ (аппарат для сигарет) | `f8resurs:block/apvsh` | [`apvsh.yml`](craftengine-blocks/apvsh.yml) |
 | `f8resurs:sweetie_bery_block` | блок сладких ягод | `f8resurs:block/sweetie_bery_block` | [`sweetie_bery_block.yml`](craftengine-blocks/sweetie_bery_block.yml) |
 
-Все три модели уже лежат в ресурспаке f8resurs — том, который вы перенесли в
+Все эти модели уже лежат в ресурспаке f8resurs — том, который вы перенесли в
 CraftEngine. Отдельных моделей к конфигам не нужно: `state.model.path` только
 привязывает существующую модель к блоку, ничего не генерируя.
 
@@ -97,6 +100,15 @@ CraftEngine генерирует. Как раздавать пак игрока�
 (вместе с содержимым), у медного блока — `BlockBreakEvent` в
 `CopperBlockListener`. Таблица лута дала бы двойной дроп.
 
+**Ступени окисления медного блока.** Ступень — отдельный блок CraftEngine, как
+у ванильной меди отдельный материал: `1s` → `2s` → `3s` → `4s`. Плагин сам
+меняет блок на следующую ступень (время в `config.yml`,
+`copper-note-block.oxidation-minutes`), слушает мёд (воск останавливает
+окисление) и топор (снимает воск, затем окисление по ступени). Предмет
+запоминает ступень и воск, поэтому сломанный блок ставится обратно таким же.
+Старый id `f8resurs:copper_note_block` считается первой ступенью — уже
+поставленные блоки продолжают работать и переезжают на `2s` при первом старении.
+
 **Музыка медного блока от блока не зависит.** Ноты играет сам плагин
 (`world.playSound(...)`), инструмент выбирается по предмету в слоте меню, а не
 по блоку, поэтому переезд с NOTE_BLOCK на свой блок ничего в звучании не меняет.
@@ -107,7 +119,7 @@ CraftEngine генерирует. Как раздавать пак игрока�
 
 ```text
 Кувшин: блоки CraftEngine f8resurs:ancient_jug и f8resurs:ancient_jug_filled зарегистрированы.
-Медный нотный блок: блок CraftEngine f8resurs:copper_note_block зарегистрирован.
+Медный нотный блок: все четыре ступени (f8resurs:1s…4s_copper_note_block) зарегистрированы.
 ```
 
 Если вместо этого предупреждение — в нём написана причина: CraftEngine не

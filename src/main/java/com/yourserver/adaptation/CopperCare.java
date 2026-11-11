@@ -47,15 +47,22 @@ import org.bukkit.inventory.ItemStack;
  *
  * - **Дальше окисленной.** Полностью окисленная медь — последняя ступень, воде
  *   её старить нечем.
- * - **Кастомные блоки CraftEngine.** Если на месте стоит блок плагина (медный
- *   нотный блок), блок не трогаем: подмена материала сломала бы привязку
- *   модели, а «окислять» нечего — это свой блок.
+ * - **Кастомные блоки CraftEngine.** Медный нотный блок стареет по своим
+ *   ступеням (1s…4s) — это отдельные блоки CraftEngine, а не материалы
+ *   ванильной меди. Полив передаётся в {@link CopperBlockListener#ageWithWater}.
  * - **Обратный ход.** Ваниль сама снимает окисление только разбором блока
  *   (молния и шлифовка), поэтому вода только старит.
  * - **Креатив.** Блок стареет, но вода не тратится — как и любое использование
  *   предметов в креативе.
  */
 final class CopperCare implements Listener {
+
+    /** Медный нотный блок: у него своя ступень окисления вместо материала. */
+    private final CopperBlockListener copper;
+
+    CopperCare(CopperBlockListener copper) {
+        this.copper = copper;
+    }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void oxidize(PlayerInteractEvent event) {
@@ -72,7 +79,20 @@ final class CopperCare implements Listener {
         if (!player.isSneaking()) return;
 
         Block block = event.getClickedBlock();
-        if (block == null || isCustomBlock(block)) return;
+        if (block == null) return;
+
+        if (isCustomBlock(block)) {
+            // Ступень медного нотного блока — отдельный блок CraftEngine, а не
+            // материал, поэтому полив отдаём его владельцу. Вода при этом
+            // тратится так же, как на обычной меди.
+            if (copper != null && copper.ageWithWater(block)) {
+                if (player.getGameMode() != GameMode.CREATIVE) {
+                    WaterBottle.consume(player, hand);
+                }
+                event.setCancelled(true);
+            }
+            return;
+        }
 
         // Один полив: ступень окисления +1, у вощёной меди вода ещё и снимает воск.
         String data = CopperWeathering.nextBlockData(block.getBlockData().getAsString());
