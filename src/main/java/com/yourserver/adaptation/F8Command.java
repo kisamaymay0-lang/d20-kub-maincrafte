@@ -27,6 +27,7 @@ public class F8Command implements CommandExecutor, Listener {
     private static final String ENCHANT_TITLE = "§8Новые чарки";
     private static final String BLOCK_TITLE = "§8Новые блоки";
     private static final String ITEM_TITLE = "§8Новые предметы";
+    private static final String DRINK_TITLE = "§8Напитки";
     /** Ключи, которые плагин просит у пака: их и проверяем по /f8 sound. */
     static final String[] TEST_SOUND_KEYS = {"f8resurs:pet-talking1", "f8resurs:pet-talking2"};
 
@@ -408,6 +409,35 @@ public class F8Command implements CommandExecutor, Listener {
         };
     }
 
+    /** Все напитки плагина, которые можно получить из /f8 → предметы → напитки. */
+    static final List<String> DRINK_CATALOG = List.of(
+            "drink_mead", "drink_matcha_tea", "drink_daiquiri", "drink_iced_latte", "drink_murk", "drink_pirate_rum");
+
+    private ItemStack drinkItem(String id) {
+        return switch (id) {
+            case "drink_mead" -> Shaker.createDrinkItem(Shaker.RECIPE_MEAD);
+            case "drink_matcha_tea" -> Shaker.createDrinkItem(Shaker.RECIPE_MATCHA_TEA);
+            case "drink_daiquiri" -> Shaker.createDrinkItem(Shaker.RECIPE_DAIQUIRI);
+            case "drink_iced_latte" -> Shaker.createDrinkItem(Shaker.RECIPE_ICED_LATTE);
+            case "drink_murk" -> Shaker.createDrinkItem(Shaker.RECIPE_MURK);
+            case "drink_pirate_rum" -> BambooBarrel.createPirateRum();
+            default -> throw new IllegalArgumentException("Неизвестный напиток каталога");
+        };
+    }
+
+    /** Меню со всеми напитками: те же предметы, что игрок получает из шейкера и бочки. */
+    private void openDrinkMenu(Player player) {
+        Inventory inventory = Bukkit.createInventory(null, 54, DRINK_TITLE);
+        fill(inventory);
+        int[] slots = {19, 20, 21, 22, 23, 24};
+        for (int i = 0; i < DRINK_CATALOG.size(); i++) {
+            String id = DRINK_CATALOG.get(i);
+            inventory.setItem(slots[i], createTaggedItem(drinkItem(id), id));
+        }
+        inventory.setItem(49, createMenuItem(Material.ARROW, "§7Назад", Collections.emptyList(), "back_items"));
+        player.openInventory(inventory);
+    }
+
     private void openItemMenu(Player player) {
         Inventory inventory = Bukkit.createInventory(null, 54, ITEM_TITLE);
         fill(inventory);
@@ -421,6 +451,12 @@ public class F8Command implements CommandExecutor, Listener {
             String id = ITEM_CATALOG.get(i);
             inventory.setItem(slots[i], createTaggedItem(catalogItem(id), id));
         }
+        inventory.setItem(47, createMenuItem(
+                Material.POTION,
+                "§bНапитки",
+                List.of("§7Все напитки плагина"),
+                "drinks"
+        ));
         inventory.setItem(49, createMenuItem(Material.ARROW, "§7Назад", Collections.emptyList(), "back"));
         player.openInventory(inventory);
     }
@@ -597,7 +633,8 @@ public class F8Command implements CommandExecutor, Listener {
         if (!title.equals(MAIN_TITLE)
                 && !title.equals(ENCHANT_TITLE)
                 && !title.equals(BLOCK_TITLE)
-                && !title.equals(ITEM_TITLE)) {
+                && !title.equals(ITEM_TITLE)
+                && !title.equals(DRINK_TITLE)) {
             return;
         }
 
@@ -620,6 +657,17 @@ public class F8Command implements CommandExecutor, Listener {
         }
 
         if (!player.hasPermission("f8.admin")) return;
+        if (title.equals(DRINK_TITLE) && DRINK_CATALOG.contains(id)) {
+            Inventory source = event.getView().getTopInventory();
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (player.isOnline() && player.hasPermission("f8.admin") && player.getOpenInventory().getTopInventory() == source) {
+                    giveItem(player, drinkItem(id)); // Настоящий напиток с PDC, иначе меню-метка ломает шейкер.
+                    player.closeInventory();
+                }
+            });
+            return;
+        }
+
         if (title.equals(ITEM_TITLE) && ITEM_CATALOG.contains(id)) {
             Inventory source = event.getView().getTopInventory();
             Bukkit.getScheduler().runTask(plugin, () -> {
@@ -637,6 +685,10 @@ public class F8Command implements CommandExecutor, Listener {
             case "blocks" -> openBlockMenu(player);
 
             case "items" -> openItemMenu(player);
+
+            case "drinks" -> openDrinkMenu(player);
+
+            case "back_items" -> openItemMenu(player);
 
             case "back" -> openMainMenu(player);
 
@@ -733,7 +785,8 @@ public class F8Command implements CommandExecutor, Listener {
         if (title.equals(MAIN_TITLE)
                 || title.equals(ENCHANT_TITLE)
                 || title.equals(BLOCK_TITLE)
-                || title.equals(ITEM_TITLE)) {
+                || title.equals(ITEM_TITLE)
+                || title.equals(DRINK_TITLE)) {
             event.setCancelled(true);
         }
     }

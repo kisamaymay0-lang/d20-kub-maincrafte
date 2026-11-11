@@ -91,4 +91,17 @@ class ProfileIconsTest {
                 "В каталоге есть холодная и горящая модель каждой сигареты");
         assertEquals(27, F8Command.ITEM_CATALOG.stream().distinct().count());
     }
+
+    @Test
+    void drinkMenuListsEveryDrink() {
+        assertEquals(List.of("drink_mead", "drink_matcha_tea", "drink_daiquiri",
+                        "drink_iced_latte", "drink_murk", "drink_pirate_rum"),
+                F8Command.DRINK_CATALOG, "в меню напитков ровно все напитки плагина");
+        // Идентификаторы меню повторяют id рецептов шейкера — так проще сверять.
+        assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_MEAD));
+        assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_MATCHA_TEA));
+        assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_DAIQUIRI));
+        assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_ICED_LATTE));
+        assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_MURK));
+    }
 }
