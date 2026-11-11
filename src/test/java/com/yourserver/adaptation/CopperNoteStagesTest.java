@@ -55,7 +55,9 @@ class CopperNoteStagesTest {
         double exposed = maxDeviation(2, random);
         double weathered = maxDeviation(3, random);
 
-        assertEquals(0.0D, plain, 1e-9, "обычная медь держит строй точно");
+        // Ровно ноль не получить: полутона считаются через логарифм, и на
+        // одинаковых float остаётся пыль порядка 1e-7 полутона.
+        assertEquals(0.0D, plain, 1e-4, "обычная медь держит строй точно");
         assertTrue(exposed > 0.0D, "потемневшая медь уже расстроена");
         assertTrue(weathered > exposed, "состаренная расстроена сильнее потемневшей");
         assertTrue(weathered <= CopperNoteStages.SPREAD_SEMITONES[2] + 1e-9,
