@@ -27,6 +27,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryAction;
+import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
@@ -223,6 +224,81 @@ public class CopperBlockListener implements Listener {
         return List.of(Material.NOTE_BLOCK, Material.REDSTONE, Material.DIAMOND);
     }
 
+    /**
+     * Ступень по решётке: из какой решётки крафтят, такой блок и получают.
+     * Обычная и вощёная решётка одной ступени дают одну ступень блока, воск
+     * переезжает в предмет отдельным флагом.
+     */
+    static int grateStage(Material material) {
+        if (material == null) return CopperNoteStages.FIRST;
+        return switch (material) {
+            case EXPOSED_COPPER_GRATE, WAXED_EXPOSED_COPPER_GRATE -> 2;
+            case WEATHERED_COPPER_GRATE, WAXED_WEATHERED_COPPER_GRATE -> 3;
+            case OXIDIZED_COPPER_GRATE, WAXED_OXIDIZED_COPPER_GRATE -> CopperNoteStages.LAST;
+            default -> CopperNoteStages.FIRST;
+        };
+    }
+
+    /** Вощёная ли решётка: тогда и блок получается вощёным. */
+    static boolean grateWaxed(Material material) {
+        return material == Material.WAXED_COPPER_GRATE
+                || material == Material.WAXED_EXPOSED_COPPER_GRATE
+                || material == Material.WAXED_WEATHERED_COPPER_GRATE
+                || material == Material.WAXED_OXIDIZED_COPPER_GRATE;
+    }
+
+    /** Решётка в сетке крафта (любая из {@link #copperGrates()}), иначе null. */
+    static Material grateInMatrix(ItemStack[] matrix) {
+        if (matrix == null) return null;
+        for (ItemStack item : matrix) {
+            if (item == null || item.getType().isAir()) continue;
+            if (copperGrates().contains(item.getType())) return item.getType();
+        }
+        return null;
+    }
+
+    /**
+     * Результат крафта зависит от решётки, а рецепт один: подменяем результат
+     * прямо в сетке. Потемневшая решётка даёт потемневший блок, вощёная — ещё
+     * и вощёный.
+     */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onPrepareCraft(PrepareItemCraftEvent event) {
+        ItemStack[] matrix = event.getInventory().getMatrix();
+
+        Material grate = grateInMatrix(matrix);
+
+        if (grate == null || !hasRecipeSingles(matrix)) {
+            return;
+        }
+
+        event.getInventory().setResult(
+                createCopperBlockItem(grateStage(grate), grateWaxed(grate))
+        );
+    }
+
+    /** В сетке лежат все одиночные ингредиенты крафта (нотный блок, редстоун, алмаз). */
+    static boolean hasRecipeSingles(ItemStack[] matrix) {
+        if (matrix == null) return false;
+
+        for (Material material : recipeSingles()) {
+            boolean found = false;
+
+            for (ItemStack item : matrix) {
+                if (item != null && !item.getType().isAir() && item.getType() == material) {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /** Решётки, которые годятся в крафт: все стадии окисления и все вощёные. */
     static List<Material> copperGrates() {
         return List.of(
@@ -254,7 +330,7 @@ public class CopperBlockListener implements Listener {
         ItemMeta meta = item.getItemMeta();
 
         if (meta != null) {
-            meta.itemName(Component.text(CopperNoteStages.itemName(step), NamedTextColor.GOLD)
+            meta.itemName(Component.text(CopperNoteStages.itemName(step, waxed), NamedTextColor.GOLD)
                     .decoration(TextDecoration.ITALIC, false));
             meta.lore(List.of(
                     Component.text("Поставьте и нажмите ПКМ, чтобы настроить ноты", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)

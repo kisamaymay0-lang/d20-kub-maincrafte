@@ -42,6 +42,20 @@ class CopperNoteStagesTest {
     }
 
     @Test
+    void waxedNamesSayTheyAreWaxed() {
+        assertEquals("Вощёный медный нотный блок", CopperNoteStages.itemName(1, true));
+        assertEquals("Вощёный потемневший медный нотный блок", CopperNoteStages.itemName(2, true));
+        assertEquals("Вощёный состаренный медный нотный блок", CopperNoteStages.itemName(3, true));
+        assertEquals("Вощёный окисленный медный нотный блок", CopperNoteStages.itemName(4, true));
+        // Без воска названия прежние.
+        assertEquals(CopperNoteStages.itemName(4), CopperNoteStages.itemName(4, false));
+        assertEquals("Окисленный медный нотный блок", CopperNoteStages.itemName(4, false));
+        // Мусор на входе не ломает приставку.
+        assertEquals("Вощёный медный нотный блок", CopperNoteStages.itemName(-3, true));
+        assertEquals("Вощёный окисленный медный нотный блок", CopperNoteStages.itemName(42, true));
+    }
+
+    @Test
     void stagesStepOneAtATimeAndStopAtTheEdges() {
         assertEquals(2, CopperNoteStages.next(1));
         assertEquals(4, CopperNoteStages.next(4), "дальше окисленного медь не идёт");

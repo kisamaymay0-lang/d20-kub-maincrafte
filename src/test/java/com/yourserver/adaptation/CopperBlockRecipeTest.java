@@ -60,6 +60,42 @@ class CopperBlockRecipeTest {
     }
 
     @Test
+    void craftedStageFollowsTheGrate() {
+        // Из какой решётки крафтят, такой блок и получают.
+        assertEquals(1, CopperBlockListener.grateStage(Material.COPPER_GRATE));
+        assertEquals(2, CopperBlockListener.grateStage(Material.EXPOSED_COPPER_GRATE));
+        assertEquals(3, CopperBlockListener.grateStage(Material.WEATHERED_COPPER_GRATE));
+        assertEquals(4, CopperBlockListener.grateStage(Material.OXIDIZED_COPPER_GRATE));
+
+        // Вощёная решётка даёт ту же ступень, но блок выходит вощёным.
+        assertEquals(1, CopperBlockListener.grateStage(Material.WAXED_COPPER_GRATE));
+        assertEquals(2, CopperBlockListener.grateStage(Material.WAXED_EXPOSED_COPPER_GRATE));
+        assertEquals(3, CopperBlockListener.grateStage(Material.WAXED_WEATHERED_COPPER_GRATE));
+        assertEquals(4, CopperBlockListener.grateStage(Material.WAXED_OXIDIZED_COPPER_GRATE));
+
+        assertFalse(CopperBlockListener.grateWaxed(Material.COPPER_GRATE));
+        assertFalse(CopperBlockListener.grateWaxed(Material.OXIDIZED_COPPER_GRATE));
+        assertTrue(CopperBlockListener.grateWaxed(Material.WAXED_COPPER_GRATE));
+        assertTrue(CopperBlockListener.grateWaxed(Material.WAXED_OXIDIZED_COPPER_GRATE));
+
+        // Посторонние материалы — обычная первая ступень без воска.
+        assertEquals(1, CopperBlockListener.grateStage(Material.DIAMOND));
+        assertFalse(CopperBlockListener.grateWaxed(Material.DIAMOND));
+
+        // Каждая ступень шейплесс-крафта даёт свой предмет и своё название.
+        for (Material grate : CopperBlockListener.copperGrates()) {
+            int stage = CopperBlockListener.grateStage(grate);
+            boolean waxed = CopperBlockListener.grateWaxed(grate);
+            String name = CopperNoteStages.itemName(stage, waxed);
+            if (waxed) {
+                assertTrue(name.startsWith("Вощёный "), grate.name() + " → " + name);
+            } else {
+                assertFalse(name.startsWith("Вощёный "), grate.name() + " → " + name);
+            }
+        }
+    }
+
+    @Test
     void anyCopperGrateFitsTheRecipe() {
         assertEquals(Set.of(
                         Material.COPPER_GRATE,

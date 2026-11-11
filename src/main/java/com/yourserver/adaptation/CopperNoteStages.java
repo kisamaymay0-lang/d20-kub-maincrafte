@@ -63,6 +63,9 @@ final class CopperNoteStages {
             "Окисленный медный нотный блок",
     };
 
+    /** Приставка к названию вощёного блока: воск виден уже в инвентаре. */
+    static final String WAXED_PREFIX = "Вощёный ";
+
     private CopperNoteStages() { }
 
     /** Ступень в допустимых пределах 1…4. */
@@ -77,7 +80,16 @@ final class CopperNoteStages {
 
     /** Название предмета этой ступени. */
     static String itemName(int stage) {
-        return NAMES[clamp(stage) - 1];
+        return itemName(stage, false);
+    }
+
+    /**
+     * Название предмета с учётом воска: вощёный блок ломается вощёным, поэтому
+     * в инвентаре это видно — «Вощёный окисленный медный нотный блок».
+     */
+    static String itemName(int stage, boolean waxed) {
+        String name = NAMES[clamp(stage) - 1];
+        return waxed ? WAXED_PREFIX + name : name;
     }
 
     /** Ключ модели предмета: «1s_copper_note_block»…«4s_copper_note_block». */
