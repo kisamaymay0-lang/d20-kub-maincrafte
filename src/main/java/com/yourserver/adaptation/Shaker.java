@@ -72,7 +72,8 @@ import java.util.UUID;
  *   <li><b>Напитки и добавки:</b> Напитки создаются из базовых ингредиентов без базовых эффектов.
  *       Дополнительные ингредиенты в шейкере становятся добавками (положительными или отрицательными).
  *       Отрицательные добавки при выпивании дают негативные эффекты (Тошнота / Отравление).
- *       В инвентаре у напитков при зажатии Shift отображается список добавок (зеленым/красным).</li>
+ *       В подсказке напитка всегда видны название (золотое), описание между двумя
+ *       разделителями из тире и, если добавки есть, их список (зеленым/красным).</li>
  * </ul>
  */
 public class Shaker implements Listener {
@@ -107,6 +108,26 @@ public class Shaker implements Listener {
     public static final String RECIPE_ICED_LATTE = "iced_latte";
     public static final String RECIPE_MATCHA_TEA = "matcha_tea";
     public static final String RECIPE_MURK = "murk";
+    /** Пиратский ром: алкоголь из бочки, в шейкере не смешивается. */
+    public static final String RECIPE_PIRATE_RUM = "pirate_rum";
+
+    /** Разделитель подсказки напитка — как у пиратского рома. */
+    public static final String LORE_SEPARATOR = "----------------------";
+
+    /** Названия готовых напитков. Все пока золотые. */
+    public static final String NAME_MEAD = "Медовуха?";
+    public static final String NAME_MATCHA_TEA = "Матча-чай";
+    public static final String NAME_DAIQUIRI = "Дайкири?";
+    public static final String NAME_ICED_LATTE = "Айс-Латте";
+    public static final String NAME_MURK = "Муть";
+    public static final String NAME_PIRATE_RUM = "Пиратский ром";
+
+    /** Описания напитков в подсказке. */
+    public static final String DESC_MEAD = "Безалькогольная медовуха, может стоит добавить в нее пиво?...";
+    public static final String DESC_MATCHA_TEA = "Чай с бархатистым вкусом, дающий легкую бодрость и яркость ума.";
+    public static final String DESC_DAIQUIRI = "Безалкогольный дайкири, может стоит в него добавить белое вино?...";
+    public static final String DESC_ICED_LATTE = "Прохладный кофейный напиток с кубиками льда... освежает!";
+    public static final String DESC_MURK = "Какая-то болотная жижа, может стоит попробовать другие ингридиенты?)";
 
     private final Plugin plugin;
     private final Map<UUID, ShakeTracker> shakeTrackers = new HashMap<>();
@@ -340,13 +361,7 @@ public class Shaker implements Listener {
         if (isDrink(item)) {
             String drink = item.getItemMeta().getPersistentDataContainer().get(DRINK_PDC_KEY, PersistentDataType.STRING);
             if (drink != null) {
-                return switch (drink) {
-                    case RECIPE_MEAD -> "Медовуха";
-                    case RECIPE_DAIQUIRI -> "Дайкири";
-                    case RECIPE_ICED_LATTE -> "Айс-латте";
-                    case RECIPE_MATCHA_TEA -> "Матча-чай";
-                    default -> "Муть";
-                };
+                return getDrinkName(drink);
             }
         }
         if (item.hasItemMeta()) {
@@ -524,6 +539,8 @@ public class Shaker implements Listener {
     public static boolean isAllowedIngredient(ItemStack item) {
         if (item == null || item.getType() == Material.AIR) return false;
         if (isShaker(item)) return false;
+        // Пиратский ром — алкоголь: он только выстаивается в бочке, в шейкер не кладётся.
+        if (RECIPE_PIRATE_RUM.equals(getDrinkType(item))) return false;
         return isAllowedIngredient(item.getType());
     }
 
@@ -709,6 +726,36 @@ public class Shaker implements Listener {
         return RECIPE_MURK;
     }
 
+    /**
+     * Имя готового напитка. Все названия пока золотые.
+     */
+    public static String getDrinkName(String recipe) {
+        if (recipe == null) return NAME_MURK;
+        return switch (recipe) {
+            case RECIPE_MEAD -> NAME_MEAD;
+            case RECIPE_MATCHA_TEA -> NAME_MATCHA_TEA;
+            case RECIPE_DAIQUIRI -> NAME_DAIQUIRI;
+            case RECIPE_ICED_LATTE -> NAME_ICED_LATTE;
+            case RECIPE_PIRATE_RUM -> NAME_PIRATE_RUM;
+            default -> NAME_MURK;
+        };
+    }
+
+    /**
+     * Описание напитка для подсказки. У пиратского рома своя подсказка (выдержка в бочке).
+     */
+    public static String getDrinkDescription(String recipe) {
+        if (recipe == null) return DESC_MURK;
+        return switch (recipe) {
+            case RECIPE_MEAD -> DESC_MEAD;
+            case RECIPE_MATCHA_TEA -> DESC_MATCHA_TEA;
+            case RECIPE_DAIQUIRI -> DESC_DAIQUIRI;
+            case RECIPE_ICED_LATTE -> DESC_ICED_LATTE;
+            case RECIPE_PIRATE_RUM -> null;
+            default -> DESC_MURK;
+        };
+    }
+
     public static ItemStack createDrinkItem(String recipe) {
         return createDrinkItem(recipe, Collections.emptyList());
     }
@@ -735,36 +782,26 @@ public class Shaker implements Listener {
         }
         meta.getPersistentDataContainer().set(BAD_ADDITIVES_COUNT_KEY, PersistentDataType.INTEGER, badAdditivesCount);
 
+        // Имя напитка: item_name для чистоты рамок + custom_name, иначе клиент
+        // показывает ванильное «Бутылочка воды» вместо названия напитка.
+        Component drinkName = Component.text(getDrinkName(recipe), NamedTextColor.GOLD)
+                .decoration(TextDecoration.ITALIC, false);
+        meta.itemName(drinkName);
+        meta.displayName(drinkName);
+
         if (RECIPE_MEAD.equals(recipe)) {
-            meta.itemName(Component.text("Медовуха", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
-            meta.displayName(null);
             meta.setItemModel(MODEL_MEAD_KEY);
             meta.setColor(Color.fromRGB(0xEB, 0xAF, 0x28));
-            try {
-                potion.setData(DataComponentTypes.CONSUMABLE, Consumable.consumable()
-                        .animation(ItemUseAnimation.DRINK)
-                        .sound(Key.key("item.honey_bottle.drink"))
-                        .build());
-            } catch (Throwable ignored) {
-            }
         } else if (RECIPE_DAIQUIRI.equals(recipe)) {
-            meta.itemName(Component.text("Дайкири", NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
-            meta.displayName(null);
             meta.setItemModel(MODEL_DAIQUIRI_KEY);
             meta.setColor(Color.fromRGB(0xF0, 0x46, 0x6E));
         } else if (RECIPE_ICED_LATTE.equals(recipe)) {
-            meta.itemName(Component.text("Айс-латте", NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
-            meta.displayName(null);
             meta.setItemModel(MODEL_ICED_LATTE_KEY);
             meta.setColor(Color.fromRGB(0xE8, 0xC4, 0x99));
         } else if (RECIPE_MATCHA_TEA.equals(recipe)) {
-            meta.itemName(Component.text("Матча-чай", NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
-            meta.displayName(null);
             meta.setItemModel(MODEL_MATCHA_TEA_KEY);
             meta.setColor(Color.fromRGB(0x78, 0xA8, 0x3C));
         } else {
-            meta.itemName(Component.text("Муть", NamedTextColor.DARK_GREEN).decoration(TextDecoration.ITALIC, false));
-            meta.displayName(null);
             meta.setColor(Color.fromRGB(0x4E, 0x93, 0x31));
             meta.clearCustomEffects();
             meta.addCustomEffect(new PotionEffect(PotionEffectType.NAUSEA, 10 * 20, 0), true);
@@ -789,18 +826,37 @@ public class Shaker implements Listener {
 
         meta.lore(buildDrinkLore(recipe, additives));
         potion.setItemMeta(meta);
+
+        if (RECIPE_MEAD.equals(recipe)) {
+            try {
+                potion.setData(DataComponentTypes.CONSUMABLE, Consumable.consumable()
+                        .animation(ItemUseAnimation.DRINK)
+                        .sound(Key.key("item.honey_bottle.drink"))
+                        .build());
+            } catch (Throwable ignored) {
+            }
+        }
         return potion;
     }
 
     /**
-     * Построение лора напитка со строкой «Добавки:» и списком ингредиентов (зеленым/красным).
+     * Подсказка напитка в стиле пиратского рома: светло-серый разделитель из тире,
+     * белое описание, второй разделитель, затем (если есть) список добавок
+     * зеленым/красным.
      */
     public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives) {
         List<Component> lore = new ArrayList<>();
+        lore.add(loreSeparator());
+        String description = getDrinkDescription(recipe);
+        if (description != null && !description.isEmpty()) {
+            lore.add(Component.text(description, NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
+        }
+        lore.add(loreSeparator());
         if (additives == null || additives.isEmpty()) {
             return lore;
         }
 
+        lore.add(Component.empty());
         lore.add(Component.text("Добавки:", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
         for (ItemStack additive : additives) {
             boolean positive = isPositiveAdditive(recipe, additive);
@@ -813,6 +869,11 @@ public class Shaker implements Listener {
 
     public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives, boolean showShift) {
         return buildDrinkLore(recipe, additives);
+    }
+
+    /** Светло-серый разделитель из тире — как в подсказке пиратского рома. */
+    private static Component loreSeparator() {
+        return Component.text(LORE_SEPARATOR, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false);
     }
 
     /**

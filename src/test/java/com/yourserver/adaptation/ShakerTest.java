@@ -1,5 +1,7 @@
 package com.yourserver.adaptation;
 
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Material;
 import org.junit.jupiter.api.Test;
 
@@ -279,10 +281,69 @@ final class ShakerTest {
     }
 
     @Test
-    void лорНапитковБезДобавокПустой() {
-        var lore = Shaker.buildDrinkLore(Shaker.RECIPE_MEAD, List.of(), false);
-        assertTrue(lore.isEmpty());
-        lore = Shaker.buildDrinkLore(Shaker.RECIPE_MEAD, null, true);
-        assertTrue(lore.isEmpty());
+    void названияНапитков() {
+        assertEquals("Медовуха?", Shaker.getDrinkName(Shaker.RECIPE_MEAD));
+        assertEquals("Матча-чай", Shaker.getDrinkName(Shaker.RECIPE_MATCHA_TEA));
+        assertEquals("Дайкири?", Shaker.getDrinkName(Shaker.RECIPE_DAIQUIRI));
+        assertEquals("Айс-Латте", Shaker.getDrinkName(Shaker.RECIPE_ICED_LATTE));
+        assertEquals("Муть", Shaker.getDrinkName(Shaker.RECIPE_MURK));
+        assertEquals("Пиратский ром", Shaker.getDrinkName(Shaker.RECIPE_PIRATE_RUM));
+        assertEquals("Муть", Shaker.getDrinkName(null));
+    }
+
+    @Test
+    void описанияНапитков() {
+        assertEquals("Безалькогольная медовуха, может стоит добавить в нее пиво?...",
+                Shaker.getDrinkDescription(Shaker.RECIPE_MEAD));
+        assertEquals("Чай с бархатистым вкусом, дающий легкую бодрость и яркость ума.",
+                Shaker.getDrinkDescription(Shaker.RECIPE_MATCHA_TEA));
+        assertEquals("Безалкогольный дайкири, может стоит в него добавить белое вино?...",
+                Shaker.getDrinkDescription(Shaker.RECIPE_DAIQUIRI));
+        assertEquals("Прохладный кофейный напиток с кубиками льда... освежает!",
+                Shaker.getDrinkDescription(Shaker.RECIPE_ICED_LATTE));
+        assertEquals("Какая-то болотная жижа, может стоит попробовать другие ингридиенты?)",
+                Shaker.getDrinkDescription(Shaker.RECIPE_MURK));
+        // У рома своя подсказка про выдержку в бочке.
+        assertNull(Shaker.getDrinkDescription(Shaker.RECIPE_PIRATE_RUM));
+    }
+
+    @Test
+    void подсказкаНапиткаКакУРома() {
+        var lore = Shaker.buildDrinkLore(Shaker.RECIPE_ICED_LATTE, List.of(), false);
+        assertEquals(3, lore.size(), "разделитель, описание, разделитель");
+        assertEquals(Shaker.LORE_SEPARATOR, plain(lore.get(0)));
+        assertEquals(Shaker.DESC_ICED_LATTE, plain(lore.get(1)));
+        assertEquals(Shaker.LORE_SEPARATOR, plain(lore.get(2)));
+
+        // Разделители светло-серые, описание белое, без курсива.
+        assertEquals(NamedTextColor.GRAY, lore.get(0).color());
+        assertEquals(NamedTextColor.WHITE, lore.get(1).color());
+        assertEquals(NamedTextColor.GRAY, lore.get(2).color());
+        assertFalse(lore.get(1).hasDecoration(TextDecoration.ITALIC));
+
+        // Без добавок больше ничего нет.
+        assertEquals(3, Shaker.buildDrinkLore(Shaker.RECIPE_MEAD, null, true).size());
+    }
+
+    @Test
+    void уВсехНапитковЕстьОписание() {
+        for (String recipe : List.of(Shaker.RECIPE_MEAD, Shaker.RECIPE_MATCHA_TEA,
+                Shaker.RECIPE_DAIQUIRI, Shaker.RECIPE_ICED_LATTE, Shaker.RECIPE_MURK)) {
+            String description = Shaker.getDrinkDescription(recipe);
+            assertNotNull(description, recipe);
+            assertFalse(description.isBlank(), recipe);
+            assertEquals(3, Shaker.buildDrinkLore(recipe, List.of(), false).size(), recipe);
+        }
+    }
+
+    @Test
+    void ромТолькоВыстаиваетсяВБочке() {
+        // Ром помечен тем же ключом напитка, но в шейкер не кладётся.
+        assertEquals("pirate_rum", Shaker.RECIPE_PIRATE_RUM);
+        assertEquals("Пиратский ром", Shaker.getDrinkName(Shaker.RECIPE_PIRATE_RUM));
+    }
+
+    private static String plain(net.kyori.adventure.text.Component component) {
+        return net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(component);
     }
 }
