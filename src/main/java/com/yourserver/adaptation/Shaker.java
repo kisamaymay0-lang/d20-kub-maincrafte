@@ -111,8 +111,10 @@ public class Shaker implements Listener {
     /** Пиратский ром: алкоголь из бочки, в шейкере не смешивается. */
     public static final String RECIPE_PIRATE_RUM = "pirate_rum";
 
-    /** Разделитель подсказки напитка — как у пиратского рома. */
-    public static final String LORE_SEPARATOR = "----------------------";
+    /** Символ разделителя подсказки напитка — как у пиратского рома. */
+    public static final String LORE_SEPARATOR_CHAR = "-";
+    /** Длина разделителя по умолчанию (для справки и тестов). */
+    public static final int LORE_SEPARATOR_MIN = 22;
 
     /** Названия готовых напитков. Все пока золотые. */
     public static final String NAME_MEAD = "Медовуха?";
@@ -122,12 +124,34 @@ public class Shaker implements Listener {
     public static final String NAME_MURK = "Муть";
     public static final String NAME_PIRATE_RUM = "Пиратский ром";
 
-    /** Описания напитков в подсказке. */
-    public static final String DESC_MEAD = "Безалькогольная медовуха, может стоит добавить в нее пиво?...";
-    public static final String DESC_MATCHA_TEA = "Чай с бархатистым вкусом, дающий легкую бодрость и яркость ума.";
-    public static final String DESC_DAIQUIRI = "Безалкогольный дайкири, может стоит в него добавить белое вино?...";
-    public static final String DESC_ICED_LATTE = "Прохладный кофейный напиток с кубиками льда... освежает!";
-    public static final String DESC_MURK = "Какая-то болотная жижа, может стоит попробовать другие ингридиенты?)";
+    /** Маркер обычного описания. */
+    public static final String DESC_MARKER = "•";
+    /** Маркер описания-подсказки «может стоит добавить…». */
+    public static final String DESC_MARKER_ADD = "▶";
+
+    /** Части описаний: до, жёлтая фраза, жёлтый подчёркнутый напиток, хвост. */
+    private static final String[] PARTS_MEAD = {
+            "Безалькогольная медовуха, ", "может стоит добавить в нее ", "пиво", "?..."
+    };
+    private static final String[] PARTS_DAIQUIRI = {
+            "Безалкогольный дайкири, ", "может стоит в него добавить ", "белое вино", "?..."
+    };
+    private static final String[] PARTS_MATCHA_TEA = {
+            "Чай с бархатистым вкусом, дающий легкую бодрость и яркость ума.", null, null, null
+    };
+    private static final String[] PARTS_ICED_LATTE = {
+            "Прохладный кофейный напиток с кубиками льда... освежает!", null, null, null
+    };
+    private static final String[] PARTS_MURK = {
+            "Какая-то болотная жижа, может стоит попробовать другие ингридиенты?)", null, null, null
+    };
+
+    /** Описания напитков без маркера (для справки и тестов). */
+    public static final String DESC_MEAD = joinParts(PARTS_MEAD);
+    public static final String DESC_MATCHA_TEA = joinParts(PARTS_MATCHA_TEA);
+    public static final String DESC_DAIQUIRI = joinParts(PARTS_DAIQUIRI);
+    public static final String DESC_ICED_LATTE = joinParts(PARTS_ICED_LATTE);
+    public static final String DESC_MURK = joinParts(PARTS_MURK);
 
     private final Plugin plugin;
     private final Map<UUID, ShakeTracker> shakeTrackers = new HashMap<>();
@@ -742,18 +766,68 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Описание напитка для подсказки. У пиратского рома своя подсказка (выдержка в бочке).
+     * Описание напитка для подсказки без маркера. У пиратского рома своя подсказка (выдержка в бочке).
      */
     public static String getDrinkDescription(String recipe) {
-        if (recipe == null) return DESC_MURK;
+        String[] parts = descriptionParts(recipe);
+        return parts == null ? null : joinParts(parts);
+    }
+
+    /**
+     * Маркер описания: точка у обычных напитков, треугольник у тех, где текст
+     * предлагает что-то добавить.
+     */
+    public static String getDescriptionMarker(String recipe) {
+        String[] parts = descriptionParts(recipe);
+        if (parts != null && parts[1] != null && !parts[1].isEmpty()) {
+            return DESC_MARKER_ADD;
+        }
+        return DESC_MARKER;
+    }
+
+    /**
+     * Строка описания между тире: маркер, обычный текст белым, фраза «может стоит
+     * добавить…» жёлтым, название напитка жёлтым и подчёркнутым.
+     */
+    public static Component buildDescriptionLine(String recipe) {
+        String[] parts = descriptionParts(recipe);
+        if (parts == null) return Component.empty();
+        Component line = Component.text(getDescriptionMarker(recipe) + " " + parts[0], NamedTextColor.WHITE)
+                .decoration(TextDecoration.ITALIC, false);
+        if (parts[1] != null && !parts[1].isEmpty()) {
+            line = line.append(Component.text(parts[1], NamedTextColor.YELLOW)
+                    .decoration(TextDecoration.ITALIC, false));
+        }
+        if (parts[2] != null && !parts[2].isEmpty()) {
+            line = line.append(Component.text(parts[2], NamedTextColor.YELLOW)
+                    .decoration(TextDecoration.ITALIC, false)
+                    .decoration(TextDecoration.UNDERLINED, true));
+        }
+        if (parts[3] != null && !parts[3].isEmpty()) {
+            line = line.append(Component.text(parts[3], NamedTextColor.WHITE)
+                    .decoration(TextDecoration.ITALIC, false));
+        }
+        return line;
+    }
+
+    private static String[] descriptionParts(String recipe) {
+        if (recipe == null) return PARTS_MURK;
         return switch (recipe) {
-            case RECIPE_MEAD -> DESC_MEAD;
-            case RECIPE_MATCHA_TEA -> DESC_MATCHA_TEA;
-            case RECIPE_DAIQUIRI -> DESC_DAIQUIRI;
-            case RECIPE_ICED_LATTE -> DESC_ICED_LATTE;
+            case RECIPE_MEAD -> PARTS_MEAD;
+            case RECIPE_MATCHA_TEA -> PARTS_MATCHA_TEA;
+            case RECIPE_DAIQUIRI -> PARTS_DAIQUIRI;
+            case RECIPE_ICED_LATTE -> PARTS_ICED_LATTE;
             case RECIPE_PIRATE_RUM -> null;
-            default -> DESC_MURK;
+            default -> PARTS_MURK;
         };
+    }
+
+    private static String joinParts(String[] parts) {
+        StringBuilder text = new StringBuilder();
+        for (String part : parts) {
+            if (part != null) text.append(part);
+        }
+        return text.toString();
     }
 
     public static ItemStack createDrinkItem(String recipe) {
@@ -840,30 +914,35 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Подсказка напитка в стиле пиратского рома: светло-серый разделитель из тире,
-     * белое описание, второй разделитель, затем (если есть) список добавок
-     * зеленым/красным.
+     * Подсказка напитка в стиле пиратского рома: светло-серые тире во всю длину
+     * текста, описание с маркером, вторые тире и сразу, без пустой строки, список
+     * добавок (зелёным/красным).
      */
     public static List<Component> buildDrinkLore(String recipe, List<ItemStack> additives) {
+        Component description = buildDescriptionLine(recipe);
+
+        List<Component> additiveLines = new ArrayList<>();
+        int width = plainLength(description);
+        if (additives != null && !additives.isEmpty()) {
+            for (ItemStack additive : additives) {
+                boolean positive = isPositiveAdditive(recipe, additive);
+                TextColor color = positive ? NamedTextColor.GREEN : NamedTextColor.RED;
+                Component line = Component.text("• " + getItemDisplayName(additive), color)
+                        .decoration(TextDecoration.ITALIC, false);
+                additiveLines.add(line);
+                width = Math.max(width, plainLength(line));
+            }
+            width = Math.max(width, "Добавки:".length());
+        }
+
         List<Component> lore = new ArrayList<>();
-        lore.add(loreSeparator());
-        String description = getDrinkDescription(recipe);
-        if (description != null && !description.isEmpty()) {
-            lore.add(Component.text(description, NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
+        lore.add(loreSeparator(width));
+        lore.add(description);
+        lore.add(loreSeparator(width));
+        if (!additiveLines.isEmpty()) {
+            lore.add(Component.text("Добавки:", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+            lore.addAll(additiveLines);
         }
-        lore.add(loreSeparator());
-        if (additives == null || additives.isEmpty()) {
-            return lore;
-        }
-
-        lore.add(Component.empty());
-        lore.add(Component.text("Добавки:", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-        for (ItemStack additive : additives) {
-            boolean positive = isPositiveAdditive(recipe, additive);
-            TextColor color = positive ? NamedTextColor.GREEN : NamedTextColor.RED;
-            lore.add(Component.text("• " + getItemDisplayName(additive), color).decoration(TextDecoration.ITALIC, false));
-        }
-
         return lore;
     }
 
@@ -871,9 +950,17 @@ public class Shaker implements Listener {
         return buildDrinkLore(recipe, additives);
     }
 
-    /** Светло-серый разделитель из тире — как в подсказке пиратского рома. */
-    private static Component loreSeparator() {
-        return Component.text(LORE_SEPARATOR, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false);
+    /** Светло-серый разделитель из тире длиной ровно в текст — как у пиратского рома. */
+    private static Component loreSeparator(int width) {
+        int length = Math.max(1, width);
+        return Component.text(LORE_SEPARATOR_CHAR.repeat(length), NamedTextColor.GRAY)
+                .decoration(TextDecoration.ITALIC, false);
+    }
+
+    /** Длина текста без разметки. */
+    private static int plainLength(Component component) {
+        return net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(component).length();
     }
 
     /**

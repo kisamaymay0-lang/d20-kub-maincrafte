@@ -310,10 +310,15 @@ final class ShakerTest {
     @Test
     void подсказкаНапиткаКакУРома() {
         var lore = Shaker.buildDrinkLore(Shaker.RECIPE_ICED_LATTE, List.of(), false);
-        assertEquals(3, lore.size(), "разделитель, описание, разделитель");
-        assertEquals(Shaker.LORE_SEPARATOR, plain(lore.get(0)));
-        assertEquals(Shaker.DESC_ICED_LATTE, plain(lore.get(1)));
-        assertEquals(Shaker.LORE_SEPARATOR, plain(lore.get(2)));
+        assertEquals(3, lore.size(), "тире, описание, тире");
+
+        String top = plain(lore.get(0));
+        String description = plain(lore.get(1));
+        String bottom = plain(lore.get(2));
+
+        assertEquals(top, bottom, "верхние и нижние тире одинаковой длины");
+        assertTrue(top.matches("-+"), "разделитель из тире");
+        assertEquals(description.length(), top.length(), "тире идут ровно до конца текста");
 
         // Разделители светло-серые, описание белое, без курсива.
         assertEquals(NamedTextColor.GRAY, lore.get(0).color());
@@ -321,8 +326,40 @@ final class ShakerTest {
         assertEquals(NamedTextColor.GRAY, lore.get(2).color());
         assertFalse(lore.get(1).hasDecoration(TextDecoration.ITALIC));
 
-        // Без добавок больше ничего нет.
+        // Без добавок больше ничего нет и пустой строки тоже нет.
         assertEquals(3, Shaker.buildDrinkLore(Shaker.RECIPE_MEAD, null, true).size());
+    }
+
+    @Test
+    void маркерОписания() {
+        assertEquals("• ", plain(Shaker.buildDescriptionLine(Shaker.RECIPE_ICED_LATTE)).substring(0, 2));
+        assertEquals("• ", plain(Shaker.buildDescriptionLine(Shaker.RECIPE_MATCHA_TEA)).substring(0, 2));
+        assertEquals("• ", plain(Shaker.buildDescriptionLine(Shaker.RECIPE_MURK)).substring(0, 2));
+        // Там, где текст предлагает что-то добавить, стоит треугольник.
+        assertEquals("▶ ", plain(Shaker.buildDescriptionLine(Shaker.RECIPE_MEAD)).substring(0, 2));
+        assertEquals("▶ ", plain(Shaker.buildDescriptionLine(Shaker.RECIPE_DAIQUIRI)).substring(0, 2));
+        assertEquals(Shaker.DESC_MARKER_ADD, Shaker.getDescriptionMarker(Shaker.RECIPE_MEAD));
+        assertEquals(Shaker.DESC_MARKER, Shaker.getDescriptionMarker(Shaker.RECIPE_MURK));
+    }
+
+    @Test
+    void жёлтаяФразаИПодчёркнутыйНапиток() {
+        var line = Shaker.buildDescriptionLine(Shaker.RECIPE_MEAD);
+        var yellow = line.children().stream()
+                .filter(child -> NamedTextColor.YELLOW.equals(child.color()))
+                .toList();
+        assertEquals(2, yellow.size(), "жёлтая фраза и жёлтый напиток");
+        assertTrue(yellow.stream().anyMatch(child -> "пиво".equals(plain(child))
+                && child.hasDecoration(TextDecoration.UNDERLINED)), "напиток подчёркнут");
+        assertTrue(yellow.stream().anyMatch(child -> "может стоит добавить в нее ".equals(plain(child))));
+
+        var daiquiri = Shaker.buildDescriptionLine(Shaker.RECIPE_DAIQUIRI);
+        assertTrue(daiquiri.children().stream().anyMatch(child -> "белое вино".equals(plain(child))
+                && NamedTextColor.YELLOW.equals(child.color())
+                && child.hasDecoration(TextDecoration.UNDERLINED)));
+
+        // У обычных описаний жёлтых кусков нет.
+        assertTrue(Shaker.buildDescriptionLine(Shaker.RECIPE_MATCHA_TEA).children().isEmpty());
     }
 
     @Test
@@ -333,6 +370,7 @@ final class ShakerTest {
             assertNotNull(description, recipe);
             assertFalse(description.isBlank(), recipe);
             assertEquals(3, Shaker.buildDrinkLore(recipe, List.of(), false).size(), recipe);
+            assertTrue(plain(Shaker.buildDescriptionLine(recipe)).length() > description.length(), recipe);
         }
     }
 
