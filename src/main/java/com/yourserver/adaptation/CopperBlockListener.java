@@ -642,6 +642,10 @@ public class CopperBlockListener implements Listener {
     private void handleTrigger(Block block) {
         String key = getBlockKey(block);
 
+        // Блок сработал — значит он наш. Заодно это подхватывает блоки,
+        // поставленные до обновления: своего раздела в blocks.yml у них ещё нет.
+        registerAging(block);
+
         ItemStack[] items = contentsOf(key);
 
         ItemStack timerItem = getSlot(items, TIMER_SLOT);
@@ -1248,11 +1252,11 @@ public class CopperBlockListener implements Listener {
     private void registerAging(Block block) {
         String key = getBlockKey(block);
         agingBlocks.put(key, block.getLocation().clone());
-        agingTicksLeft.put(key, randomOxidationTicks());
+        agingTicksLeft.putIfAbsent(key, randomOxidationTicks());
         if (!blockData.contains("stages." + key)) {
             blockData.set("stages." + key, Boolean.FALSE);
+            saveBlockData();
         }
-        saveBlockData();
     }
 
     /** Блок ушёл из мира или уехал поршнем: данные старения больше не нужны. */
@@ -1580,6 +1584,8 @@ public class CopperBlockListener implements Listener {
             return;
         }
 
+        boolean loadStageMigration = false;
+
         for (String key :
                 blockData.getConfigurationSection("blocks")
                         .getKeys(false)) {
@@ -1595,12 +1601,24 @@ public class CopperBlockListener implements Listener {
                 sessionInventories.put(key, contents);
                 Location location = locationFromKey(key);
                 if (location != null) {
+                    // Блоки, поставленные до ступеней, попадают под старение
+                    // при первом запуске: их место уже известно из blocks.yml.
+                    if (!blockData.contains("stages." + key)) {
+                        blockData.set("stages." + key, Boolean.FALSE);
+                        loadStageMigration = true;
+                    }
+                    agingBlocks.putIfAbsent(key, location);
+                    agingTicksLeft.putIfAbsent(key, randomOxidationTicks());
                     // Пустые сохранённые GUI не нуждаются в опросе питания.
                     // Пока не загружаем чанк и не вызываем getBlockAt().
                     // При первой проверке загруженного блока считываем питание.
                     powerTrackedBlocks.put(key, location);
                 }
             }
+        }
+
+        if (loadStageMigration) {
+            saveBlockData();
         }
     }
 
