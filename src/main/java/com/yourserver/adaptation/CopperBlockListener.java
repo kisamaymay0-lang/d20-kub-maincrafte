@@ -1263,8 +1263,10 @@ public class CopperBlockListener implements Listener {
         }
 
         if (name.contains("ORE") || name.contains("RAW_") || name.contains("INGOT")
-                || name.contains("NUGGET") || name.contains("BULB") || name.contains("LIGHTNING_ROD")
-                || name.contains("CHAIN") || name.contains("DOOR") || name.contains("TRAPDOOR")) {
+                || name.contains("NUGGET") || name.contains("LIGHTNING_ROD") || name.contains("CHAIN")
+                || name.contains("DOOR") || name.contains("TRAPDOOR") || name.contains("BARS")
+                || name.contains("TORCH") || name.contains("LANTERN") || name.contains("GOLEM")
+                || name.contains("CHEST") || name.contains("ARMOR")) {
             return null;
         }
 
