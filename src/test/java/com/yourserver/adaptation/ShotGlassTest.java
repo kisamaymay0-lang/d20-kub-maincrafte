@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** id рюмок из config.yml приводятся к «namespace:path» так же, как их пишет RP Engine. */
@@ -33,6 +34,22 @@ final class ShotGlassTest {
     void пустойСписокОстаётсяПустым() {
         assertTrue(ShotGlass.cleanIds(null).isEmpty());
         assertTrue(ShotGlass.cleanIds(List.of()).isEmpty());
+    }
+
+    @Test
+    void посудаПоУмолчаниюЭтоСтаканБокалИРюмка() {
+        assertTrue(ShotGlass.isConfigured("testpack:stakan"));
+        assertTrue(ShotGlass.isConfigured("testpack:bokal"));
+        assertTrue(ShotGlass.isConfigured("testpack:ryumka"));
+        // Регистр и пробелы не важны.
+        assertTrue(ShotGlass.isConfigured(" TestPack:Stakan "));
+    }
+
+    @Test
+    void статуяБольшеНеПосуда() {
+        assertFalse(ShotGlass.isConfigured("testpack:statue"));
+        assertFalse(ShotGlass.isConfigured(""));
+        assertFalse(ShotGlass.isConfigured(null));
     }
 
     @Test

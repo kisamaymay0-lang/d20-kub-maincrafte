@@ -65,7 +65,8 @@ import java.util.UUID;
  *
  * <h2>Файл рюмки</h2>
  *
- * <p>Готовый и проверенный по FORMAT.md файл лежит в {@code docs/rpengine/shot-glass.yml}.
+ * <p>Готовые и проверенные по FORMAT.md файлы лежат в {@code docs/rpengine/glassware.yml}:
+ * стакан, бокал и рюмка.
  */
 final class ShotGlass implements Listener {
 
@@ -75,8 +76,12 @@ final class ShotGlass implements Listener {
     /** Публичный интерфейс RP Engine: одна поставленная модель. */
     static final String PLACEMENT_CLASS = "ai.resourcepack.engine.api.Placement";
 
-    /** Если ключа в config.yml нет: рюмка из пака testpack. */
-    static final List<String> DEFAULT_MODELS = List.of("testpack:statue");
+    /** Публичный интерфейс RP Engine: предметы пака. */
+    static final String ITEMS_CLASS = "ai.resourcepack.engine.api.Items";
+
+    /** Если ключа в config.yml нет: посуда из пака testpack. */
+    static final List<String> DEFAULT_MODELS = List.of(
+            "testpack:stakan", "testpack:bokal", "testpack:ryumka");
 
     /** Не чаще одной строки в консоль на игрока за этот промежуток. */
     private static final long DEBUG_INTERVAL_MS = 3000L;
@@ -87,6 +92,24 @@ final class ShotGlass implements Listener {
     private final Plugin plugin;
     /** id рюмок: «namespace:path». */
     private final Set<String> models = new LinkedHashSet<>();
+    /**
+     * Тот же список id, что и в {@link #models}, но доступный {@link Shaker}:
+     * им шейкер понимает, что в руке держат стакан, а не что-то ещё. Один
+     * список на обе стороны — чтобы «во что наливать» и «чем черпать» не
+     * разъезжались.
+     */
+    private static volatile Set<String> sharedModels = Set.copyOf(DEFAULT_MODELS);
+
+    /** {@code Items#idOf(ItemStack)} — поиск id предмета пака. */
+    private static Method idOfMethod;
+    /** {@code ContentId#namespace()} и {@code ContentId#path()}. */
+    private static Method namespaceMethod;
+    private static Method pathMethod;
+    /** Экземпляр {@code Items} из RP Engine. */
+    private static Object itemsApi;
+    /** Искали ли уже API предметов: один раз на запуск. */
+    private static boolean itemsTried;
+
     /** Когда игроку последний раз писали причину отказа: чтобы не спамить. */
     private final Map<UUID, Long> debugAt = new HashMap<>();
 
@@ -119,6 +142,7 @@ final class ShotGlass implements Listener {
         if (models.isEmpty()) {
             models.addAll(DEFAULT_MODELS);
         }
+        sharedModels = Set.copyOf(models);
     }
 
     /**
@@ -137,6 +161,88 @@ final class ShotGlass implements Listener {
         return cleaned;
     }
 
+    /** id посуды из config.yml — для проверок без экземпляра плагина. */
+    static Set<String> configuredModels() {
+        return sharedModels;
+    }
+
+    /** Относится ли id к нашей посуде. */
+    static boolean isConfigured(String id) {
+        return id != null && sharedModels.contains(id.trim().toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * Стакан/бокал/рюмка в руке: предмет пака RP Engine, чей id есть в списке
+     * {@code shaker.glass-models}. Такую посуду шейкер принимает наравне с
+     * пустой стеклянной бутылочкой.
+     */
+    static boolean isGlass(ItemStack stack) {
+        return isConfigured(engineItemId(stack));
+    }
+
+    /** id предмета пака RP Engine, иначе null. */
+    static String engineItemId(ItemStack stack) {
+        if (stack == null || stack.getType().isAir()) {
+            return null;
+        }
+
+        Object items = itemsApi();
+
+        if (items == null || idOfMethod == null) {
+            return null;
+        }
+
+        Object found = call(idOfMethod, items, stack);
+
+        if (!(found instanceof Optional<?> optional) || optional.isEmpty()) {
+            return null;
+        }
+
+        Object id = optional.get();
+        Object namespace = call(namespaceMethod, id);
+        Object path = call(pathMethod, id);
+
+        if (namespace instanceof String ns && path instanceof String p) {
+            return ns.toLowerCase(Locale.ROOT) + ":" + p.toLowerCase(Locale.ROOT);
+        }
+
+        String text = String.valueOf(id);
+        return text.contains(":") ? text : null;
+    }
+
+    /** Экземпляр {@code Items} из RP Engine; ищется один раз за запуск. */
+    private static synchronized Object itemsApi() {
+        if (itemsTried) {
+            return itemsApi;
+        }
+
+        itemsTried = true;
+
+        try {
+            Class<?> itemsClass = Class.forName(ITEMS_CLASS);
+            Class<?> idClass = Class.forName("ai.resourcepack.engine.api.ContentId");
+
+            idOfMethod = itemsClass.getMethod("idOf", ItemStack.class);
+            namespaceMethod = idClass.getMethod("namespace");
+            pathMethod = idClass.getMethod("path");
+        } catch (ClassNotFoundException | NoSuchMethodException | LinkageError error) {
+            return null;
+        }
+
+        for (Plugin other : Bukkit.getPluginManager().getPlugins()) {
+            if (!other.getClass().getName().startsWith("ai.resourcepack.engine.")) continue;
+
+            try {
+                itemsApi = other.getClass().getMethod("items").invoke(other);
+                return itemsApi;
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                // Не тот класс — смотрим следующий.
+            }
+        }
+
+        return null;
+    }
+
     /** Есть ли с чем работать: без API RP Engine наливать некуда. */
     boolean hooked() {
         return hooked;
@@ -148,9 +254,9 @@ final class ShotGlass implements Listener {
         hooked = resolveApi();
 
         if (hooked) {
-            plugin.getLogger().info("Рюмка RP Engine: налив включён, id " + models);
+            plugin.getLogger().info("Посуда RP Engine: налив включён, id " + models);
         } else {
-            plugin.getLogger().info("RP Engine не найден: наливать в рюмку некуда, "
+            plugin.getLogger().info("RP Engine не найден: наливать некуда, "
                     + "шейкер работает как раньше.");
         }
     }
@@ -171,7 +277,7 @@ final class ShotGlass implements Listener {
 
             return modelsApi != null;
         } catch (ClassNotFoundException | NoSuchMethodException | LinkageError | RuntimeException error) {
-            plugin.getLogger().warning("Рюмка RP Engine: API не подошёл — " + error);
+            plugin.getLogger().warning("Посуда RP Engine: API не подошёл — " + error);
             return false;
         }
     }
@@ -377,7 +483,7 @@ final class ShotGlass implements Listener {
         }
 
         debugAt.put(player.getUniqueId(), now);
-        plugin.getLogger().info("Рюмка: клик был, но налить не вышло — " + reason);
+        plugin.getLogger().info("Посуда: клик был, но налить не вышло — " + reason);
     }
 
     /**

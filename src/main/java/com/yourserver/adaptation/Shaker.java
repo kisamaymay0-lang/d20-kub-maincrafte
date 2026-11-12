@@ -1198,7 +1198,10 @@ public class Shaker implements Listener {
         // ========== ПКМ: Забор жидкости, открытие/закрытие, добавление предметов ==========
 
         // 1a. Забор бутилированной жидкости / готового напитка в стеклянную бутылочку
-        if (hasOtherItem && otherItem.getType() == Material.GLASS_BOTTLE) {
+        // или в посуду RP Engine: стакан, бокал, рюмка (ключ shaker.glass-models).
+        // Посуда расходуется, как и бутылочка: из неё и получается напиток.
+        if (hasOtherItem
+                && (otherItem.getType() == Material.GLASS_BOTTLE || ShotGlass.isGlass(otherItem))) {
             if (!open) {
                 event.setCancelled(true);
                 event.setUseInteractedBlock(Event.Result.DENY);

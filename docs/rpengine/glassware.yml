@@ -1,0 +1,75 @@
+# Посуда для RP Engine: стакан, бокал, рюмка.
+#
+# Что это даёт:
+#   • ПКМ шейкером с готовым напитком по поставленной посуде — посуда исчезает,
+#     на её месте появляется бутылочка с напитком;
+#   • с посудой в руке напиток забирают из открытого шейкера так же, как пустой
+#     стеклянной бутылочкой (посуда при этом расходуется).
+# Оба поведения включаются одним списком id в config.yml плагина:
+#   shaker:
+#     glass-models: [ testpack:stakan, testpack:bokal, testpack:ryumka ]
+#
+# Куда положить внутри пака RP Engine:
+#   plugins/RPEngine/content/testpack/pack.yml               обязателен в папке пака
+#   plugins/RPEngine/content/testpack/items/glassware.yml    этот файл (любая подпапка items/)
+#   plugins/RPEngine/content/testpack/assets/models/<имя>.bbmodel   сами модели
+#
+# Папка пака — это namespace: строчные a-z, цифры, _ . - (testpack подходит).
+# После правки: /rp reload.
+#
+# Все ключи ниже описаны в FORMAT.md RP Engine. Чего в нём нет и что поэтому
+# здесь не написано:
+#   • place.type: FURNITURE — такого ключа не существует;
+#   • папок models/ и furniture/ — тоже нет: поставленная модель это обычный
+#     item с блоком place:, а не отдельный вид контента;
+#   • models/geometry/... в model: — модель называется по имени файла в assets/models/
+#     (можно и полным ресурс-локейшеном, как здесь).
+#
+# id предмета = «папка пака : ключ» = testpack:stakan, testpack:bokal, testpack:ryumka.
+# Эти же id стоят в config.yml плагина, ключ shaker.glass-models.
+
+stakan:
+  material: PAPER
+  name: "&fСтакан"
+  # Модель: assets/models/stakan.bbmodel внутри пака.
+  model: testpack:stakan
+  place:
+    facing: free              # куда угодно (cardinal | diagonal | free | fixed)
+    surface: floor            # только на пол (floor | wall | ceiling | any)
+    scale: 1.0
+    solid: false              # без барьера: посуда не мешает пройти
+    vehicle-collision: false  # и проехать: это не забор
+    light: 0
+    # width и height не заданы: хитбокс считается по самой модели.
+    # drop не задан: при поломке выпадает сама посуда.
+    #
+    # Анимации из .bbmodel играют сами: loop крутится всегда, once — по ПКМ.
+    # Ниже — только если нужно их переопределить (mode | speed | priority |
+    # blend | layer | weight | bones):
+    # animations:
+    #   idle:
+    #     mode: loop
+
+bokal:
+  material: PAPER
+  name: "&fБокал"
+  model: testpack:bokal
+  place:
+    facing: free
+    surface: floor
+    scale: 1.0
+    solid: false
+    vehicle-collision: false
+    light: 0
+
+ryumka:
+  material: PAPER
+  name: "&fРюмка"
+  model: testpack:ryumka
+  place:
+    facing: free
+    surface: floor
+    scale: 1.0
+    solid: false
+    vehicle-collision: false
+    light: 0

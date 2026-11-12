@@ -175,9 +175,12 @@ fishing:
 bamboo_barrel:
   ticks_per_year: 24000
 
-# Рюмка RP Engine: id моделей, по которым ПКМ наливает напиток из шейкера.
+# Посуда RP Engine: ПКМ шейкером по поставленной посуде наливает напиток,
+# а с посудой в руке напиток забирают из шейкера вместо бутылочки.
 # id пишется как «папка:предмет» — ровно как в plugins/RPEngine/content/<папка>/items.
-# Готовый файл рюмки: docs/rpengine/shot-glass.yml.
+# Готовые файлы посуды: docs/rpengine/glassware.yml.
 shaker:
   glass-models:
-    - testpack:statue
+    - testpack:stakan
+    - testpack:bokal
+    - testpack:ryumka
