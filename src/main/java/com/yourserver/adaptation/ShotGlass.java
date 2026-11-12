@@ -2,23 +2,31 @@ package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Interaction;
 import org.bukkit.entity.Player;
-import org.bukkit.event.Cancellable;
-import org.bukkit.event.Event;
+import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerInteractAtEntityEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.Method;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Рюмка из RP Engine: налить в неё готовый напиток прямо из шейкера.
@@ -29,15 +37,27 @@ import java.util.Set;
  * исчезает, а на её месте появляется бутылочка — тот самый напиток. Напиток
  * уходит из шейкера, стекло не возвращается.
  *
- * <h2>Как это связано с RP Engine</h2>
+ * <h2>Почему своё событие, а не {@code ModelInteractEvent}</h2>
  *
- * <p>Рюмка — это piece RP Engine (у предмета есть {@code place:}), поэтому
- * клик приходит его событием
- * {@code ai.resourcepack.engine.api.event.ModelInteractEvent}. Плагин не
- * зависит от RP Engine при сборке: класс события ищется по имени, а
- * {@code model()}, {@code placement()}, {@code location()} и
- * {@code remove(boolean)} вызываются отражением. Нет RP Engine — нет рюмки,
- * всё остальное работает как раньше.
+ * <p>RP Engine сам ловит {@code PlayerInteractAtEntityEvent} и уже из него
+ * рассылает {@code ModelInteractEvent}. Слушать первое надёжнее: не зависит от
+ * того, дошёл ли внутренний обработчик до рассылки, и работает, даже если у
+ * рюмки есть свои действия на клик. Поэтому здесь {@code PlayerInteractAtEntityEvent}
+ * на {@link EventPriority#LOWEST}: RP Engine ловит его на {@code NORMAL} и
+ * уважает отмену, так что наш отменённый клик до него уже не дойдёт.
+ *
+ * <h2>Как связаться с RP Engine без сборки против него</h2>
+ *
+ * <p>{@code ai.resourcepack.engine.api.Models} и
+ * {@code ai.resourcepack.engine.api.Placement} — публичные интерфейсы, а
+ * экземпляр {@code Models} отдаёт метод {@code models()} самого плагина.
+ * Ищем их по имени, поэтому плагин не зависит от RP Engine при сборке: нет
+ * движка — нет рюмки, всё остальное работает как раньше.
+ *
+ * <p>Важно: методы вызываются через <b>интерфейсы</b>, а не через класс
+ * объекта. Реализация {@code Placement} внутри RP Engine — приватный класс,
+ * и вызов через {@code placement.getClass().getMethod(...)} падает с
+ * {@code IllegalAccessException}; именно на этом и стояла первая версия.
  *
  * <p>Идентификаторы рюмок берутся из config.yml, ключ
  * {@code shaker.glass-models}: список «папка:предмет» ровно в том виде, в каком
@@ -49,16 +69,40 @@ import java.util.Set;
  */
 final class ShotGlass implements Listener {
 
-    /** Полное имя класса события RP Engine. */
-    static final String INTERACT_EVENT = "ai.resourcepack.engine.api.event.ModelInteractEvent";
+    /** Публичный интерфейс RP Engine: модели, стоящие в мире. */
+    static final String MODELS_CLASS = "ai.resourcepack.engine.api.Models";
+
+    /** Публичный интерфейс RP Engine: одна поставленная модель. */
+    static final String PLACEMENT_CLASS = "ai.resourcepack.engine.api.Placement";
 
     /** Если ключа в config.yml нет: рюмка из пака testpack. */
     static final List<String> DEFAULT_MODELS = List.of("testpack:statue");
 
+    /** Не чаще одной строки в консоль на игрока за этот промежуток. */
+    private static final long DEBUG_INTERVAL_MS = 3000L;
+
+    /** Ключ в persistent data, которым RP Engine помечает свой хитбокс. */
+    private static final String MODEL_TAG = "model";
+
     private final Plugin plugin;
     /** id рюмок: «namespace:path». */
     private final Set<String> models = new LinkedHashSet<>();
-    /** Зарегистрировали ли событие RP Engine. */
+    /** Когда игроку последний раз писали причину отказа: чтобы не спамить. */
+    private final Map<UUID, Long> debugAt = new HashMap<>();
+
+    /** {@code Models#at(Entity)}. */
+    private Method atMethod;
+    /** {@code Models#near(Location, double)} — запасной поиск по месту. */
+    private Method nearMethod;
+    /** {@code Placement#modelId()}. */
+    private Method modelIdMethod;
+    /** {@code Placement#location()}. */
+    private Method locationMethod;
+    /** {@code Placement#remove(boolean)}. */
+    private Method removeMethod;
+    /** Экземпляр {@code Models} из RP Engine. */
+    private Object modelsApi;
+    /** Есть ли с чем работать. */
     private boolean hooked;
 
     ShotGlass(Plugin plugin) {
@@ -71,9 +115,10 @@ final class ShotGlass implements Listener {
         models.clear();
         if (plugin.getConfig().isSet("shaker.glass-models")) {
             models.addAll(cleanIds(plugin.getConfig().getStringList("shaker.glass-models")));
-            return;
         }
-        models.addAll(DEFAULT_MODELS);
+        if (models.isEmpty()) {
+            models.addAll(DEFAULT_MODELS);
+        }
     }
 
     /**
@@ -92,63 +137,139 @@ final class ShotGlass implements Listener {
         return cleaned;
     }
 
-    /** Есть ли вообще что слушать: без RP Engine событие не регистрируется. */
+    /** Есть ли с чем работать: без API RP Engine наливать некуда. */
     boolean hooked() {
         return hooked;
     }
 
-    /** Подписаться на клик по piece RP Engine. Без плагина — тихо пропускаем. */
+    /** Подписаться на клик по хитбоксу и найти API RP Engine. */
     void register() {
-        Class<?> eventClass;
+        Bukkit.getPluginManager().registerEvents(this, plugin);
+        hooked = resolveApi();
 
-        try {
-            eventClass = Class.forName(INTERACT_EVENT);
-        } catch (ClassNotFoundException | LinkageError error) {
+        if (hooked) {
+            plugin.getLogger().info("Рюмка RP Engine: налив включён, id " + models);
+        } else {
             plugin.getLogger().info("RP Engine не найден: наливать в рюмку некуда, "
                     + "шейкер работает как раньше.");
-            return;
-        }
-
-        try {
-            Bukkit.getPluginManager().registerEvent(
-                    eventClass.asSubclass(Event.class),
-                    this,
-                    EventPriority.HIGH,
-                    (listener, event) -> onModelInteract(event),
-                    plugin
-            );
-            hooked = true;
-        } catch (RuntimeException error) {
-            plugin.getLogger().warning("RP Engine нашёлся, но событие клика не подписано: "
-                    + error.getMessage());
         }
     }
 
-    private void onModelInteract(Event event) {
-        if (!(event instanceof Cancellable cancellable) || cancellable.isCancelled()) {
+    /** Найти классы и экземпляр API. Всё публичное, приватных классов не трогаем. */
+    private boolean resolveApi() {
+        try {
+            Class<?> modelsClass = Class.forName(MODELS_CLASS);
+            Class<?> placementClass = Class.forName(PLACEMENT_CLASS);
+
+            atMethod = modelsClass.getMethod("at", Entity.class);
+            nearMethod = modelsClass.getMethod("near", Location.class, double.class);
+            modelIdMethod = placementClass.getMethod("modelId");
+            locationMethod = placementClass.getMethod("location");
+            removeMethod = placementClass.getMethod("remove", boolean.class);
+
+            modelsApi = modelsInstance();
+
+            return modelsApi != null;
+        } catch (ClassNotFoundException | NoSuchMethodException | LinkageError | RuntimeException error) {
+            plugin.getLogger().warning("Рюмка RP Engine: API не подошёл — " + error);
+            return false;
+        }
+    }
+
+    /** Экземпляр {@code Models}: его отдаёт сам плагин RP Engine. */
+    private Object modelsInstance() {
+        for (Plugin other : Bukkit.getPluginManager().getPlugins()) {
+            if (other == plugin) continue;
+            if (!other.getClass().getName().startsWith("ai.resourcepack.engine.")) continue;
+
+            try {
+                return other.getClass().getMethod("models").invoke(other);
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                // Не тот класс — смотрим следующий.
+            }
+        }
+        return null;
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onInteractAtEntity(PlayerInteractAtEntityEvent event) {
+        if (!hooked || models.isEmpty()) {
             return;
         }
 
-        String id = idOf(call(event, "model"));
-
-        if (id == null || !models.contains(id.toLowerCase(Locale.ROOT))) {
+        // Клик по хитбоксу модели — это Interaction. Ничего другого не трогаем.
+        if (!(event.getRightClicked() instanceof Interaction hitbox)) {
             return;
         }
 
-        Object placement = call(event, "placement");
+        Object placement = placementOf(hitbox);
 
         if (placement == null) {
             return;
         }
 
-        if (!(player(event) instanceof Player player)) {
+        String id = modelId(placement);
+
+        if (id == null || !models.contains(id.toLowerCase(Locale.ROOT))) {
             return;
         }
 
-        if (pour(player, placement)) {
-            // Рюмка уже убрана и напиток выдан: остальное по этому клику не нужно.
-            cancellable.setCancelled(true);
+        if (!pour(event.getPlayer(), placement)) {
+            return;
         }
+
+        // Рюмка убрана и напиток выдан: остальное по этому клику не нужно.
+        // RP Engine ловит событие на NORMAL и отмену уважает.
+        event.setCancelled(true);
+    }
+
+    /** Поставленная модель, к которой относится этот хитбокс. */
+    private Object placementOf(Entity hitbox) {
+        Object placement = call(atMethod, modelsApi, hitbox);
+
+        if (placement instanceof Optional<?> found && found.isPresent()) {
+            return found.get();
+        }
+
+        // Прямое попадание не вышло: ищем по месту и сверяем id из persistent data.
+        String tagged = taggedModelId(hitbox);
+
+        if (tagged == null) {
+            return null;
+        }
+
+        Object nearby = call(nearMethod, modelsApi, hitbox.getLocation(), 0.75D);
+
+        if (!(nearby instanceof List<?> list)) {
+            return null;
+        }
+
+        for (Object candidate : list) {
+            if (tagged.equalsIgnoreCase(modelId(candidate))) {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /** id модели из самого хитбокса: RP Engine пишет его в persistent data. */
+    private static String taggedModelId(Entity entity) {
+        for (NamespacedKey key : entity.getPersistentDataContainer().getKeys()) {
+            if (!MODEL_TAG.equals(key.getKey())) continue;
+
+            String value = entity.getPersistentDataContainer().get(key, PersistentDataType.STRING);
+
+            if (value != null && value.contains(":")) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String modelId(Object placement) {
+        Object id = call(modelIdMethod, placement);
+        return id instanceof String text ? text : null;
     }
 
     /**
@@ -171,6 +292,7 @@ final class ShotGlass implements Listener {
         }
 
         if (shaker == null || hand == null) {
+            debug(player, "в руке нет шейкера");
             return false;
         }
 
@@ -178,10 +300,14 @@ final class ShotGlass implements Listener {
         int index = drinkIndex(contents);
 
         if (index < 0) {
+            debug(player, "в шейкере нет готового напитка (содержимое: " + contents.size() + ")");
             return false;
         }
 
-        if (!(call(placement, "location") instanceof Location at) || at.getWorld() == null) {
+        Object where = call(locationMethod, placement);
+
+        if (!(where instanceof Location at) || at.getWorld() == null) {
+            debug(player, "не удалось узнать место рюмки");
             return false;
         }
 
@@ -189,6 +315,7 @@ final class ShotGlass implements Listener {
 
         // Сначала убираем рюмку: если RP Engine отказал, напиток остаётся в шейкере.
         if (!remove(placement)) {
+            debug(player, "RP Engine отказался убирать рюмку");
             return false;
         }
 
@@ -231,49 +358,39 @@ final class ShotGlass implements Listener {
         }
     }
 
-    /** {@code placement.remove(false)} — рюмка исчезает без выпадения предмета. */
-    private static boolean remove(Object placement) {
-        try {
-            Method remove = placement.getClass().getMethod("remove", boolean.class);
-            Object result = remove.invoke(placement, false);
-            return !(result instanceof Boolean done) || done;
-        } catch (ReflectiveOperationException | RuntimeException error) {
-            return false;
-        }
+    /**
+     * {@code placement.remove(false)} — рюмка исчезает без выпадения предмета.
+     * Метод возвращает boolean; если вызвать не удалось — считаем отказом.
+     */
+    private boolean remove(Object placement) {
+        Object result = call(removeMethod, placement, false);
+        return result instanceof Boolean done && done;
     }
 
-    /** ContentId → «namespace:path». */
-    private static String idOf(Object contentId) {
-        if (contentId == null) {
-            return null;
+    /** Причина отказа — в консоль, но не чаще раза в 3 секунды на игрока. */
+    private void debug(Player player, String reason) {
+        long now = System.currentTimeMillis();
+        long last = debugAt.getOrDefault(player.getUniqueId(), 0L);
+
+        if (now - last < DEBUG_INTERVAL_MS) {
+            return;
         }
 
-        Object namespace = call(contentId, "namespace");
-        Object path = call(contentId, "path");
-
-        if (namespace instanceof String ns && path instanceof String p) {
-            return ns + ":" + p;
-        }
-
-        String text = String.valueOf(contentId);
-        return text.isEmpty() ? null : text;
+        debugAt.put(player.getUniqueId(), now);
+        plugin.getLogger().info("Рюмка: клик был, но налить не вышло — " + reason);
     }
 
     /**
-     * Автор клика. В RP Engine это {@code player()} — обычное имя бина, поэтому
-     * {@code getPlayer()} не подходит и вернул бы null.
+     * Вызов метода через интерфейс RP Engine. {@code null}, если метода нет
+     * или он отказал: одна ошибка не должна ронять обработчик клика.
      */
-    private static Object player(Event event) {
-        return call(event, "player");
-    }
-
-    private static Object call(Object target, String name) {
-        if (target == null) {
+    private static Object call(Method method, Object target, Object... args) {
+        if (method == null || target == null) {
             return null;
         }
 
         try {
-            return target.getClass().getMethod(name).invoke(target);
+            return method.invoke(target, args);
         } catch (ReflectiveOperationException | RuntimeException error) {
             return null;
         }
