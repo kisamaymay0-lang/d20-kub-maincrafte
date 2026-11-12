@@ -2,12 +2,14 @@ package com.yourserver.adaptation;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
+import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
-import org.bukkit.entity.Interaction;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -15,10 +17,13 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerInteractAtEntityEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -29,44 +34,47 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Рюмка из RP Engine: налить в неё готовый напиток прямо из шейкера.
+ * Посуда из RP Engine: налить в неё готовый напиток прямо из шейкера.
  *
  * <h2>Что происходит</h2>
  *
- * <p>ПКМ по поставленной рюмке, когда в шейкере есть готовый напиток: рюмка
+ * <p>ПКМ по поставленной посуде, когда в шейкере есть готовый напиток: посуда
  * исчезает, а на её месте появляется бутылочка — тот самый напиток. Напиток
- * уходит из шейкера, стекло не возвращается.
+ * уходит из шейкера, посуда не возвращается. Посуду же ({@code stakan},
+ * {@code bokal}, {@code ryumka}) можно держать в руке: тогда ей просто
+ * забирают напиток из открытого шейкера, как пустой бутылочкой.
  *
- * <h2>Почему своё событие, а не {@code ModelInteractEvent}</h2>
+ * <h2>Как узнаём, что это наша посуда</h2>
  *
- * <p>RP Engine сам ловит {@code PlayerInteractAtEntityEvent} и уже из него
- * рассылает {@code ModelInteractEvent}. Слушать первое надёжнее: не зависит от
- * того, дошёл ли внутренний обработчик до рассылки, и работает, даже если у
- * рюмки есть свои действия на клик. Поэтому здесь {@code PlayerInteractAtEntityEvent}
- * на {@link EventPriority#LOWEST}: RP Engine ловит его на {@code NORMAL} и
- * уважает отмену, так что наш отменённый клик до него уже не дойдёт.
+ * <p>Сначала — по метке самого RP Engine в persistent data: id модели лежит
+ * строкой на хитбоксе поставленной модели ({@code rpengine:model}) и на её
+ * предмете. Это работает на любой версии движка и не требует ни одного его
+ * класса. Только если метки нет, спрашиваем API: {@code Models.at(entity)} и
+ * {@code Items.idOf(stack)} — оба публичные интерфейсы.
  *
- * <h2>Как связаться с RP Engine без сборки против него</h2>
+ * <p>Вызывать их надо <b>через интерфейс</b>, а не через класс объекта:
+ * реализация {@code Placement} внутри RP Engine — приватный класс, и
+ * {@code getClass().getMethod(...)} падает с {@code IllegalAccessException}.
  *
- * <p>{@code ai.resourcepack.engine.api.Models} и
- * {@code ai.resourcepack.engine.api.Placement} — публичные интерфейсы, а
- * экземпляр {@code Models} отдаёт метод {@code models()} самого плагина.
- * Ищем их по имени, поэтому плагин не зависит от RP Engine при сборке: нет
- * движка — нет рюмки, всё остальное работает как раньше.
+ * <h2>Клик</h2>
  *
- * <p>Важно: методы вызываются через <b>интерфейсы</b>, а не через класс
- * объекта. Реализация {@code Placement} внутри RP Engine — приватный класс,
- * и вызов через {@code placement.getClass().getMethod(...)} падает с
- * {@code IllegalAccessException}; именно на этом и стояла первая версия.
+ * <p>Слушаем {@code PlayerInteractAtEntityEvent} на {@link EventPriority#LOWEST}:
+ * из него же RP Engine рассылает свой {@code ModelInteractEvent}, и отмена
+ * нашего клика до его обработчика уже не доходит. Хитбокс — это
+ * {@code Interaction}, но проверка на него не обязательна: посуда ищется по
+ * метке, так что подойдёт и сущность из другой версии движка.
  *
- * <p>Идентификаторы рюмок берутся из config.yml, ключ
+ * <p>Если API недоступен, посуду убираем сами: снимаем её отображения (их
+ * UUID перечислены в persistent data хитбокса), барьер/свет на месте и сам
+ * хитбокс.
+ *
+ * <p>Идентификаторы посуды берутся из config.yml, ключ
  * {@code shaker.glass-models}: список «папка:предмет» ровно в том виде, в каком
- * рюмка описана в паке RP Engine ({@code plugins/RPEngine/content/<папка>/items/...}).
+ * посуда описана в паке RP Engine ({@code plugins/RPEngine/content/<папка>/items/...}).
  *
- * <h2>Файл рюмки</h2>
+ * <h2>Файлы посуды</h2>
  *
- * <p>Готовые и проверенные по FORMAT.md файлы лежат в {@code docs/rpengine/glassware.yml}:
- * стакан, бокал и рюмка.
+ * <p>Готовые и проверенные по FORMAT.md файлы лежат в {@code docs/rpengine/glassware.yml}.
  */
 final class ShotGlass implements Listener {
 
@@ -79,6 +87,9 @@ final class ShotGlass implements Listener {
     /** Публичный интерфейс RP Engine: предметы пака. */
     static final String ITEMS_CLASS = "ai.resourcepack.engine.api.Items";
 
+    /** Публичный интерфейс RP Engine: id контента. */
+    static final String CONTENT_ID_CLASS = "ai.resourcepack.engine.api.ContentId";
+
     /** Если ключа в config.yml нет: посуда из пака testpack. */
     static final List<String> DEFAULT_MODELS = List.of(
             "testpack:stakan", "testpack:bokal", "testpack:ryumka");
@@ -86,12 +97,6 @@ final class ShotGlass implements Listener {
     /** Не чаще одной строки в консоль на игрока за этот промежуток. */
     private static final long DEBUG_INTERVAL_MS = 3000L;
 
-    /** Ключ в persistent data, которым RP Engine помечает свой хитбокс. */
-    private static final String MODEL_TAG = "model";
-
-    private final Plugin plugin;
-    /** id рюмок: «namespace:path». */
-    private final Set<String> models = new LinkedHashSet<>();
     /**
      * Тот же список id, что и в {@link #models}, но доступный {@link Shaker}:
      * им шейкер понимает, что в руке держат стакан, а не что-то ещё. Один
@@ -107,9 +112,14 @@ final class ShotGlass implements Listener {
     private static Method pathMethod;
     /** Экземпляр {@code Items} из RP Engine. */
     private static Object itemsApi;
+    /** Когда игроку последний раз объясняли, что у него в руке. */
+    private static final Map<UUID, Long> explainedAt = new HashMap<>();
     /** Искали ли уже API предметов: один раз на запуск. */
     private static boolean itemsTried;
 
+    private final Plugin plugin;
+    /** id посуды: «namespace:path». */
+    private final Set<String> models = new LinkedHashSet<>();
     /** Когда игроку последний раз писали причину отказа: чтобы не спамить. */
     private final Map<UUID, Long> debugAt = new HashMap<>();
 
@@ -125,15 +135,17 @@ final class ShotGlass implements Listener {
     private Method removeMethod;
     /** Экземпляр {@code Models} из RP Engine. */
     private Object modelsApi;
-    /** Есть ли с чем работать. */
+    /** Есть ли API поставленных моделей. */
     private boolean hooked;
+    /** Что именно не нашлось — для /f8 rp. */
+    private String hookProblem = "ещё не искали";
 
     ShotGlass(Plugin plugin) {
         this.plugin = plugin;
         reloadSettings();
     }
 
-    /** Перечитать список рюмок (/f8 reload и старт). */
+    /** Перечитать список посуды (/f8 reload и старт). */
     void reloadSettings() {
         models.clear();
         if (plugin.getConfig().isSet("shaker.glass-models")) {
@@ -172,15 +184,43 @@ final class ShotGlass implements Listener {
     }
 
     /**
-     * Стакан/бокал/рюмка в руке: предмет пака RP Engine, чей id есть в списке
-     * {@code shaker.glass-models}. Такую посуду шейкер принимает наравне с
-     * пустой стеклянной бутылочкой.
+     * Стакан/бокал/рюмка в руке. Сначала спрашиваем API предметов RP Engine,
+     * затем — метки в самом предмете: там id тоже лежит строкой.
      */
     static boolean isGlass(ItemStack stack) {
-        return isConfigured(engineItemId(stack));
+        if (stack == null || stack.getType().isAir()) {
+            return false;
+        }
+
+        if (isConfigured(engineItemId(stack))) {
+            return true;
+        }
+
+        return storedGlassId(stack) != null;
     }
 
-    /** id предмета пака RP Engine, иначе null. */
+    /** id посуды, записанный в предмете RP Engine, иначе null. */
+    static String storedGlassId(ItemStack stack) {
+        if (stack == null || stack.getType().isAir() || !stack.hasItemMeta()) {
+            return null;
+        }
+
+        ItemMeta meta = stack.getItemMeta();
+
+        if (meta == null) {
+            return null;
+        }
+
+        for (String value : stringsOf(meta.getPersistentDataContainer())) {
+            if (isConfigured(value)) {
+                return value.toLowerCase(Locale.ROOT);
+            }
+        }
+
+        return null;
+    }
+
+    /** id предмета пака RP Engine через API, иначе null. */
     static String engineItemId(ItemStack stack) {
         if (stack == null || stack.getType().isAir()) {
             return null;
@@ -198,7 +238,11 @@ final class ShotGlass implements Listener {
             return null;
         }
 
-        Object id = optional.get();
+        return contentId(optional.get());
+    }
+
+    /** {@code ContentId} → «namespace:path». */
+    private static String contentId(Object id) {
         Object namespace = call(namespaceMethod, id);
         Object path = call(pathMethod, id);
 
@@ -207,7 +251,26 @@ final class ShotGlass implements Listener {
         }
 
         String text = String.valueOf(id);
-        return text.contains(":") ? text : null;
+        return text.contains(":") ? text.toLowerCase(Locale.ROOT) : null;
+    }
+
+    /** Все строки из persistent data — и у предмета, и у сущности. */
+    private static List<String> stringsOf(PersistentDataContainer data) {
+        List<String> values = new ArrayList<>();
+
+        for (NamespacedKey key : data.getKeys()) {
+            try {
+                String value = data.get(key, PersistentDataType.STRING);
+
+                if (value != null && !value.isBlank()) {
+                    values.add(value);
+                }
+            } catch (RuntimeException ignored) {
+                // Ключ другого типа — не наше дело.
+            }
+        }
+
+        return values;
     }
 
     /** Экземпляр {@code Items} из RP Engine; ищется один раз за запуск. */
@@ -220,7 +283,7 @@ final class ShotGlass implements Listener {
 
         try {
             Class<?> itemsClass = Class.forName(ITEMS_CLASS);
-            Class<?> idClass = Class.forName("ai.resourcepack.engine.api.ContentId");
+            Class<?> idClass = Class.forName(CONTENT_ID_CLASS);
 
             idOfMethod = itemsClass.getMethod("idOf", ItemStack.class);
             namespaceMethod = idClass.getMethod("namespace");
@@ -229,12 +292,17 @@ final class ShotGlass implements Listener {
             return null;
         }
 
+        itemsApi = engineAccessor("items");
+        return itemsApi;
+    }
+
+    /** Плагин RP Engine и любой его публичный метод без аргументов. */
+    private static Object engineAccessor(String method) {
         for (Plugin other : Bukkit.getPluginManager().getPlugins()) {
             if (!other.getClass().getName().startsWith("ai.resourcepack.engine.")) continue;
 
             try {
-                itemsApi = other.getClass().getMethod("items").invoke(other);
-                return itemsApi;
+                return other.getClass().getMethod(method).invoke(other);
             } catch (ReflectiveOperationException | RuntimeException ignored) {
                 // Не тот класс — смотрим следующий.
             }
@@ -243,7 +311,7 @@ final class ShotGlass implements Listener {
         return null;
     }
 
-    /** Есть ли с чем работать: без API RP Engine наливать некуда. */
+    /** Есть ли API поставленных моделей. */
     boolean hooked() {
         return hooked;
     }
@@ -254,15 +322,18 @@ final class ShotGlass implements Listener {
         hooked = resolveApi();
 
         if (hooked) {
-            plugin.getLogger().info("Посуда RP Engine: налив включён, id " + models);
+            plugin.getLogger().info("Посуда RP Engine: API найден, налив включён, id " + models);
         } else {
-            plugin.getLogger().info("RP Engine не найден: наливать некуда, "
-                    + "шейкер работает как раньше.");
+            plugin.getLogger().warning("Посуда RP Engine: API не найден (" + hookProblem
+                    + "). Посуда ищется по меткам самого движка; если и это не сработает,"
+                    + " покажите вывод /f8 rp.");
         }
     }
 
     /** Найти классы и экземпляр API. Всё публичное, приватных классов не трогаем. */
     private boolean resolveApi() {
+        String problem = null;
+
         try {
             Class<?> modelsClass = Class.forName(MODELS_CLASS);
             Class<?> placementClass = Class.forName(PLACEMENT_CLASS);
@@ -272,79 +343,83 @@ final class ShotGlass implements Listener {
             modelIdMethod = placementClass.getMethod("modelId");
             locationMethod = placementClass.getMethod("location");
             removeMethod = placementClass.getMethod("remove", boolean.class);
-
-            modelsApi = modelsInstance();
-
-            return modelsApi != null;
-        } catch (ClassNotFoundException | NoSuchMethodException | LinkageError | RuntimeException error) {
-            plugin.getLogger().warning("Посуда RP Engine: API не подошёл — " + error);
-            return false;
+        } catch (ClassNotFoundException error) {
+            problem = "нет класса " + error.getMessage();
+        } catch (NoSuchMethodException | LinkageError | RuntimeException error) {
+            problem = "не тот API: " + error;
         }
-    }
 
-    /** Экземпляр {@code Models}: его отдаёт сам плагин RP Engine. */
-    private Object modelsInstance() {
-        for (Plugin other : Bukkit.getPluginManager().getPlugins()) {
-            if (other == plugin) continue;
-            if (!other.getClass().getName().startsWith("ai.resourcepack.engine.")) continue;
+        if (problem == null) {
+            modelsApi = engineAccessor("models");
 
-            try {
-                return other.getClass().getMethod("models").invoke(other);
-            } catch (ReflectiveOperationException | RuntimeException ignored) {
-                // Не тот класс — смотрим следующий.
+            if (modelsApi == null) {
+                problem = "плагин RP Engine не отдал models()";
             }
         }
-        return null;
+
+        hookProblem = problem == null ? "всё на месте" : problem;
+        return problem == null;
     }
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onInteractAtEntity(PlayerInteractAtEntityEvent event) {
-        if (!hooked || models.isEmpty()) {
+        Entity clicked = event.getRightClicked();
+
+        if (clicked == null) {
             return;
         }
 
-        // Клик по хитбоксу модели — это Interaction. Ничего другого не трогаем.
-        if (!(event.getRightClicked() instanceof Interaction hitbox)) {
+        // 1. Сначала метки самого движка: работают без всякого API.
+        String id = metadataModelId(clicked);
+        Object placement = null;
+
+        // 2. Если метки нет — спрашиваем API.
+        if (id == null && hooked) {
+            placement = placementOf(clicked);
+
+            if (placement != null) {
+                id = modelId(placement);
+            }
+        }
+
+        if (id == null) {
             return;
         }
 
-        Object placement = placementOf(hitbox);
-
-        if (placement == null) {
+        if (!isConfigured(id)) {
+            // Строка в консоли — чтобы было видно, как движок называет модель.
+            debug(event.getPlayer(), "клик по модели " + id + " — это не посуда из списка "
+                    + models);
             return;
         }
 
-        String id = modelId(placement);
+        if (placement == null && hooked) {
+            placement = placementOf(clicked);
+        }
 
-        if (id == null || !models.contains(id.toLowerCase(Locale.ROOT))) {
+        if (!pour(event.getPlayer(), placement, clicked)) {
             return;
         }
 
-        if (!pour(event.getPlayer(), placement)) {
-            return;
-        }
-
-        // Рюмка убрана и напиток выдан: остальное по этому клику не нужно.
-        // RP Engine ловит событие на NORMAL и отмену уважает.
+        // Посуда убрана и напиток выдан: остальное по этому клику не нужно.
         event.setCancelled(true);
     }
 
-    /** Поставленная модель, к которой относится этот хитбокс. */
-    private Object placementOf(Entity hitbox) {
-        Object placement = call(atMethod, modelsApi, hitbox);
+    /** Поставленная модель, к которой относится эта сущность (через API). */
+    private Object placementOf(Entity entity) {
+        Object found = call(atMethod, modelsApi, entity);
 
-        if (placement instanceof Optional<?> found && found.isPresent()) {
-            return found.get();
+        if (found instanceof Optional<?> optional && optional.isPresent()) {
+            return optional.get();
         }
 
-        // Прямое попадание не вышло: ищем по месту и сверяем id из persistent data.
-        String tagged = taggedModelId(hitbox);
+        String tagged = metadataModelId(entity);
 
         if (tagged == null) {
             return null;
         }
 
-        Object nearby = call(nearMethod, modelsApi, hitbox.getLocation(), 0.75D);
+        Object nearby = call(nearMethod, modelsApi, entity.getLocation(), 0.75D);
 
         if (!(nearby instanceof List<?> list)) {
             return null;
@@ -359,17 +434,22 @@ final class ShotGlass implements Listener {
         return null;
     }
 
-    /** id модели из самого хитбокса: RP Engine пишет его в persistent data. */
-    private static String taggedModelId(Entity entity) {
-        for (NamespacedKey key : entity.getPersistentDataContainer().getKeys()) {
-            if (!MODEL_TAG.equals(key.getKey())) continue;
+    /**
+     * id модели из меток сущности. RP Engine пишет его строкой на хитбокс
+     * ({@code rpengine:model}), поэтому имя ключа не важно — важно, что
+     * значение выглядит как «namespace:path».
+     */
+    static String metadataModelId(Entity entity) {
+        if (entity == null) {
+            return null;
+        }
 
-            String value = entity.getPersistentDataContainer().get(key, PersistentDataType.STRING);
-
-            if (value != null && value.contains(":")) {
+        for (String value : stringsOf(entity.getPersistentDataContainer())) {
+            if (value.indexOf(':') > 0 && !value.contains(",") && !value.contains(" ")) {
                 return value;
             }
         }
+
         return null;
     }
 
@@ -379,11 +459,11 @@ final class ShotGlass implements Listener {
     }
 
     /**
-     * Перелить напиток из шейкера в рюмку. Возвращает false, если наливать
-     * нечего (нет шейкера, нет напитка, рюмка не убралась) — тогда клик
+     * Перелить напиток из шейкера в посуду. Возвращает false, если наливать
+     * нечего (нет шейкера, нет напитка, посуда не убралась) — тогда клик
      * остаётся за RP Engine.
      */
-    private boolean pour(Player player, Object placement) {
+    private boolean pour(Player player, Object placement, Entity hitbox) {
         EquipmentSlot hand = null;
         ItemStack shaker = null;
 
@@ -410,18 +490,18 @@ final class ShotGlass implements Listener {
             return false;
         }
 
-        Object where = call(locationMethod, placement);
+        Location at = locationOf(placement, hitbox);
 
-        if (!(where instanceof Location at) || at.getWorld() == null) {
-            debug(player, "не удалось узнать место рюмки");
+        if (at == null || at.getWorld() == null) {
+            debug(player, "не удалось узнать место посуды");
             return false;
         }
 
         ItemStack drink = contents.get(index).clone();
 
-        // Сначала убираем рюмку: если RP Engine отказал, напиток остаётся в шейкере.
-        if (!remove(placement)) {
-            debug(player, "RP Engine отказался убирать рюмку");
+        // Сначала убираем посуду: если не вышло, напиток остаётся в шейкере.
+        if (!removePiece(placement, hitbox)) {
+            debug(player, "не удалось убрать посуду");
             return false;
         }
 
@@ -435,6 +515,79 @@ final class ShotGlass implements Listener {
         drop.getWorld().spawnParticle(Particle.SPLASH, drop, 12, 0.12, 0.08, 0.12, 0.0);
 
         return true;
+    }
+
+    /** Где стоит посуда: у API, иначе у самого хитбокса. */
+    private Location locationOf(Object placement, Entity hitbox) {
+        Object where = call(locationMethod, placement);
+
+        if (where instanceof Location at) {
+            return at;
+        }
+
+        return hitbox == null ? null : hitbox.getLocation();
+    }
+
+    /**
+     * Убрать посуду. Через API — если он есть; иначе своими руками: снимаем
+     * отображения, барьер и свет, потом сам хитбокс.
+     */
+    private boolean removePiece(Object placement, Entity hitbox) {
+        if (placement != null && removeMethod != null) {
+            Object result = call(removeMethod, placement, false);
+
+            if (result instanceof Boolean done && done) {
+                return true;
+            }
+        }
+
+        return hitbox != null && removeByMetadata(hitbox);
+    }
+
+    /**
+     * Убрать поставленную модель по её же меткам: UUID отображений перечислены
+     * в persistent data хитбокса, барьер и свет стоят в его блоке.
+     */
+    private static boolean removeByMetadata(Entity hitbox) {
+        if (metadataModelId(hitbox) == null) {
+            return false;
+        }
+
+        Location at = hitbox.getLocation();
+        World world = at.getWorld();
+        Set<UUID> displays = new LinkedHashSet<>();
+
+        for (String value : stringsOf(hitbox.getPersistentDataContainer())) {
+            for (String part : value.split(",")) {
+                String trimmed = part.trim();
+
+                try {
+                    displays.add(UUID.fromString(trimmed));
+                } catch (IllegalArgumentException ignored) {
+                    // Не UUID — значит, и не отображение.
+                }
+            }
+        }
+
+        Block block = at.getBlock();
+
+        if (block.getType() == Material.BARRIER || block.getType() == Material.LIGHT) {
+            block.setType(Material.AIR, false);
+        }
+
+        boolean removed = hitbox.remove();
+
+        if (world != null) {
+            for (UUID id : displays) {
+                Entity display = Bukkit.getEntity(id);
+
+                if (display != null) {
+                    display.remove();
+                }
+            }
+        }
+
+        return removed;
     }
 
     /** Первый готовый напиток в шейкере, иначе -1. */
@@ -465,12 +618,73 @@ final class ShotGlass implements Listener {
     }
 
     /**
-     * {@code placement.remove(false)} — рюмка исчезает без выпадения предмета.
-     * Метод возвращает boolean; если вызвать не удалось — считаем отказом.
+     * Что видит плагин — для /f8 rp. Строки готовы к отправке игроку.
      */
-    private boolean remove(Object placement) {
-        Object result = call(removeMethod, placement, false);
-        return result instanceof Boolean done && done;
+    List<String> report(Player player) {
+        List<String> lines = new ArrayList<>();
+
+        lines.add("§6Посуда RP Engine");
+        lines.add("§7id из config.yml: §f" + models);
+        lines.add("§7API моделей: §f" + (hooked ? "найден" : "НЕТ — " + hookProblem));
+        lines.add("§7API предметов: §f" + (itemsApi() != null ? "найден" : "НЕТ"));
+
+        Plugin engine = null;
+
+        for (Plugin other : Bukkit.getPluginManager().getPlugins()) {
+            if (other.getClass().getName().startsWith("ai.resourcepack.engine.")) {
+                engine = other;
+                break;
+            }
+        }
+
+        lines.add("§7плагин движка: §f"
+                + (engine == null ? "не найден среди загруженных" : engine.getName()));
+
+        if (player != null) {
+            ItemStack hand = player.getInventory().getItemInMainHand();
+            lines.add("§7в руке: §f" + hand.getType()
+                    + " §7id: §f" + engineItemId(hand)
+                    + " §7метка: §f" + storedGlassId(hand));
+
+            int shown = 0;
+
+            for (Entity entity : player.getNearbyEntities(8, 8, 8)) {
+                String id = metadataModelId(entity);
+
+                if (id == null) continue;
+
+                lines.add("§7рядом: §f" + entity.getType() + " §7id: §f" + id
+                        + (isConfigured(id) ? " §a— наша посуда" : " §c— НЕ из списка"));
+
+                if (++shown >= 6) break;
+            }
+
+            if (shown == 0) {
+                lines.add("§7рядом: §fпоставленных моделей RP Engine нет (8 блоков)");
+            }
+        }
+
+        return lines;
+    }
+
+    /**
+     * Строка в консоль, когда во второй руке держат что-то похожее на посуду,
+     * но шейкер этого не узнал. Показывает, что именно видит плагин: тип
+     * предмета, id от API и метку из самого предмета.
+     */
+    static void explain(Plugin plugin, Player player, ItemStack item) {
+        long now = System.currentTimeMillis();
+        long last = explainedAt.getOrDefault(player.getUniqueId(), 0L);
+
+        if (now - last < DEBUG_INTERVAL_MS) {
+            return;
+        }
+
+        explainedAt.put(player.getUniqueId(), now);
+        plugin.getLogger().info("Шейкер: во второй руке " + item.getType()
+                + " (id от API: " + engineItemId(item)
+                + ", метка в предмете: " + storedGlassId(item) + ") — это не бутылочка и не посуда из "
+                + sharedModels);
     }
 
     /** Причина отказа — в консоль, но не чаще раза в 3 секунды на игрока. */
@@ -483,7 +697,7 @@ final class ShotGlass implements Listener {
         }
 
         debugAt.put(player.getUniqueId(), now);
-        plugin.getLogger().info("Посуда: клик был, но налить не вышло — " + reason);
+        plugin.getLogger().info("Посуда: " + reason);
     }
 
     /**

@@ -91,6 +91,22 @@ public class F8Command implements CommandExecutor, Listener {
             return true;
         }
 
+        // /f8 rp — что плагин видит из RP Engine: посуда, API, модели рядом.
+        if (args.length > 0 && args[0].equalsIgnoreCase("rp")) {
+            if (!sender.hasPermission("f8.admin")) {
+                sender.sendMessage("§cНедостаточно прав.");
+                return true;
+            }
+            ShotGlass glass = plugin.shotGlass();
+            if (glass == null) {
+                sender.sendMessage("§cПосуда RP Engine не подключена.");
+                return true;
+            }
+            Player viewer = sender instanceof Player player ? player : null;
+            for (String line : glass.report(viewer)) sender.sendMessage(line);
+            return true;
+        }
+
         // /f8 sound — проиграть оба звука пака самому себе (диагностика пака).
         if (args.length > 0 && args[0].equalsIgnoreCase("sound")) {
             if (!sender.hasPermission("f8.admin")) {

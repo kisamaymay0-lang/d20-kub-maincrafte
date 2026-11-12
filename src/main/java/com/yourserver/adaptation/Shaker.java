@@ -1288,6 +1288,17 @@ public class Shaker implements Listener {
             }
         }
 
+        // Отладка: в другой руке что-то есть, напиток в шейкере есть, но это
+        // не бутылочка, не ведро и не наша посуда. Строка в консоли объяснит,
+        // что именно видит плагин.
+        if (hasOtherItem && open
+                && otherItem.getType() != Material.GLASS_BOTTLE
+                && otherItem.getType() != Material.BUCKET
+                && !ShotGlass.isGlass(otherItem)
+                && findBottledLiquidOrDrinkIndex(contents) != -1) {
+            ShotGlass.explain(plugin, player, otherItem);
+        }
+
         // 2. Открытие / закрытие шейкера (Shift + ПКМ с пустой второй рукой)
         if (sneaking && !hasOtherItem) {
             event.setCancelled(true);

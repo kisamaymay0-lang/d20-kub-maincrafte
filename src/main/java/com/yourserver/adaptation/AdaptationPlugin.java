@@ -341,6 +341,11 @@ public void onEnable() {
      * без этого правки YAML и новые файлы до перезапуска не доходили.
      * Шанс дуэлей диких котов также применяется здесь.
      */
+    /** Посуда RP Engine: нужна /f8 rp и шейкеру. */
+    ShotGlass shotGlass() {
+        return shotGlass;
+    }
+
     public String reloadPluginSettings() {
         ConfigSync.sync(this);   // /f8 reload тоже доводит файлы до полного вида
         reloadConfig();
