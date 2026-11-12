@@ -90,6 +90,14 @@ final class ShotGlass implements Listener {
     /** Публичный интерфейс RP Engine: id контента. */
     static final String CONTENT_ID_CLASS = "ai.resourcepack.engine.api.ContentId";
 
+    /**
+     * Старые id из наших же прошлых сборок. ConfigSync дописывает только
+     * недостающие ключи и не переписывает значения владельца, поэтому у тех,
+     * кто ставил позапрошлую версию, в config.yml так и остаётся statue.
+     * Такой id заменяем на актуальный список.
+     */
+    static final Set<String> LEGACY_MODELS = Set.of("testpack:statue");
+
     /** Если ключа в config.yml нет: посуда из пака testpack. */
     static final List<String> DEFAULT_MODELS = List.of(
             "testpack:stakan", "testpack:bokal", "testpack:ryumka");
@@ -148,12 +156,20 @@ final class ShotGlass implements Listener {
     /** Перечитать список посуды (/f8 reload и старт). */
     void reloadSettings() {
         models.clear();
-        if (plugin.getConfig().isSet("shaker.glass-models")) {
-            models.addAll(cleanIds(plugin.getConfig().getStringList("shaker.glass-models")));
+
+        Set<String> configured = new LinkedHashSet<>(
+                cleanIds(plugin.getConfig().getStringList("shaker.glass-models")));
+
+        if (configured.removeAll(LEGACY_MODELS)) {
+            plugin.getLogger().warning("Посуда RP Engine: id " + LEGACY_MODELS
+                    + " больше не используется — беру список по умолчанию " + DEFAULT_MODELS);
         }
-        if (models.isEmpty()) {
-            models.addAll(DEFAULT_MODELS);
+
+        if (configured.isEmpty()) {
+            configured.addAll(DEFAULT_MODELS);
         }
+
+        models.addAll(configured);
         sharedModels = Set.copyOf(models);
     }
 
@@ -623,11 +639,26 @@ final class ShotGlass implements Listener {
     /**
      * Что видит плагин — для /f8 rp. Строки готовы к отправке игроку.
      */
+    /** Остался ли в config.yml старый id (подсказка в /f8 rp). */
+    private boolean legacyInConfig() {
+        for (String id : cleanIds(plugin.getConfig().getStringList("shaker.glass-models"))) {
+            if (LEGACY_MODELS.contains(id)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     List<String> report(Player player) {
         List<String> lines = new ArrayList<>();
 
         lines.add("§6Посуда RP Engine");
         lines.add("§7id из config.yml: §f" + models);
+
+        if (legacyInConfig()) {
+            lines.add("§cв config.yml остался старый id " + LEGACY_MODELS
+                    + " — он игнорируется, работает список выше");
+        }
         lines.add("§7API моделей: §f" + (hooked ? "найден" : "НЕТ — " + hookProblem));
         lines.add("§7API предметов: §f" + (itemsApi() != null ? "найден" : "НЕТ"));
 

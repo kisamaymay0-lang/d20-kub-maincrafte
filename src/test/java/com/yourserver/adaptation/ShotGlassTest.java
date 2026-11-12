@@ -53,6 +53,17 @@ final class ShotGlassTest {
     }
 
     @Test
+    void старыйIdНеОсталсяВСпискеПоУмолчанию() {
+        // ConfigSync не переписывает значения владельца, поэтому старый
+        // testpack:statue у кого-то так и лежит в config.yml — он должен
+        // отбрасываться, а не подмешиваться к посуде.
+        for (String id : ShotGlass.DEFAULT_MODELS) {
+            assertFalse(ShotGlass.LEGACY_MODELS.contains(id), id + " не должен быть старым id");
+        }
+        assertTrue(ShotGlass.LEGACY_MODELS.contains("testpack:statue"));
+    }
+
+    @Test
     void безСодержимогоНаливатьНечего() {
         assertEquals(-1, ShotGlass.drinkIndex(null));
         assertEquals(-1, ShotGlass.drinkIndex(List.of()));
