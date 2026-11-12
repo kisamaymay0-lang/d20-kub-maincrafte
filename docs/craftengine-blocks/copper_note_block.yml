@@ -1,0 +1,120 @@
+# Медный нотный блок — кастомный блок CraftEngine, четыре ступени окисления.
+#
+# Куда положить: в ВАШ пак, который уже стоит в CraftEngine —
+#   plugins/CraftEngine/resources/<имя вашего пака>/configuration/blocks/copper_note_block.yml
+# Рядом в паке должен быть pack.yml c
+#   namespace: f8resurs
+# Дальше — /ce reload all.
+#
+# Ступень — отдельный блок CraftEngine, как у ванильной меди отдельный материал:
+#   1s — обычная медь, 2s — потемневшая, 3s — состаренная, 4s — окисленная.
+# Модели с этими именами уже есть в ресурспаке (models/block/1s…4s_copper_note_block.json):
+# state.model.path только привязывает существующую модель, ничего не генерируя.
+#
+# state.auto_state: solid — модели cube_all, глухие кубы. Группа note_block не
+# годится: в ресурспаке f8resurs blockstates/note_block.json уже привязывает
+# состояния нот-блока к моделям кувшина, и CraftEngine выбрал бы занятое.
+#
+# Ключи сплошности заданы явно: по умолчанию они наследуются от носителя, а блок
+# ДОЛЖЕН проводить редстоун — питание читается обычным block.isBlockPowered().
+#
+# Время копания — как у ванильного нотного блока (hardness 0.8, resistance 0.8),
+# тег minecraft:mineable/axe даёт топору обычное ускорение. correct_tools нет:
+# нотный блок ломается чем угодно. loot нет: предмет роняет плагин
+# (BlockBreakEvent в CopperBlockListener), таблица лута дала бы двойной дроп.
+#
+# У всех четырёх ступеней одни и те же настройки — различается только модель.
+
+blocks:
+
+  f8resurs:1s_copper_note_block:
+    state:
+      auto_state: solid
+      model:
+        path: "f8resurs:block/1s_copper_note_block"
+    settings:
+      hardness: 0.8
+      resistance: 0.8
+      replaceable: false
+      is_suffocating: true
+      is_view_blocking: true
+      is_redstone_conductor: true
+      can_occlude: true
+      propagate_skylight: false
+      tags:
+        - minecraft:mineable/axe
+      sounds:
+        break: minecraft:block.copper.break
+        step: minecraft:block.copper.step
+        place: minecraft:block.copper.place
+        hit: minecraft:block.copper.hit
+        fall: minecraft:block.copper.fall
+
+  f8resurs:2s_copper_note_block:
+    state:
+      auto_state: solid
+      model:
+        path: "f8resurs:block/2s_copper_note_block"
+    settings:
+      hardness: 0.8
+      resistance: 0.8
+      replaceable: false
+      is_suffocating: true
+      is_view_blocking: true
+      is_redstone_conductor: true
+      can_occlude: true
+      propagate_skylight: false
+      tags:
+        - minecraft:mineable/axe
+      sounds:
+        break: minecraft:block.copper.break
+        step: minecraft:block.copper.step
+        place: minecraft:block.copper.place
+        hit: minecraft:block.copper.hit
+        fall: minecraft:block.copper.fall
+
+  f8resurs:3s_copper_note_block:
+    state:
+      auto_state: solid
+      model:
+        path: "f8resurs:block/3s_copper_note_block"
+    settings:
+      hardness: 0.8
+      resistance: 0.8
+      replaceable: false
+      is_suffocating: true
+      is_view_blocking: true
+      is_redstone_conductor: true
+      can_occlude: true
+      propagate_skylight: false
+      tags:
+        - minecraft:mineable/axe
+      sounds:
+        break: minecraft:block.copper.break
+        step: minecraft:block.copper.step
+        place: minecraft:block.copper.place
+        hit: minecraft:block.copper.hit
+        fall: minecraft:block.copper.fall
+
+  f8resurs:4s_copper_note_block:
+    state:
+      auto_state: solid
+      model:
+        path: "f8resurs:block/4s_copper_note_block"
+    settings:
+      hardness: 0.8
+      resistance: 0.8
+      replaceable: false
+      is_suffocating: true
+      is_view_blocking: true
+      is_redstone_conductor: true
+      can_occlude: true
+      propagate_skylight: false
+      tags:
+        - minecraft:mineable/axe
+      sounds:
+        break: minecraft:block.copper.break
+        step: minecraft:block.copper.step
+        place: minecraft:block.copper.place
+        hit: minecraft:block.copper.hit
+        fall: minecraft:block.copper.fall

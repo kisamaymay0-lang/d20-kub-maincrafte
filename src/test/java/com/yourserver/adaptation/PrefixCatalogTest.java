@@ -43,6 +43,53 @@ class PrefixCatalogTest {
     }
 
     @Test
+    void префиксНаходитсяПоФайлу() throws Exception {
+        PrefixCatalog catalog = load("""
+                prefixes:
+                  pref1:
+                    name: 'Морозный'
+                    color: '#8FE3F5'
+                    file: pref1
+                  pref2:
+                    name: 'Зимний мастер'
+                    color: '#E6B94B'
+                    file: custom_icon
+                """);
+        assertEquals("pref2", catalog.byFile("custom_icon").id());
+        assertEquals("pref1", catalog.byFile("pref1").id());
+        assertNull(catalog.byFile("нет-такого"));
+        assertNull(catalog.byFile(null));
+        assertNull(catalog.byFile(""));
+    }
+
+    @Test
+    void пакиДобавляютсяПослеСвоих(@TempDir Path packFolder) throws Exception {
+        PrefixCatalog base = load("""
+                prefixes:
+                  pref1:
+                    name: 'Морозный'
+                    color: '#8FE3F5'
+                    file: pref1
+                """);
+        Files.writeString(packFolder.resolve("pref-pack1.yml"), """
+                name: 'Тестовый пак'
+                prefixes:
+                  - pref1
+                  - file: my_icon
+                    name: 'Свой'
+                """);
+        PrefixPackCatalog packs = PrefixPackCatalog.load(packFolder, base, null);
+
+        PrefixCatalog all = base.withPacks(packs);
+        assertEquals(2, all.size(), "префикс пака, который уже есть в prefixes.yml, не дублируется");
+        assertEquals("pref1", all.list().get(0).id());
+        assertEquals(1, all.list().get(0).number(), "свои префиксы сохраняют номера");
+        assertEquals("pref-pack1_my_icon", all.list().get(1).id(), "префикс пака идёт после своих");
+        assertEquals(2, all.list().get(1).number());
+        assertEquals("Свой", all.list().get(1).name());
+    }
+
+    @Test
     void fileDefaultsToIdAndMissingFieldsAreConfigErrors() throws Exception {
         PrefixCatalog catalog = load("""
                 prefixes:

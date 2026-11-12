@@ -46,6 +46,17 @@ final class ProfileText {
         return -1;
     }
 
+    static int profileMedalSlot(int inventorySlot) {
+        if (inventorySlot >= 0 && inventorySlot < 9) return inventorySlot;
+        if (inventorySlot >= 45 && inventorySlot < 54) return inventorySlot - 36;
+        return -1;
+    }
+
+    static int profileInventorySlot(int medalSlot) {
+        if (medalSlot < 0 || medalSlot >= 18) throw new IllegalArgumentException("medalSlot");
+        return medalSlot < 9 ? medalSlot : medalSlot + 36;
+    }
+
     static int inventorySlot(int medalSlot) {
         if (medalSlot < 0 || medalSlot >= 18) throw new IllegalArgumentException("medalSlot");
         return medalSlot < 9 ? medalSlot : medalSlot + 9;
