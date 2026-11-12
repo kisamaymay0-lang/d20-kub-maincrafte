@@ -6,6 +6,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
+import org.bukkit.Registry;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.World;
@@ -81,6 +82,9 @@ public class CopperBlockListener implements Listener {
     private static final long DEFAULT_OXIDATION_MINUTES = 60L;
     private static final int DEFAULT_OXIDATION_TICKS = (int) (DEFAULT_OXIDATION_MINUTES * 60L * 20L);
     /** Период проверки старения: раз в секунду, как случайные тики у ванили. */
+    /** Сколько тиков ждём возвращения своего блока на месте, прежде чем забыть его. */
+    static final int POWER_MISS_GRACE_TICKS = 40;
+
     private static final long AGING_INTERVAL_TICKS = 20L;
     private static final double DISC_RANGE = 65.0;
     private static final long DEBOUNCE_MS = 400L;
@@ -113,6 +117,12 @@ public class CopperBlockListener implements Listener {
     /** Сказали ли уже, почему блок не ставится. */
     private boolean placeWarned;
     private final Map<String, Location> powerTrackedBlocks = new HashMap<>();
+    /**
+     * Сколько тиков подряд блок не был нашим, пока менял ступень. Смена ступени —
+     * это снятие старого блока и постановка нового, между ними место пустое, и
+     * терять из-за этого ноты нельзя.
+     */
+    private final Map<String, Integer> powerMisses = new HashMap<>();
     /** Блоки, которые стареют сами: ключ места -> позиция. */
     private final Map<String, Location> agingBlocks = new HashMap<>();
     /** Сколько тиков осталось до следующей ступени (у незагруженных чанков время стоит). */
@@ -617,6 +627,7 @@ public class CopperBlockListener implements Listener {
             } else {
                 powerTrackedBlocks.remove(key);
                 powerEdges.remove(key);
+                powerMisses.remove(key);
             }
             reevaluateDisc(block, key, contents);
         }
@@ -699,11 +710,25 @@ public class CopperBlockListener implements Listener {
                 continue;
             }
             Block block = world.getBlockAt(location);
+
             if (!isCopperBlock(block)) {
+                // Место пустое — блок как раз меняет ступень (или чанк догружается).
+                // Ждём: иначе после окисления блок замолкает, и ноты приходится
+                // расставлять заново.
+                int misses = powerMisses.merge(entry.getKey(), 1, Integer::sum);
+
+                if (block.getType().isAir() && misses <= POWER_MISS_GRACE_TICKS) {
+                    powerEdges.remove(entry.getKey());
+                    continue;
+                }
+
+                powerMisses.remove(entry.getKey());
                 powerEdges.remove(entry.getKey());
                 iterator.remove();
                 continue;
             }
+
+            powerMisses.remove(entry.getKey());
             observePower(entry.getKey(), block);
         }
     }
@@ -1060,85 +1085,202 @@ public class CopperBlockListener implements Listener {
         }
     }
 
-    private Sound getInstrumentByMaterial(Material material) {
+    /** Ключи инструментов: те же звуки, что у ванильного нотного блока. */
+    static final String KEY_HARP = "block.note_block.harp";
+    static final String KEY_BASS = "block.note_block.bass";
+    static final String KEY_BASEDRUM = "block.note_block.basedrum";
+    static final String KEY_SNARE = "block.note_block.snare";
+    static final String KEY_HAT = "block.note_block.hat";
+    static final String KEY_BELL = "block.note_block.bell";
+    static final String KEY_FLUTE = "block.note_block.flute";
+    static final String KEY_CHIME = "block.note_block.chime";
+    static final String KEY_GUITAR = "block.note_block.guitar";
+    static final String KEY_XYLOPHONE = "block.note_block.xylophone";
+    static final String KEY_IRON_XYLOPHONE = "block.note_block.iron_xylophone";
+    static final String KEY_COW_BELL = "block.note_block.cow_bell";
+    static final String KEY_DIDGERIDOO = "block.note_block.didgeridoo";
+    static final String KEY_BIT = "block.note_block.bit";
+    static final String KEY_BANJO = "block.note_block.banjo";
+    static final String KEY_PLING = "block.note_block.pling";
+
+    /** 26.1: у медных блоков своя труба, звук зависит от ступени окисления. */
+    static final String KEY_TRUMPET = "block.note_block.trumpet";
+    static final String KEY_TRUMPET_EXPOSED = "block.note_block.trumpet_exposed";
+    static final String KEY_TRUMPET_WEATHERED = "block.note_block.trumpet_weathered";
+    static final String KEY_TRUMPET_OXIDIZED = "block.note_block.trumpet_oxidized";
+
+    /** Головы вместо инструмента дают свой звук. */
+    static final String KEY_SKELETON = "block.note_block.imitate.skeleton";
+    static final String KEY_WITHER_SKELETON = "block.note_block.imitate.wither_skeleton";
+    static final String KEY_ZOMBIE = "block.note_block.imitate.zombie";
+
+    /**
+     * Инструмент по предмету в слоте — те же группы, что у ванильного нотного
+     * блока над этим блоком. Возвращается ключ звука, а не {@code Sound}: таблицу
+     * можно проверить тестом без сервера, а новые звуки ванили (труба меди из
+     * 26.1) не требуют правок, пока у них есть ключ.
+     */
+    static String instrumentKey(Material material) {
+        if (material == null) {
+            return KEY_HARP;
+        }
+
         String name = material.name();
 
+        String copper = copperInstrumentKey(name);
+
+        if (copper != null) {
+            return copper;
+        }
+
+        // Головы: звук вместо инструмента.
+        if (name.equals("SKELETON_SKULL") || name.equals("SKELETON_WALL_SKULL")) {
+            return KEY_SKELETON;
+        }
+
+        if (name.equals("WITHER_SKELETON_SKULL") || name.equals("WITHER_SKELETON_WALL_SKULL")) {
+            return KEY_WITHER_SKELETON;
+        }
+
+        if (name.equals("ZOMBIE_HEAD") || name.equals("ZOMBIE_WALL_HEAD")) {
+            return KEY_ZOMBIE;
+        }
+
         if (name.contains("BONE_BLOCK")) {
-            return Sound.BLOCK_NOTE_BLOCK_XYLOPHONE;
+            return KEY_XYLOPHONE;
         }
 
         if (name.contains("GOLD_BLOCK")) {
-            return Sound.BLOCK_NOTE_BLOCK_BELL;
+            return KEY_BELL;
         }
 
         if (name.contains("CLAY")) {
-            return Sound.BLOCK_NOTE_BLOCK_FLUTE;
+            return KEY_FLUTE;
         }
 
-        if (name.contains("PACKED_ICE")) {
-            return Sound.BLOCK_NOTE_BLOCK_CHIME;
+        if (name.contains("ICE") || name.contains("AMETHYST")) {
+            return KEY_CHIME;
         }
 
-        if (name.contains("WOOL")
-                || name.contains("CARPET")) {
-            return Sound.BLOCK_NOTE_BLOCK_GUITAR;
+        if (name.contains("WOOL") || name.contains("CARPET")) {
+            return KEY_GUITAR;
         }
 
         if (name.contains("IRON_BLOCK")) {
-            return Sound.BLOCK_NOTE_BLOCK_IRON_XYLOPHONE;
+            return KEY_IRON_XYLOPHONE;
         }
 
-        if (name.contains("SOUL_SAND")) {
-            return Sound.BLOCK_NOTE_BLOCK_COW_BELL;
+        if (name.contains("SOUL_SAND") || name.contains("SOUL_SOIL")) {
+            return KEY_COW_BELL;
         }
 
-        if (name.contains("PUMPKIN")) {
-            return Sound.BLOCK_NOTE_BLOCK_DIDGERIDOO;
+        if (name.contains("PUMPKIN") || name.contains("JACK_O_LANTERN")) {
+            return KEY_DIDGERIDOO;
         }
 
         if (name.contains("EMERALD_BLOCK")) {
-            return Sound.BLOCK_NOTE_BLOCK_BIT;
+            return KEY_BIT;
         }
 
         if (name.contains("HAY_BLOCK")) {
-            return Sound.BLOCK_NOTE_BLOCK_BANJO;
+            return KEY_BANJO;
         }
 
         if (name.contains("GLOWSTONE")) {
-            return Sound.BLOCK_NOTE_BLOCK_PLING;
+            return KEY_PLING;
         }
 
-        if (name.contains("AMETHYST")) {
-            return Sound.BLOCK_NOTE_BLOCK_CHIME;
+        // Дерево: доски, брёвна, заборы, двери, сундуки, полки, верстак, нотный блок.
+        if (name.contains("WOOD") || name.contains("LOG") || name.contains("PLANKS")
+                || name.contains("FENCE") || name.contains("DOOR") || name.contains("TRAPDOOR")
+                || name.contains("SIGN") || name.contains("CRAFTING_TABLE")
+                || name.contains("BOOKSHELF") || name.contains("LADDER") || name.contains("BARREL")
+                || name.equals("CHEST") || name.equals("TRAPPED_CHEST")
+                || name.contains("JUKEBOX") || name.contains("NOTE_BLOCK")
+                || name.equals("BAMBOO") || name.contains("SCAFFOLDING")) {
+            return KEY_BASS;
         }
 
-        if (name.contains("COPPER")) {
-            return Sound.BLOCK_NOTE_BLOCK_BASS;
+        if (name.contains("GLASS") || name.contains("BEACON") || name.contains("SEA_LANTERN")) {
+            return KEY_HAT;
         }
 
-        if (name.contains("WOOD")
-                || name.contains("LOG")
-                || name.contains("PLANKS")) {
-            return Sound.BLOCK_NOTE_BLOCK_BASS;
-        }
-
-        if (name.contains("STONE")
-                || name.contains("COBBLESTONE")
-                || name.contains("OBSIDIAN")
-                || name.contains("ORE")) {
-            return Sound.BLOCK_NOTE_BLOCK_BASEDRUM;
-        }
-
-        if (name.contains("SAND")
+        // Порошок бетона — как песок, а не как бетон. Песчаник — не песок:
+        // у него свой звук, поэтому SANDSTONE проверяется ниже, в камне.
+        if (name.contains("CONCRETE_POWDER") || name.equals("SAND") || name.equals("RED_SAND")
                 || name.contains("GRAVEL")) {
-            return Sound.BLOCK_NOTE_BLOCK_SNARE;
+            return KEY_SNARE;
         }
 
-        if (name.contains("GLASS")) {
-            return Sound.BLOCK_NOTE_BLOCK_HAT;
+        if (name.contains("STONE") || name.contains("DEEPSLATE") || name.contains("TUFF")
+                || name.contains("CALCITE") || name.contains("BASALT") || name.contains("BLACKSTONE")
+                || name.contains("NETHERRACK") || name.contains("NETHER_BRICK") || name.contains("BRICK")
+                || name.contains("OBSIDIAN") || name.contains("QUARTZ") || name.contains("SANDSTONE")
+                || name.contains("PURPUR") || name.contains("PRISMARINE") || name.contains("TERRACOTTA")
+                || name.contains("CONCRETE") || name.contains("ORE") || name.contains("RAW_")
+                || name.contains("FURNACE") || name.contains("SMOKER") || name.contains("DISPENSER")
+                || name.contains("DROPPER") || name.contains("OBSERVER") || name.contains("MAGMA")
+                || name.contains("ANCIENT_DEBRIS") || name.contains("SPAWNER")
+                || name.contains("END_STONE") || name.contains("RESPAWN_ANCHOR")
+                || name.contains("ENDER_CHEST") || name.contains("ENCHANTING_TABLE")
+                || name.contains("CAULDRON") || name.contains("ANVIL") || name.contains("MUD")) {
+            return KEY_BASEDRUM;
         }
 
-        return Sound.BLOCK_NOTE_BLOCK_HARP;
+        return KEY_HARP;
+    }
+
+    /**
+     * Ключ звука → {@link Sound}. Если сервер такого звука не знает (труба
+     * появилась в 26.1), откатываемся на арфу: молчащий блок хуже старого.
+     */
+    private Sound resolveInstrument(String key) {
+        try {
+            Sound sound = Registry.SOUND_EVENT.get(NamespacedKey.minecraft(key));
+
+            if (sound != null) {
+                return sound;
+            }
+        } catch (Throwable ignored) {
+            // старый сервер: звука ещё нет в реестре
+        }
+
+        if (KEY_HARP.equals(key)) {
+            return Sound.BLOCK_NOTE_BLOCK_HARP;
+        }
+
+        return resolveInstrument(KEY_HARP);
+    }
+
+    /**
+     * Медь: с 26.1 нотный блок на медном блоке играет трубой, и звук свой на
+     * каждую ступень окисления. Руды, слитки, самородки и медная электрика
+     * трубой не считаются — у них остаётся прежний инструмент.
+     */
+    private static String copperInstrumentKey(String name) {
+        if (!name.contains("COPPER")) {
+            return null;
+        }
+
+        if (name.contains("ORE") || name.contains("RAW_") || name.contains("INGOT")
+                || name.contains("NUGGET") || name.contains("BULB") || name.contains("LIGHTNING_ROD")
+                || name.contains("CHAIN") || name.contains("DOOR") || name.contains("TRAPDOOR")) {
+            return null;
+        }
+
+        if (name.contains("OXIDIZED")) {
+            return KEY_TRUMPET_OXIDIZED;
+        }
+
+        if (name.contains("WEATHERED")) {
+            return KEY_TRUMPET_WEATHERED;
+        }
+
+        if (name.contains("EXPOSED")) {
+            return KEY_TRUMPET_EXPOSED;
+        }
+
+        return KEY_TRUMPET;
     }
 
     // ===== ПОРШНИ =====
@@ -1210,6 +1352,7 @@ public class CopperBlockListener implements Listener {
             sessionInventories.remove(key);
             powerTrackedBlocks.remove(key);
             powerEdges.remove(key);
+            powerMisses.remove(key);
             blockData.set("blocks." + key, null);
             forgetAging(key);
             block.removeMetadata("copper_playing", plugin);
@@ -1273,7 +1416,8 @@ public class CopperBlockListener implements Listener {
 
         block.getWorld().playSound(
                 block.getLocation(),
-                getInstrumentByMaterial(instrument.getType()),
+                resolveInstrument(instrumentKey(instrument.getType())),
+                SoundCategory.RECORDS,
                 volume,
                 pitch
         );
@@ -1422,7 +1566,27 @@ public class CopperBlockListener implements Listener {
             return false;
         }
 
+        restoreTrigger(block);
         return true;
+    }
+
+    /**
+     * Вернуть блок в список играющих после смены ступени: CraftEngine снимает
+     * старый блок и ставит новый, а следом {@link #tickRedstone()} мог решить,
+     * что блока больше нет. Ноты при этом остались в blocks.yml — терять их
+     * незачем.
+     */
+    private void restoreTrigger(Block block) {
+        String key = getBlockKey(block);
+
+        powerMisses.remove(key);
+
+        if (!hasWorkingContents(contentsOf(key))) {
+            return;
+        }
+
+        powerTrackedBlocks.put(key, block.getLocation());
+        powerEdges.update(key, hasPower(block));
     }
 
     private void warnMissingStage(String id) {
@@ -1618,6 +1782,7 @@ public class CopperBlockListener implements Listener {
         sessionInventories.remove(key);
         powerTrackedBlocks.remove(key);
         powerEdges.remove(key);
+        powerMisses.remove(key);
         block.removeMetadata("copper_playing", plugin);
         block.removeMetadata("last_copper_trigger", plugin);
 
@@ -1745,6 +1910,7 @@ public class CopperBlockListener implements Listener {
         agingTicksLeft.clear();
         powerTrackedBlocks.clear();
         powerEdges.clear();
+        powerMisses.clear();
         for (Inventory inventory : new ArrayList<>(openInventories.values())) {
             saveInventory(inventory);
         }

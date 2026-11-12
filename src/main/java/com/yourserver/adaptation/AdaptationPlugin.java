@@ -60,6 +60,8 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private Apvsh apvsh;
     private SweetBerryBlock sweetBerryBlock;
     private Shaker shaker;
+    /** Рюмка из RP Engine: налить напиток прямо из шейкера. */
+    private ShotGlass shotGlass;
     private BambooBarrel bambooBarrel;
     /** Сигарета из /f8: тикает шкалу тяги и дым, поэтому нужен доступ на выключении. */
     private Cigarette cigarette;
@@ -178,6 +180,11 @@ public void onEnable() {
     shaker = new Shaker(this);
     getServer().getPluginManager().registerEvents(shaker, this);
     shaker.registerRecipe();
+
+    // Рюмка RP Engine: событие клика по поставленной модели, свой класс —
+    // без RP Engine плагин молча работает дальше.
+    shotGlass = new ShotGlass(this);
+    shotGlass.register();
 
     // Бамбуковая бочка для брожения пиратского рома.
     bambooBarrel = new BambooBarrel(this);
@@ -345,6 +352,10 @@ public void onEnable() {
         }
         if (bambooBarrel != null) {
             bambooBarrel.reloadSettings();
+        }
+        if (shotGlass != null) {
+            // Список рюмок: shaker.glass-models.
+            shotGlass.reloadSettings();
         }
         if (catBattleManager != null) {
             catBattleManager.reloadSettings();

@@ -174,3 +174,10 @@ fishing:
 # Бамбуковая бочка и пиратский ром: тиков на 1 год выдержки (24000 = 1 игровой день).
 bamboo_barrel:
   ticks_per_year: 24000
+
+# Рюмка RP Engine: id моделей, по которым ПКМ наливает напиток из шейкера.
+# id пишется как «папка:предмет» — ровно как в plugins/RPEngine/content/<папка>/items.
+# Готовый файл рюмки: docs/rpengine/shot-glass.yml.
+shaker:
+  glass-models:
+    - testpack:statue
