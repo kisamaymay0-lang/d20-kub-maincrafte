@@ -575,7 +575,10 @@ final class ShotGlass implements Listener {
             block.setType(Material.AIR, false);
         }
 
-        boolean removed = hitbox.remove();
+        // Entity#remove() ничего не возвращает: считаем, что убрали, если
+        // сущность была живой до вызова.
+        boolean alive = hitbox.isValid();
+        hitbox.remove();
 
         if (world != null) {
             for (UUID id : displays) {
@@ -587,7 +590,7 @@ final class ShotGlass implements Listener {
             }
         }
 
-        return removed;
+        return alive;
     }
 
     /** Первый готовый напиток в шейкере, иначе -1. */
