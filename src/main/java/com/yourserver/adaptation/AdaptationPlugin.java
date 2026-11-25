@@ -411,8 +411,10 @@ public void onEnable() {
      * <p>Ошибка в файле не снимает напитки: остаются прежние, а причина уходит в журнал.
      */
     public String reloadDrinkRecipes() {
-        String drinks = reloadDrinkCatalog();
+        // Сначала выдержка: бочковому напитку нужен свой блок в napitki.yml, иначе он
+        // не создаётся вовсе (см. DrinkRecipes#requireBarrelProfiles).
         String barrel = reloadBarrelDrinks();
+        String drinks = reloadDrinkCatalog();
         return drinks + " " + barrel;
     }
 
@@ -425,6 +427,11 @@ public void onEnable() {
         }
         try {
             DrinkRecipes next = DrinkRecipes.load(path);
+            // Если napitki.yml прочитался, требуем для каждого бочкового напитка свой блок:
+            // без него нет ни сроков, ни качеств, ни крепости — значит, нет и напитка.
+            if (lastBarrelError == null) {
+                next = next.requireBarrelProfiles(BarrelDrinks.current().ids());
+            }
             DrinkRecipes.install(next);
             lastDrinkError = null;
             // Напиток с ошибкой не отменяет остальные, но в журнале должно быть видно,

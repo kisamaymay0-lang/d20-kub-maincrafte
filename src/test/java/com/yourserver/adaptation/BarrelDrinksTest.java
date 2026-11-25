@@ -199,6 +199,19 @@ final class BarrelDrinksTest {
     }
 
     @Test
+    void уКаждогоБочковогоНапиткаЕстьБлокВNapitki() throws Exception {
+        DrinkRecipes recipes = DrinkRecipes.load(Path.of("src/main/resources/settings/recipe-poilo.yml"));
+        BarrelDrinks barrel = BarrelDrinks.load(Path.of("src/main/resources/data/napitki/napitki.yml"));
+
+        for (DrinkRecipes.Drink drink : recipes.barrelDrinks()) {
+            assertTrue(barrel.ids().contains(drink.id()),
+                    "нет блока в napitki.yml — напиток не создастся: " + drink.id());
+        }
+        assertTrue(BarrelDrinks.defaults().ids().contains(Shaker.RECIPE_PIRATE_RUM),
+                "даже без файла ром остаётся бочковым напитком");
+    }
+
+    @Test
     void вижноКакиеКлючиНаписаныСамим() throws Exception {
         BarrelDrinks shipped = BarrelDrinks.load(Path.of("src/main/resources/data/napitki/napitki.yml"));
 

@@ -437,6 +437,38 @@ final class DrinkRecipes {
         return problems;
     }
 
+    /**
+     * Оставить только те бочковые напитки, у которых есть свой блок в
+     * {@code data/napitki/napitki.yml}.
+     *
+     * <p>Бочковому напитку там задают сроки, качества и крепость. Нет блока — нет и
+     * напитка: иначе он молча брал бы ромовую лестницу (10 лет, 4–8 единиц за глоток)
+     * и выглядел бы как «мой рецепт не работает».
+     *
+     * @param profileIds id, для которых в napitki.yml есть запись; {@code null} — не проверять
+     */
+    DrinkRecipes requireBarrelProfiles(java.util.Set<String> profileIds) {
+        if (profileIds == null) return this;
+        Map<String, Drink> kept = new LinkedHashMap<>();
+        Map<String, BarrelRecipe> keptBarrels = new LinkedHashMap<>();
+        List<String> next = new ArrayList<>(problems);
+        for (Drink drink : ordered) {
+            if (drink.method() == Method.BARREL && !profileIds.contains(drink.id())) {
+                next.add("напиток «" + drink.id() + "» не создан: у бочкового напитка нет своего блока в "
+                        + BarrelDrinks.FILE + ". Сроки, качества и крепость берутся оттуда — "
+                        + "допишите «" + drink.id() + ":» в раздел drinks (хотя бы пустой).");
+                continue;
+            }
+            kept.put(drink.id(), drink);
+            BarrelRecipe recipe = barrels.get(drink.id());
+            if (recipe != null) keptBarrels.put(drink.id(), recipe);
+        }
+        if (kept.isEmpty()) {
+            throw new IllegalArgumentException("Ни один напиток не остался: " + String.join("; ", next));
+        }
+        return new DrinkRecipes(kept, keptBarrels, next);
+    }
+
     /** Текущий каталог напитков: его читают {@link Shaker} и {@link BambooBarrel}. */
     static DrinkRecipes current() {
         return current;

@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -397,6 +398,34 @@ final class DrinkRecipesTest {
         assertNull(recipes.get("brak"));
         assertEquals(1, recipes.problems().size());
         assertTrue(recipes.problems().get(0).contains("brak"), recipes.problems().get(0));
+    }
+
+    @Test
+    void бочковомуНапиткуНуженБлокВNapitki() throws Exception {
+        DrinkRecipes recipes = load("""
+                recipes:
+                  pivo:
+                    name: 'Пиво'
+                    color: '#EBBB40'
+                    method: barrel
+                    ingredients:
+                      wheat: 3
+                  chai:
+                    name: 'Чай'
+                    color: '#8FE3F5'
+                    method: shaker
+                    ingredients: [honeycomb]
+                """);
+
+        DrinkRecipes checked = recipes.requireBarrelProfiles(Set.of("wine"));
+        assertNull(checked.get("pivo"), "без блока в napitki.yml бочковой напиток не создаётся");
+        assertNotNull(checked.get("chai"), "шейкерный напиток файла napitki.yml не касается");
+        assertEquals(1, checked.problems().size());
+        assertTrue(checked.problems().get(0).contains("napitki"), checked.problems().get(0));
+
+        DrinkRecipes allowed = recipes.requireBarrelProfiles(Set.of("pivo"));
+        assertNotNull(allowed.get("pivo"));
+        assertTrue(allowed.problems().isEmpty());
     }
 
     @Test

@@ -225,6 +225,9 @@ final class BarrelDrinks {
                 defaultLevels(), defaultYears(), null, DEFAULT_RUM_DRUNK);
         // Вина слабее рома: свои значения на каждое качество.
         Map<String, Profile> drinks = new LinkedHashMap<>();
+        // Ром — и есть base, но запись нужна: /f8 drinks и проверка «есть ли блок
+        // в napitki.yml» смотрят именно на список id.
+        drinks.put("pirate_rum", base);
         drinks.put("wine", base.withDrunk(DEFAULT_WINE_DRUNK));
         drinks.put("sweet_wine", base.withDrunk(DEFAULT_WINE_DRUNK));
         drinks.put("white_wine", base.withDrunk(DEFAULT_WINE_DRUNK));

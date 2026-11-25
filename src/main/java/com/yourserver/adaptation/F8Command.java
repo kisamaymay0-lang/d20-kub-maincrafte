@@ -712,6 +712,7 @@ public class F8Command implements CommandExecutor, Listener {
             allowed.append(ingredient.label());
         }
         lines.add("§7Бочка берёт только это: §f" + allowed);
+        lines.add("§7Бочковому напитку нужен свой блок в napitki.yml — без него он не создаётся.");
 
         if (plugin.lastDrinkError() != null) {
             lines.add("§cОшибка recipe-poilo.yml: §f" + plugin.lastDrinkError());
