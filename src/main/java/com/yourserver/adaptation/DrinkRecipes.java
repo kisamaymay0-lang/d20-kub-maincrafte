@@ -279,10 +279,11 @@ final class DrinkRecipes {
         BarrelRecipe {
             // Порядок — по id ингредиента: «3 × тростник + 2 × вода» не должен
             // перемешиваться от запуска к запуску.
+            Map<BarrelIngredient, Integer> original = ingredients;
             Map<BarrelIngredient, Integer> ordered = new LinkedHashMap<>();
-            ingredients.keySet().stream()
+            original.keySet().stream()
                     .sorted(java.util.Comparator.comparing(BarrelIngredient::id))
-                    .forEach(key -> ordered.put(key, ingredients.get(key)));
+                    .forEach(key -> ordered.put(key, original.get(key)));
             ingredients = java.util.Collections.unmodifiableMap(ordered);
         }
 
