@@ -393,6 +393,13 @@ public void onEnable() {
      * <p>Ошибка в файле не снимает напитки: остаются прежние, а причина уходит в журнал.
      */
     public String reloadDrinkRecipes() {
+        String drinks = reloadDrinkCatalog();
+        String barrel = reloadBarrelDrinks();
+        return drinks + " " + barrel;
+    }
+
+    /** Напитки из {@code settings/recipe-poilo.yml}: рецепты, названия, цвета, модели. */
+    private String reloadDrinkCatalog() {
         Path path = Layout.settings(this, "recipe-poilo.yml");
         if (!Files.exists(path)) {
             saveResource("settings/recipe-poilo.yml", false);
@@ -402,11 +409,34 @@ public void onEnable() {
             DrinkRecipes next = DrinkRecipes.load(path);
             DrinkRecipes.install(next);
             return "Напитки: " + next.size() + " (шейкер: " + next.shakerDrinks().size()
-                    + ", бочка: " + next.barrelDrinks().size() + "), файл " + path;
+                    + ", бочка: " + next.barrelDrinks().size() + "), файл " + path + ".";
         } catch (Exception ex) {
             getLogger().log(java.util.logging.Level.WARNING,
                     "Ошибка settings/recipe-poilo.yml; остаются прежние напитки (" + ex.getMessage() + ")", ex);
             return "Напитки не перечитаны: ошибка в settings/recipe-poilo.yml (причина в журнале сервера).";
+        }
+    }
+
+    /**
+     * Бочковые напитки из {@code data/napitki/napitki.yml}: сколько варится, сколько лет
+     * до какого качества и что написано в подсказке. Файл кладётся из комплекта при первом
+     * запуске, дальше живёт сам — плагин его не перезаписывает.
+     */
+    private String reloadBarrelDrinks() {
+        Path path = Layout.data(this, BarrelDrinks.FILE);
+        if (!Files.exists(path)) {
+            saveResource("data/" + BarrelDrinks.FILE, false);
+            getLogger().info("Создан файл бочковых напитков: " + path);
+        }
+        try {
+            BarrelDrinks.install(BarrelDrinks.load(path));
+            return "Выдержка: файл " + path + ".";
+        } catch (Exception ex) {
+            getLogger().log(java.util.logging.Level.WARNING,
+                    "Ошибка data/" + BarrelDrinks.FILE + "; остаются прежние сроки и качества ("
+                            + ex.getMessage() + ")", ex);
+            return "Сроки выдержки не перечитаны: ошибка в data/" + BarrelDrinks.FILE
+                    + " (причина в журнале сервера).";
         }
     }
 

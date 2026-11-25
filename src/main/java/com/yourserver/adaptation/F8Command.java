@@ -464,9 +464,13 @@ public class F8Command implements CommandExecutor, Listener {
             case "drink_pirate_rum" -> BambooBarrel.createPirateRum();
             default -> {
                 // Напиток, добавленный в settings/recipe-poilo.yml: готовим по рецепту из файла.
-                if (id.startsWith("drink_")
-                        && DrinkRecipes.current().get(id.substring("drink_".length())) != null) {
-                    yield Shaker.createDrinkItem(id.substring("drink_".length()));
+                if (id.startsWith("drink_")) {
+                    DrinkRecipes.Drink drink = DrinkRecipes.current().get(id.substring("drink_".length()));
+                    if (drink != null) {
+                        // Бочковый напиток выдаём бутылочкой из бочки: у неё годы, качество и глотки.
+                        yield drink.shaker() ? Shaker.createDrinkItem(drink.id())
+                                : BambooBarrel.createBarrelDrink(drink.id(), 0, 1, 3);
+                    }
                 }
                 throw new IllegalArgumentException("Неизвестный напиток каталога");
             }

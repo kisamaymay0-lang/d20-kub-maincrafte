@@ -77,7 +77,7 @@ final class ProfileIcons {
         return glyph((char) (PREFIX_GLYPH_START + number - 1));
     }
 
-    /** Иконка префикса сразу перед ником, без пробела. Сам ник всегда белый обычным шрифтом —
+    /** Иконка префикса, пробел и ник: {@code (префикс) Ник}. Сам ник всегда белый обычным шрифтом —
      *  префикс его не меняет. Шрифт иконки ставится только на саму иконку: если его унаследуют
      *  буквы ника, клиент покажет их пустыми квадратами (в шрифте иконок нет букв). */
     static Component prefixedName(PrefixCatalog.Prefix prefix, String name) {
@@ -87,7 +87,19 @@ final class ProfileIcons {
     /** Ник с картинкой префикса в заданный момент времени. */
     static Component prefixedName(PrefixCatalog.Prefix prefix, String name, long millis) {
         if (prefix == null) return ProfileItems.nick(name);
-        return Component.empty().append(prefixIcon(prefix, millis)).append(ProfileItems.nick(name));
+        return withIcon(prefix, millis, ProfileItems.nick(name));
+    }
+
+    /** Иконка префикса, пробел и текст: {@code (префикс) Название}. Пробел — часть отступа
+     *  между картинкой и буквами, без него ник липнет к иконке. */
+    static Component withIcon(PrefixCatalog.Prefix prefix, Component tail) {
+        return withIcon(prefix, System.currentTimeMillis(), tail);
+    }
+
+    /** То же в заданный момент времени (анимация префикса). */
+    static Component withIcon(PrefixCatalog.Prefix prefix, long millis, Component tail) {
+        if (prefix == null) return tail;
+        return Component.empty().append(prefixIcon(prefix, millis)).append(Component.space()).append(tail);
     }
 
     /** Строка глифов E101–E10F для проверки ресурспака: видны картинки — пакет и шрифт загружены. */

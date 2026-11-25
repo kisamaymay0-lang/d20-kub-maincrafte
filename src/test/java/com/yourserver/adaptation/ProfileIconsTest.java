@@ -40,7 +40,8 @@ class ProfileIconsTest {
         // Ник не меняется: префикс добавляет только иконку, имя остаётся белым обычным шрифтом.
         // (Если ник унаследует шрифт иконки, клиент покажет его буквы пустыми квадратами.)
         var row = ProfileIcons.prefixedName(prefix, "Steve");
-        assertEquals("\uE106Steve", PlainTextComponentSerializer.plainText().serialize(row));
+        // Между иконкой префикса и ником — пробел: (префикс) Ник, а не слипшись.
+        assertEquals("\uE106 Steve", PlainTextComponentSerializer.plainText().serialize(row));
         assertEquals(NamedTextColor.WHITE, leafColor(row, "Steve"));
         assertEquals(Key.key("minecraft", "default"), leafFont(row, "Steve"));
         assertEquals(ProfileIcons.FONT, leafFont(row, "\uE106"));

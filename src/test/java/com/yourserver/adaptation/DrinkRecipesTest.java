@@ -32,9 +32,9 @@ final class DrinkRecipesTest {
     void поставляемыйФайлСовпадаетСоСтарымиНапитками() throws Exception {
         DrinkRecipes shipped = DrinkRecipes.load(Path.of("src/main/resources/settings/recipe-poilo.yml"));
 
-        assertEquals(6, shipped.size(), "пять напитков шейкера и ром");
+        assertEquals(10, shipped.size(), "пять напитков шейкера, ром и четыре вина");
         assertEquals(4, shipped.shakerDrinks().size(), "муть — запасной, а не рецепт");
-        assertEquals(1, shipped.barrelDrinks().size(), "в бочке только ром");
+        assertEquals(5, shipped.barrelDrinks().size(), "в бочке ром и четыре вина");
 
         assertEquals("Медовуха?", shipped.get(Shaker.RECIPE_MEAD).name());
         assertEquals("Матча-чай", shipped.get(Shaker.RECIPE_MATCHA_TEA).name());
@@ -58,6 +58,12 @@ final class DrinkRecipesTest {
         assertEquals("iced_latte", shipped.get(Shaker.RECIPE_ICED_LATTE).model());
         assertEquals("", shipped.get(Shaker.RECIPE_MURK).model(), "у мути модели нет");
         assertEquals("skull_poilo", shipped.get(Shaker.RECIPE_PIRATE_RUM).model());
+        assertEquals("Вино", shipped.get("wine").name());
+        assertEquals("Сладкое вино", shipped.get("sweet_wine").name());
+        assertEquals("Белое вино", shipped.get("white_wine").name());
+        assertEquals("Горькое вино", shipped.get("bitter_wine").name());
+        assertEquals("", shipped.get("wine").model(), "модели у вина пока нет");
+        assertEquals(DrinkRecipes.Method.BARREL, shipped.get("wine").method());
         assertEquals("#EBAF28", shipped.get(Shaker.RECIPE_MEAD).color().asHexString());
         assertEquals("#4E9331", shipped.get(Shaker.RECIPE_MURK).color().asHexString());
     }
@@ -260,5 +266,68 @@ final class DrinkRecipesTest {
         assertNull(DrinkRecipes.kindOf("ромашка"));
         assertNull(DrinkRecipes.kindOf(""));
         assertNull(DrinkRecipes.kindOf(null));
+    }
+
+    @Test
+    void рецептыБочкиИзФайла() throws Exception {
+        DrinkRecipes shipped = DrinkRecipes.load(Path.of("src/main/resources/settings/recipe-poilo.yml"));
+
+        DrinkRecipes.BarrelRecipe rum = shipped.barrelRecipe(Shaker.RECIPE_PIRATE_RUM);
+        assertNotNull(rum, "ром варится в бочке");
+        assertEquals(5, rum.total(), "тростник, уголь и три горячей воды");
+        assertEquals(3, rum.needed(DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE));
+
+        assertEquals(4, shipped.barrelRecipe("wine").total(), "три помятых ягоды и вода");
+        assertEquals(1, shipped.barrelRecipe("sweet_wine").needed(DrinkRecipes.BarrelIngredient.SUGAR));
+        assertEquals(1, shipped.barrelRecipe("white_wine").needed(DrinkRecipes.BarrelIngredient.BONE_MEAL));
+        assertEquals(3, shipped.barrelRecipe("bitter_wine").needed(DrinkRecipes.BarrelIngredient.HARD_SWEETIE_BERRY));
+        assertNull(shipped.barrelRecipe(Shaker.RECIPE_MEAD), "медовуха не бочковая");
+    }
+
+    @Test
+    void бочкаЖдётРовноТотНабор() {
+        DrinkRecipes.BarrelRecipe wine = new DrinkRecipes.BarrelRecipe(Map.of(
+                DrinkRecipes.BarrelIngredient.LOW_SWEETIE_BERRY, 3,
+                DrinkRecipes.BarrelIngredient.WATER_BOTTLE, 1));
+
+        java.util.Map<DrinkRecipes.BarrelIngredient, Integer> have =
+                new java.util.EnumMap<>(DrinkRecipes.BarrelIngredient.class);
+        have.put(DrinkRecipes.BarrelIngredient.LOW_SWEETIE_BERRY, 3);
+        have.put(DrinkRecipes.BarrelIngredient.WATER_BOTTLE, 1);
+        assertTrue(wine.matches(have), "ровно три ягоды и вода");
+
+        // Лишний сахар — это уже не обычное вино: рецепт ждёт точного набора.
+        have.put(DrinkRecipes.BarrelIngredient.SUGAR, 1);
+        assertFalse(wine.matches(have), "лишний предмет останавливает варку");
+
+        // Горячая вода годится вместо обычной.
+        java.util.Map<DrinkRecipes.BarrelIngredient, Integer> hot =
+                new java.util.EnumMap<>(DrinkRecipes.BarrelIngredient.class);
+        hot.put(DrinkRecipes.BarrelIngredient.LOW_SWEETIE_BERRY, 3);
+        hot.put(DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE, 1);
+        assertTrue(wine.matches(hot));
+
+        // А ром наоборот: обычная вода вместо горячей не подойдёт.
+        DrinkRecipes.BarrelRecipe rum = new DrinkRecipes.BarrelRecipe(Map.of(
+                DrinkRecipes.BarrelIngredient.COAL, 1,
+                DrinkRecipes.BarrelIngredient.SUGAR_CANE, 1,
+                DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE, 3));
+        java.util.Map<DrinkRecipes.BarrelIngredient, Integer> cold =
+                new java.util.EnumMap<>(DrinkRecipes.BarrelIngredient.class);
+        cold.put(DrinkRecipes.BarrelIngredient.COAL, 1);
+        cold.put(DrinkRecipes.BarrelIngredient.SUGAR_CANE, 1);
+        cold.put(DrinkRecipes.BarrelIngredient.WATER_BOTTLE, 3);
+        assertFalse(rum.matches(cold), "ром требует именно горячую воду");
+    }
+
+    @Test
+    void именаИнгредиентовБочкиПоРазному() {
+        assertEquals(DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE,
+                DrinkRecipes.BarrelIngredient.of("hot_water_bottle"));
+        assertEquals(DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE,
+                DrinkRecipes.BarrelIngredient.of("Hot-Water-Bottle"));
+        assertEquals(DrinkRecipes.BarrelIngredient.LOW_SWEETIE_BERRY,
+                DrinkRecipes.BarrelIngredient.of(" low_sweetie_berry "));
+        assertNull(DrinkRecipes.BarrelIngredient.of("ромашка"));
     }
 }

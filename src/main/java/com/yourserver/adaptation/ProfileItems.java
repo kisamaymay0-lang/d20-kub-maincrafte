@@ -179,7 +179,7 @@ final class ProfileItems {
 
     ItemStack randomPrefixShowcase(PrefixCatalog.Prefix prefix) {
         if (prefix == null) return emptySlot();
-        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(text(prefix.name(), prefix.color()));
+        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(Component.space()).append(text(prefix.name(), prefix.color()));
         ItemStack item = named(Material.NAME_TAG, display,
                 List.of(text("Случайный префикс из каталога", NamedTextColor.DARK_GRAY)));
         return model(item, prefix.file());
@@ -204,9 +204,9 @@ final class ProfileItems {
     /** Префикс в списке выбора. Чужой показан красным «У вас нету этого префикса!». */
     ItemStack prefixEntry(PrefixCatalog.Prefix prefix, boolean owned, boolean equipped) {
         if (!owned) {
-            Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(bold("У вас нету этого префикса!", NamedTextColor.RED));
+            Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(Component.space()).append(bold("У вас нету этого префикса!", NamedTextColor.RED));
             ItemStack item = named(Material.NAME_TAG, display, List.of(
-                    text("№" + prefix.number() + ": ", NamedTextColor.DARK_GRAY).append(ProfileIcons.prefixIcon(prefix)).append(text(prefix.name(), prefix.color())),
+                    text("№" + prefix.number() + ": ", NamedTextColor.DARK_GRAY).append(ProfileIcons.prefixIcon(prefix)).append(Component.space()).append(text(prefix.name(), prefix.color())),
                     text("Получите его из кейса префиксов", NamedTextColor.DARK_GRAY)));
             return model(item, prefix.file());
         }
@@ -222,7 +222,7 @@ final class ProfileItems {
             lore.add(text("Анимация: картинок " + prefix.frames().size() + " · "
                     + PrefixCatalog.intervalText(prefix.intervalHundredths()) + " на кадр", NamedTextColor.DARK_GRAY));
         }
-        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(bold(prefix.name(), prefix.color()));
+        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(Component.space()).append(bold(prefix.name(), prefix.color()));
         ItemStack item = named(Material.NAME_TAG, display, lore);
         ItemMeta meta = item.getItemMeta();
         meta.setEnchantmentGlintOverride(equipped);
@@ -399,7 +399,7 @@ final class ProfileItems {
 
     /** Карточка префикса во время вскрытия кейса. slot — номер места (1…9). */
     ItemStack prefixReveal(PrefixCatalog.Prefix prefix, int slot) {
-        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(bold(prefix.name(), prefix.color()));
+        Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(Component.space()).append(bold(prefix.name(), prefix.color()));
         return model(named(Material.NAME_TAG, display, List.of(
                 text("Место " + slot, NamedTextColor.DARK_GRAY),
                 text("Вскрытие кейса…", NamedTextColor.DARK_GRAY))), prefix.file());
@@ -476,7 +476,7 @@ final class ProfileItems {
             // Иконка префикса перед ником; сам ник всегда белый обычным шрифтом — префикс его не меняет.
             Component nameText = nick(title).decorate(TextDecoration.BOLD);
             if (prefix == null) skull.displayName(nameText);
-            else skull.displayName(Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(nameText));
+            else skull.displayName(Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(Component.space()).append(nameText));
         }
         Player player = Bukkit.getPlayer(data.skinOwner());
         if (player != null) skins.put(data.skinOwner(), player.getPlayerProfile());

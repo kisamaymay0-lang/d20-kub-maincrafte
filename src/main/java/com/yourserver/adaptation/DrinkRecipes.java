@@ -4,12 +4,15 @@ import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.inventory.ItemStack;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -37,7 +40,8 @@ import java.util.Map;
  *       треугольный маркер ▶, если нет — точка •;</li>
  *   <li><b>method</b> — {@code shaker} (взбить в шейкере) или {@code barrel}
  *       (настаивается в бочке; в шейкер такой напиток не кладётся);</li>
- *   <li><b>ingredients</b> — что должно лежать в шейкере (для {@code shaker});</li>
+ *   <li><b>ingredients</b> — что должно лежать в шейкере: список (для {@code shaker})
+ *       или «предмет: сколько» (для {@code barrel});</li>
  *   <li><b>additives</b> — положительные добавки. Всё, чего тут нет, считается
  *       отрицательным: за него напиток даёт тошноту и отравление.</li>
  * </ul>
@@ -50,6 +54,148 @@ final class DrinkRecipes {
 
     /** Как готовится напиток. */
     enum Method { SHAKER, BARREL }
+
+    /**
+     * Что бочка принимает как ингредиент. В файле пишется строчными буквами
+     * ({@code hot_water_bottle}, {@code low_sweetie_berry}), понимает и дефисы.
+     *
+     * <p>{@link #WATER_BOTTLE} — «просто вода»: под неё подходит и обычная бутылочка
+     * воды, и бутылочка горячей воды. Обратное неверно: ром требует именно горячую.
+     */
+    enum BarrelIngredient {
+        COAL("уголь"),
+        SUGAR_CANE("сахарный тростник"),
+        HOT_WATER_BOTTLE("бутылочка горячей воды"),
+        WATER_BOTTLE("бутылочка воды"),
+        LOW_SWEETIE_BERRY("помятые сладкие ягоды"),
+        HARD_SWEETIE_BERRY("продавленные сладкие ягоды"),
+        SUGAR("сахар"),
+        BONE_MEAL("костная мука");
+
+        private final String label;
+
+        BarrelIngredient(String label) {
+            this.label = label;
+        }
+
+        /** Русское название — для сообщений и тестов. */
+        String label() {
+            return label;
+        }
+
+        /** Предмет, который отдаём обратно, если ингредиент забирают из бочки. */
+        ItemStack create() {
+            return switch (this) {
+                case COAL -> new ItemStack(Material.COAL);
+                case SUGAR_CANE -> new ItemStack(Material.SUGAR_CANE);
+                case HOT_WATER_BOTTLE -> Shaker.createHotWaterBottle();
+                case WATER_BOTTLE -> waterBottle();
+                case LOW_SWEETIE_BERRY -> SweetBerryBlock.createLowSweetieBerry();
+                case HARD_SWEETIE_BERRY -> SweetBerryBlock.createHardSweetieBerry();
+                case SUGAR -> new ItemStack(Material.SUGAR);
+                case BONE_MEAL -> new ItemStack(Material.BONE_MEAL);
+            };
+        }
+
+        private static ItemStack waterBottle() {
+            ItemStack item = new ItemStack(Material.POTION);
+            if (item.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta) {
+                meta.setBasePotionType(org.bukkit.potion.PotionType.WATER);
+                item.setItemMeta(meta);
+            }
+            return item;
+        }
+
+        /** Ингредиент по предмету; null — бочке такой предмет не нужен. */
+        static BarrelIngredient of(ItemStack item) {
+            if (item == null || item.getType() == Material.AIR) return null;
+            if (Shaker.isHotWaterBottle(item)) return HOT_WATER_BOTTLE;
+            if (SweetBerryBlock.isHardSweetieBerry(item)) return HARD_SWEETIE_BERRY;
+            if (SweetBerryBlock.isLowSweetieBerry(item)) return LOW_SWEETIE_BERRY;
+            return switch (item.getType()) {
+                case COAL, CHARCOAL -> COAL;
+                case SUGAR_CANE -> SUGAR_CANE;
+                case SUGAR -> SUGAR;
+                case BONE_MEAL -> BONE_MEAL;
+                case POTION -> WaterBottle.isWaterBottle(item) ? WATER_BOTTLE : null;
+                default -> null;
+            };
+        }
+
+        /** Запись из файла: {@code hot_water_bottle}, {@code hot-water-bottle} или {@code HOT_WATER_BOTTLE}. */
+        static BarrelIngredient of(String raw) {
+            if (raw == null) return null;
+            String text = ProfileText.clean(raw).toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+            if (text.isEmpty()) return null;
+            for (BarrelIngredient ingredient : values()) {
+                if (ingredient.name().equals(text)) return ingredient;
+            }
+            return null;
+        }
+
+        /** Все допустимые имена — для сообщения об ошибке в файле. */
+        static String names() {
+            List<String> names = new ArrayList<>();
+            for (BarrelIngredient ingredient : values()) {
+                names.add(ingredient.name().toLowerCase(Locale.ROOT));
+            }
+            return String.join(", ", names);
+        }
+    }
+
+    /**
+     * Рецепт для бочки: «предмет: сколько». Совпадение точное — лишний предмет в бочке
+     * останавливает варку, поэтому сладкое вино не превратится в обычное, если сахар
+     * положили раньше ягод.
+     */
+    record BarrelRecipe(Map<BarrelIngredient, Integer> ingredients) {
+
+        BarrelRecipe {
+            ingredients = Map.copyOf(ingredients);
+        }
+
+        /** Сколько всего предметов нужно. */
+        int total() {
+            int sum = 0;
+            for (int count : ingredients.values()) sum += count;
+            return sum;
+        }
+
+        /** Сколько этого ингредиента нужно по рецепту (0 — не нужен). */
+        int needed(BarrelIngredient ingredient) {
+            Integer count = ingredients.get(ingredient);
+            return count == null ? 0 : count;
+        }
+
+        /**
+         * Лежит ли в бочке ровно то, что нужно. Вода с оговоркой: там, где просят
+         * обычную воду, подойдёт и горячая; там, где просят горячую, — только горячая.
+         */
+        boolean matches(Map<BarrelIngredient, Integer> have) {
+            if (have == null || have.isEmpty()) return false;
+            int counted = 0;
+            for (int count : have.values()) counted += count;
+            if (counted != total()) return false;
+            for (Map.Entry<BarrelIngredient, Integer> need : ingredients.entrySet()) {
+                if (available(have, need.getKey()) < need.getValue()) return false;
+            }
+            return true;
+        }
+
+        /** Сколько этого ингредиента реально лежит в бочке (с оговоркой про воду). */
+        private static int available(Map<BarrelIngredient, Integer> have, BarrelIngredient ingredient) {
+            int count = have.getOrDefault(ingredient, 0);
+            if (ingredient == BarrelIngredient.WATER_BOTTLE) {
+                count += have.getOrDefault(BarrelIngredient.HOT_WATER_BOTTLE, 0);
+            }
+            return count;
+        }
+
+        /** Пустой ли рецепт (у «мути» и прочих запасных напитков). */
+        boolean empty() {
+            return ingredients.isEmpty();
+        }
+    }
 
     /**
      * Жёлтая приписка в описании: «может стоит добавить в нее <drink>?</...>».
@@ -122,10 +268,12 @@ final class DrinkRecipes {
 
     private final Map<String, Drink> byId;
     private final List<Drink> ordered;
+    private final Map<String, BarrelRecipe> barrels;
 
-    private DrinkRecipes(Map<String, Drink> byId) {
+    private DrinkRecipes(Map<String, Drink> byId, Map<String, BarrelRecipe> barrels) {
         this.byId = Map.copyOf(byId);
         this.ordered = List.copyOf(byId.values());
+        this.barrels = Map.copyOf(barrels);
     }
 
     /** Текущий каталог напитков: его читают {@link Shaker} и {@link BambooBarrel}. */
@@ -166,6 +314,23 @@ final class DrinkRecipes {
             if (!drink.shaker()) drinks.add(drink);
         }
         return drinks;
+    }
+
+    /** Рецепт бочки для напитка; null — напиток в бочке не варится. */
+    BarrelRecipe barrelRecipe(String id) {
+        return id == null ? null : barrels.get(id);
+    }
+
+    /**
+     * Сколько этого ингредиента бочка принимает за один раз: столько, сколько его
+     * просит самый жадный рецепт. Больше класть некуда — всё равно не совпадёт.
+     */
+    int maxBarrelCount(BarrelIngredient ingredient) {
+        int max = 0;
+        for (BarrelRecipe recipe : barrels.values()) {
+            max = Math.max(max, recipe.needed(ingredient));
+        }
+        return Math.max(1, max);
     }
 
     /** Запасной напиток «муть» — то, что получается из непонятного набора. */
@@ -224,7 +389,27 @@ final class DrinkRecipes {
                 List.of(), List.of()));
         byId.put(Shaker.RECIPE_PIRATE_RUM, new Drink(Shaker.RECIPE_PIRATE_RUM, Shaker.NAME_PIRATE_RUM,
                 TextColor.color(0x8B3A14), "skull_poilo", null, null, Method.BARREL, List.of(), List.of()));
-        return new DrinkRecipes(byId);
+        Map<String, BarrelRecipe> barrels = new LinkedHashMap<>();
+        buckets(barrels, Shaker.RECIPE_PIRATE_RUM, Map.of(
+                BarrelIngredient.COAL, 1,
+                BarrelIngredient.SUGAR_CANE, 1,
+                BarrelIngredient.HOT_WATER_BOTTLE, 3));
+        // Вина: модели пока нет, поэтому бутылочка узнаётся по цвету.
+        wine(byId, barrels, "wine", "Вино", 0x7A1123, Map.of(
+                BarrelIngredient.LOW_SWEETIE_BERRY, 3,
+                BarrelIngredient.WATER_BOTTLE, 1));
+        wine(byId, barrels, "sweet_wine", "Сладкое вино", 0xB23A63, Map.of(
+                BarrelIngredient.LOW_SWEETIE_BERRY, 3,
+                BarrelIngredient.SUGAR, 1,
+                BarrelIngredient.WATER_BOTTLE, 1));
+        wine(byId, barrels, "white_wine", "Белое вино", 0xE4D9A0, Map.of(
+                BarrelIngredient.LOW_SWEETIE_BERRY, 3,
+                BarrelIngredient.BONE_MEAL, 1,
+                BarrelIngredient.WATER_BOTTLE, 1));
+        wine(byId, barrels, "bitter_wine", "Горькое вино", 0x3E0C18, Map.of(
+                BarrelIngredient.HARD_SWEETIE_BERRY, 3,
+                BarrelIngredient.WATER_BOTTLE, 1));
+        return new DrinkRecipes(byId, barrels);
     }
 
     /**
@@ -237,6 +422,7 @@ final class DrinkRecipes {
         ConfigurationSection section = yaml.getConfigurationSection(ROOT);
         if (section == null) throw new IllegalArgumentException("В recipe-poilo.yml нет раздела " + ROOT);
         Map<String, Drink> byId = new LinkedHashMap<>();
+        Map<String, BarrelRecipe> barrels = new LinkedHashMap<>();
         for (String rawId : section.getKeys(false)) {
             String id = ProfileText.clean(rawId);
             if (id.isEmpty()) continue;
@@ -250,7 +436,14 @@ final class DrinkRecipes {
             String description = section.getString(root + "description", "");
             Method method = parseMethod(section.getString(root + "method", "shaker"), id);
             Hint hint = readHint(section.getConfigurationSection(root + "hint"), id);
-            List<Shaker.IngredientKind> ingredients = readKinds(section.getStringList(root + "ingredients"), id);
+            BarrelRecipe barrel = readBarrelRecipe(section.getConfigurationSection(root + "ingredients"), id);
+            if (barrel != null && method != Method.BARREL) {
+                throw new IllegalArgumentException("Напиток " + id + ": ingredients записан как «предмет: сколько». "
+                        + "Так пишут только бочку (method: barrel), а у шейкера — списком");
+            }
+            List<Shaker.IngredientKind> ingredients = barrel == null
+                    ? readKinds(section.getStringList(root + "ingredients"), id)
+                    : List.of();
             List<Shaker.IngredientKind> additives = readKinds(section.getStringList(root + "additives"), id);
             Drink drink = new Drink(id, name, color, model,
                     description == null || description.isEmpty() ? null : description,
@@ -258,9 +451,10 @@ final class DrinkRecipes {
             if (byId.putIfAbsent(id, drink) != null) {
                 throw new IllegalArgumentException("Повторяется напиток " + id);
             }
+            if (barrel != null && !barrel.empty()) barrels.put(id, barrel);
         }
         if (byId.isEmpty()) throw new IllegalArgumentException("Список напитков пуст");
-        return new DrinkRecipes(byId);
+        return new DrinkRecipes(byId, barrels);
     }
 
     private static Method parseMethod(String raw, String id) {
@@ -291,6 +485,41 @@ final class DrinkRecipes {
             if (!kinds.contains(kind)) kinds.add(kind);
         }
         return kinds;
+    }
+
+    /** Рецепт бочки из раздела {@code ingredients}; null — там список (шейкер) или пусто. */
+    private static BarrelRecipe readBarrelRecipe(ConfigurationSection section, String id) {
+        if (section == null) return null;
+        Map<BarrelIngredient, Integer> counts = new EnumMap<>(BarrelIngredient.class);
+        for (String raw : section.getKeys(false)) {
+            BarrelIngredient ingredient = BarrelIngredient.of(raw);
+            if (ingredient == null) {
+                throw new IllegalArgumentException("Напиток " + id + ": бочка не знает ингредиент «" + raw + "». "
+                        + "Можно писать: " + BarrelIngredient.names());
+            }
+            int count = section.getInt(raw, 0);
+            if (count <= 0) {
+                throw new IllegalArgumentException("Напиток " + id + ": у ингредиента «" + raw
+                        + "» должно быть количество больше нуля");
+            }
+            counts.put(ingredient, count);
+        }
+        if (counts.isEmpty()) return null;
+        return new BarrelRecipe(counts);
+    }
+
+    /** Добавить вино в комплект: бутылочка без модели, рецепт бочки — из карты. */
+    private static void wine(Map<String, Drink> byId, Map<String, BarrelRecipe> barrels,
+                             String id, String name, int color, Map<BarrelIngredient, Integer> ingredients) {
+        byId.put(id, new Drink(id, name, TextColor.color(color), "", null, null, Method.BARREL,
+                List.of(), List.of()));
+        buckets(barrels, id, ingredients);
+    }
+
+    /** Положить рецепт бочки в карту — короткая запись для {@link #defaults()}. */
+    private static void buckets(Map<String, BarrelRecipe> barrels, String id,
+                                Map<BarrelIngredient, Integer> ingredients) {
+        barrels.put(id, new BarrelRecipe(new EnumMap<>(ingredients)));
     }
 
     /** Ингредиент по записи: {@code hot_water_bottle}, {@code hot-water-bottle} или {@code HOT_WATER_BOTTLE}. */

@@ -42,17 +42,21 @@ import java.util.Map;
 import java.util.Random;
 
 /**
- * Бамбуковая бочка для приготовления и выдержки «Пиратского рома» (3x3x3 мультблок по NBT-структуре bamboo-bo4ka):
+ * Бамбуковая бочка: в ней варят и выдерживают напитки (3x3x3 мультблок по NBT-структуре bamboo-bo4ka):
  * <ul>
  *   <li><b>Структура 3x3x3:</b> Состоит из обтёсанных бамбуковых блоков (stripped_bamboo_block) и бамбуковых ступеней (bamboo_stairs) с полой сердцевиной (air).</li>
  *   <li><b>Ориентация:</b> Поддерживается горизонтальное расположение вдоль оси X и вдоль оси Z.</li>
- *   <li><b>Ингредиенты:</b> 1 Уголь/Древесный уголь, 1 Сахарный тростник, 3 Бутылочки горячей воды.</li>
- *   <li><b>Вместимость:</b> Вмещает до 9 бутылок алкоголя (готового рома) для выдержки.</li>
+ *   <li><b>Что варится:</b> любой напиток с {@code method: barrel} из settings/recipe-poilo.yml.
+ *       Рецепт — это «предмет: сколько»: у рома тростник, уголь и три горячей воды; у вин —
+ *       помятые (или продавленные) ягоды и вода, а сладкому ещё сахар, белому — костная мука.</li>
+ *   <li><b>Вместимость:</b> Вмещает до 9 бутылочек напитка для выдержки.</li>
  *   <li><b>Добавление:</b> При добавлении предметов из бочки вылетают частицы WAX_OFF.</li>
- *   <li><b>Извлечение:</b> На Shift + ПКМ можно забирать ингредиенты из бочки (для сбора жидкости нужна пустая стеклянная бутылочка).</li>
- *   <li><b>Брожение:</b> 10 секунд (200 тиков) с визуальными эффектами, варит 3 бутылки рома.</li>
+ *   <li><b>Извлечение:</b> На Shift + ПКМ можно забрать из бочки один ингредиент обратно.</li>
+ *   <li><b>Брожение:</b> сколько тиков и сколько бутылочек — в data/napitki/napitki.yml
+ *       (у рома и вин по умолчанию 200 тиков и 3 бутылочки).</li>
  *   <li><b>Готовность:</b> После завершения брожения вся 3x3 поверхность бочки покрывается стекающими каплями воды (dripping_water / falling_water).</li>
- *   <li><b>Выдержка и качества:</b> Количество тиков для 1 года настраивается в settings/drinks.yml (по умолчанию 24000 = 1 майнкрафт-день). 5 ступеней качества, штрафы от переливаний, 3 глотка (хранилища).</li>
+ *   <li><b>Выдержка и качества:</b> Годы, ступени качества и их описания — тоже в
+ *       data/napitki/napitki.yml (по умолчанию 24000 тиков = 1 год), штрафы от переливаний, 3 глотка.</li>
  *   <li><b>Разрушение бочки:</b> Твёрдые ресурсы выпадают в центре, а жидкость разливается и не выпадает.</li>
  *   <li><b>Обратная связь:</b> Исключительно внутриигровая (звуки, партиклы, предметы) без лишнего чата.</li>
  * </ul>
@@ -61,6 +65,8 @@ public class BambooBarrel implements Listener {
 
     public static final NamespacedKey MODEL_PIRATE_RUM_KEY = new NamespacedKey("f8resurs", "skull_poilo");
     public static final NamespacedKey PIRATE_RUM_KEY = new NamespacedKey("adaptation", "pirate_rum");
+    /** Какой бочковый напиток в бутылочке: id из settings/recipe-poilo.yml. */
+    public static final NamespacedKey BARREL_DRINK_KEY = new NamespacedKey("adaptation", "barrel_drink");
     public static final NamespacedKey RUM_YEARS_KEY = new NamespacedKey("adaptation", "pirate_rum_years");
     public static final NamespacedKey RUM_TRANSFERS_KEY = new NamespacedKey("adaptation", "pirate_rum_transfers");
     public static final NamespacedKey RUM_CHARGES_KEY = new NamespacedKey("adaptation", "pirate_rum_charges");
@@ -123,10 +129,13 @@ public class BambooBarrel implements Listener {
         }
     }
 
+    /** Что сейчас в бочке: какие ингредиенты лежат и что из них варится. */
     public static final class BarrelState {
-        public int coalCount = 0;
-        public int caneCount = 0;
-        public int hotWaterCount = 0;
+        /** Ингредиенты в бочке: чего сколько лежит. */
+        public final Map<DrinkRecipes.BarrelIngredient, Integer> items =
+                new java.util.EnumMap<>(DrinkRecipes.BarrelIngredient.class);
+        /** id напитка из recipe-poilo.yml, когда закладка уже варится или настоялась. */
+        public String drink = null;
         public boolean brewing = false;
         public int brewingTicks = 0;
         public boolean ready = false;
@@ -135,38 +144,23 @@ public class BambooBarrel implements Listener {
         public int transfers = 0;
 
         public boolean isEmpty() {
-            return coalCount == 0 && caneCount == 0 && hotWaterCount == 0 && !brewing && !ready && bottlesCount == 0;
+            return items.isEmpty() && !brewing && !ready && bottlesCount == 0;
         }
     }
 
-    // ===== КАЧЕСТВА И ОФОРМЛЕНИЕ ПИРАТСКОГО РОМА =====
+    // ===== КАЧЕСТВА И ОФОРМЛЕНИЕ =====
+    //
+    // Лестница качества живёт в data/napitki/napitki.yml: у каждого бочкового напитка свои
+    // сроки, свои ступени и свои описания. Здесь только читаем её и считаем штрафы.
 
+    /** Ступени качества рома — для старых вызовов и тестов. */
     public static QualityTier getBaseQuality(int years) {
-        if (years <= 1) return QualityTier.TERRIBLE;
-        if (years <= 3) return QualityTier.STRANGE;
-        if (years <= 5) return QualityTier.GOOD;
-        if (years <= 9) return QualityTier.PERFECT;
-        if (years == 10) return QualityTier.FLAWLESS;
-        if (years <= 13) return QualityTier.GOOD;
-        return QualityTier.STRANGE;
+        return QualityTier.fromTier(BarrelDrinks.current().of(Shaker.RECIPE_PIRATE_RUM).tierFor(years));
     }
 
     public static QualityTier getQuality(int years, int transfers) {
-        QualityTier base = getBaseQuality(years);
-        int baseTier = base.tier();
-        int finalTier = baseTier;
-
-        if (transfers >= 2 && transfers <= 3) {
-            finalTier = Math.max(2, baseTier - 1);
-            if (baseTier == 1) finalTier = 1;
-        } else if (transfers >= 4 && transfers <= 5) {
-            finalTier = Math.max(2, baseTier - 2);
-            if (baseTier == 1) finalTier = 1;
-        } else if (transfers >= 6) {
-            finalTier = Math.min(baseTier, 2);
-        }
-
-        return QualityTier.fromTier(finalTier);
+        int tier = BarrelDrinks.tierAfterTransfers(getBaseQuality(years).tier(), transfers);
+        return QualityTier.fromTier(tier);
     }
 
     public static Component gradientText(String text, TextColor from, TextColor to) {
@@ -182,59 +176,56 @@ public class BambooBarrel implements Listener {
         return comp;
     }
 
+    /** Надпись ступени рома (цвет, жирность, подчёркивание) — из настроек напитка. */
     public static Component formatQualityName(QualityTier quality) {
-        return switch (quality) {
-            case TERRIBLE -> Component.text("Ужасное! ☠", NamedTextColor.RED).decoration(TextDecoration.ITALIC, false);
-            case STRANGE -> Component.text("Странное...", TextColor.color(0xFF, 0xA5, 0x00)).decoration(TextDecoration.ITALIC, false);
-            case GOOD -> Component.text("Хорошее ☺", NamedTextColor.YELLOW).decorate(TextDecoration.BOLD).decoration(TextDecoration.ITALIC, false);
-            case PERFECT -> Component.text("Идеальное! ☀", NamedTextColor.GREEN).decorate(TextDecoration.BOLD, TextDecoration.UNDERLINED).decoration(TextDecoration.ITALIC, false);
-            case FLAWLESS -> gradientText("БЕЗУПРЕЧНОЕ!!1", TextColor.color(0xFF, 0xFF, 0xFF), TextColor.color(0xFF, 0xFF, 0x55))
-                    .decorate(TextDecoration.BOLD, TextDecoration.UNDERLINED).decoration(TextDecoration.ITALIC, false);
-        };
+        return BarrelDrinks.current().of(Shaker.RECIPE_PIRATE_RUM).level(quality.tier()).format();
     }
 
     public static TextColor getQualityColor(QualityTier quality) {
-        return switch (quality) {
-            case TERRIBLE -> NamedTextColor.RED;
-            case STRANGE -> TextColor.color(0xFF, 0xA5, 0x00);
-            case GOOD -> NamedTextColor.YELLOW;
-            case PERFECT -> NamedTextColor.GREEN;
-            case FLAWLESS -> NamedTextColor.YELLOW;
-        };
+        return BarrelDrinks.current().of(Shaker.RECIPE_PIRATE_RUM).level(quality.tier()).color();
     }
 
     public static String getQualityDescription(QualityTier quality, int years) {
-        return switch (quality) {
-            case TERRIBLE -> "Молодой сивушный спирт. Обжигает горло.";
-            case STRANGE -> years >= 14 ? "Уже не ром, а жидкость со вкусом старой доски." : "Вкус еще только формируется...";
-            case GOOD -> years >= 11 ? "Передержали. Ром становится горьким и древесным" : "Добротный пиратский ром, пик для будней на корабле!";
-            case PERFECT -> "Ром идеален, вкус приятно чешет горло.";
-            case FLAWLESS -> "Теперь ты можешь называть себя настоящим пиратом!";
-        };
+        return BarrelDrinks.current().of(Shaker.RECIPE_PIRATE_RUM).description(years, quality.tier());
+    }
+
+    /**
+     * Описание напитка в подсказке бутылочки: качество, годы, переливания и текст.
+     *
+     * <p>Текст берётся из {@code data/napitki/napitki.yml} (описание ступени или года), а если
+     * у напитка в {@code settings/recipe-poilo.yml} заполнено {@code description} — оно
+     * добавляется отдельной строкой в конце. Так описания бочковых напитков правятся в
+     * recipe-poilo.yml, не трогая годы и ступени.
+     */
+    public static List<Component> buildDrinkLore(String drinkId, int years, int transfers) {
+        BarrelDrinks.Profile profile = BarrelDrinks.current().of(drinkId);
+        int tier = profile.tierAfterTransfers(years, transfers);
+        BarrelDrinks.Level level = profile.level(tier);
+        TextColor qColor = level.color();
+
+        List<Component> lore = new ArrayList<>(7);
+        lore.add(Component.text("----------------------", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        lore.add(Component.text("Качество: ", NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false)
+                .append(level.format()));
+        lore.add(Component.text("----------------------", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        lore.add(Component.text("Лет: ", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)
+                .append(Component.text(years, qColor).decoration(TextDecoration.ITALIC, false)));
+        lore.add(Component.text("Переливаний: ", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)
+                .append(Component.text(transfers, NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
+        String description = profile.description(years, tier);
+        if (description != null && !description.isEmpty()) {
+            lore.add(Component.text(description, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        }
+        DrinkRecipes.Drink recipe = DrinkRecipes.current().get(drinkId);
+        if (recipe != null && recipe.description() != null && !recipe.description().isEmpty()) {
+            lore.add(Component.text(recipe.description(), NamedTextColor.GRAY)
+                    .decoration(TextDecoration.ITALIC, false));
+        }
+        return lore;
     }
 
     public static List<Component> buildRumLore(int years, int transfers) {
-        QualityTier quality = getQuality(years, transfers);
-        TextColor qColor = getQualityColor(quality);
-
-        List<Component> lore = new ArrayList<>(6);
-        // 1 строка: светло-серый разделитель
-        lore.add(Component.text("----------------------", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-        // 2 строка: слово "Качество: " белым, само качество со стилем
-        lore.add(Component.text("Качество: ", NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false)
-                .append(formatQualityName(quality)));
-        // 3 строка: светло-серый разделитель
-        lore.add(Component.text("----------------------", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-        // 4 строка: "Лет:" темно-серым, цифра цветом качества
-        lore.add(Component.text("Лет: ", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)
-                .append(Component.text(years, qColor).decoration(TextDecoration.ITALIC, false)));
-        // 5 строка: "Переливаний:" темно-серым, цифра темно-серым
-        lore.add(Component.text("Переливаний: ", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)
-                .append(Component.text(transfers, NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
-        // 6 строка: описание качества
-        lore.add(Component.text(getQualityDescription(quality, years), NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
-
-        return lore;
+        return buildDrinkLore(Shaker.RECIPE_PIRATE_RUM, years, transfers);
     }
 
     // ===== ПРОВЕРКА МУЛЬТИБЛОКА (3x3x3 NBT СТРУКТУРА) =====
@@ -365,45 +356,74 @@ public class BambooBarrel implements Listener {
         return null;
     }
 
-    // ===== СОЗДАНИЕ И ПРОВЕРКА ПИРАТСКОГО РОМА =====
+    // ===== СОЗДАНИЕ И ПРОВЕРКА БУТЫЛОЧКИ ИЗ БОЧКИ =====
 
+    /** Пустая бутылочка рома: 0 лет, 1 переливание, 3 глотка (как раньше). */
     public static ItemStack createPirateRum() {
-        return createPirateRum(0, 1, 3);
+        return createBarrelDrink(Shaker.RECIPE_PIRATE_RUM, 0, 1, 3);
     }
 
     public static ItemStack createPirateRum(int years, int transfers, int charges) {
+        return createBarrelDrink(Shaker.RECIPE_PIRATE_RUM, years, transfers, charges);
+    }
+
+    /**
+     * Бутылочка напитка из бочки: название, модель, цвет и описание — из
+     * {@code settings/recipe-poilo.yml}, годы и качество — из {@code data/napitki/napitki.yml}.
+     *
+     * <p>Модели у нового напитка может не быть — тогда бутылочка остаётся обычным зельем
+     * своего цвета, и модель появится сама, как только её пропишут в файле.
+     */
+    public static ItemStack createBarrelDrink(String drinkId, int years, int transfers, int charges) {
         ItemStack potion = new ItemStack(Material.POTION);
         PotionMeta meta = (PotionMeta) potion.getItemMeta();
         if (meta != null) {
             meta.setBasePotionType(PotionType.WATER);
-            // Название, модель и цвет рома — из settings/recipe-poilo.yml (method: barrel).
-            DrinkRecipes.Drink recipe = DrinkRecipes.current().get(Shaker.RECIPE_PIRATE_RUM);
-            Component name = Component.text(recipe != null ? recipe.name() : Shaker.NAME_PIRATE_RUM,
-                    NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false);
-            meta.itemName(name);
-            meta.displayName(name);
-            if (recipe != null && !recipe.model().isEmpty()) {
+            DrinkRecipes.Drink recipe = DrinkRecipes.current().get(drinkId);
+            String name = recipe != null ? recipe.name()
+                    : (Shaker.RECIPE_PIRATE_RUM.equals(drinkId) ? Shaker.NAME_PIRATE_RUM : drinkId);
+            Component title = Component.text(name, NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false);
+            meta.itemName(title);
+            meta.displayName(title);
+            if (recipe != null && recipe.model() != null && !recipe.model().isEmpty()) {
                 meta.setItemModel(new NamespacedKey("f8resurs", recipe.model()));
-            } else {
+            } else if (Shaker.RECIPE_PIRATE_RUM.equals(drinkId)) {
                 meta.setItemModel(MODEL_PIRATE_RUM_KEY);
             }
             if (recipe != null) meta.setColor(Color.fromRGB(recipe.color().value()));
             else meta.setColor(Color.fromRGB(0x8B, 0x3A, 0x14));
-            meta.getPersistentDataContainer().set(PIRATE_RUM_KEY, PersistentDataType.BYTE, (byte) 1);
-            meta.getPersistentDataContainer().set(RUM_YEARS_KEY, PersistentDataType.INTEGER, years);
-            meta.getPersistentDataContainer().set(RUM_TRANSFERS_KEY, PersistentDataType.INTEGER, transfers);
-            meta.getPersistentDataContainer().set(RUM_CHARGES_KEY, PersistentDataType.INTEGER, Math.max(1, Math.min(3, charges)));
-            meta.getPersistentDataContainer().set(Shaker.DRINK_PDC_KEY, PersistentDataType.STRING, "pirate_rum");
-            meta.lore(buildRumLore(years, transfers));
+            var pdc = meta.getPersistentDataContainer();
+            pdc.set(BARREL_DRINK_KEY, PersistentDataType.STRING, drinkId);
+            if (Shaker.RECIPE_PIRATE_RUM.equals(drinkId)) {
+                pdc.set(PIRATE_RUM_KEY, PersistentDataType.BYTE, (byte) 1);
+            }
+            pdc.set(RUM_YEARS_KEY, PersistentDataType.INTEGER, years);
+            pdc.set(RUM_TRANSFERS_KEY, PersistentDataType.INTEGER, transfers);
+            pdc.set(RUM_CHARGES_KEY, PersistentDataType.INTEGER, Math.max(1, Math.min(3, charges)));
+            pdc.set(Shaker.DRINK_PDC_KEY, PersistentDataType.STRING, drinkId);
+            meta.lore(buildDrinkLore(drinkId, years, transfers));
             potion.setItemMeta(meta);
         }
         return potion;
     }
 
+    /** Это бутылочка из бочки (ром, вино и всё, что там настаивают). */
+    public static boolean isBarrelDrink(ItemStack item) {
+        return getBarrelDrinkId(item) != null;
+    }
+
+    /** Что за напиток в бутылочке; null — это не напиток из бочки. */
+    public static String getBarrelDrinkId(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return null;
+        var pdc = item.getItemMeta().getPersistentDataContainer();
+        String id = pdc.get(BARREL_DRINK_KEY, PersistentDataType.STRING);
+        if (id != null && !id.isEmpty()) return id;
+        Byte legacy = pdc.get(PIRATE_RUM_KEY, PersistentDataType.BYTE);
+        return legacy != null && legacy == (byte) 1 ? Shaker.RECIPE_PIRATE_RUM : null;
+    }
+
     public static boolean isPirateRum(ItemStack item) {
-        if (item == null || !item.hasItemMeta()) return false;
-        Byte b = item.getItemMeta().getPersistentDataContainer().get(PIRATE_RUM_KEY, PersistentDataType.BYTE);
-        return b != null && b == (byte) 1;
+        return Shaker.RECIPE_PIRATE_RUM.equals(getBarrelDrinkId(item));
     }
 
     public static int getRumYears(ItemStack item) {
@@ -467,13 +487,14 @@ public class BambooBarrel implements Listener {
                 if (state.brewingTicks <= 0) {
                     state.brewing = false;
                     state.ready = true;
-                    state.bottlesCount = Math.min(MAX_BOTTLES, state.bottlesCount + 3);
+                    state.bottlesCount = Math.min(MAX_BOTTLES,
+                            state.bottlesCount + BarrelDrinks.current().of(state.drink).bottles());
                     state.ageTicks = 0L;
                     world.playSound(centerLoc, Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.BLOCKS, 0.8F, 1.2F);
                     world.playSound(centerLoc, Sound.BLOCK_CONDUIT_ACTIVATE, SoundCategory.BLOCKS, 0.5F, 1.5F);
                 }
             } else if (state.ready) {
-                // Настаивание рома: время выдержки тикает
+                // Настаивание: время выдержки тикает
                 state.ageTicks += 2L;
 
                 // Покрывается каплями воды по всей внешней поверхности структуры 3x3
@@ -517,70 +538,27 @@ public class BambooBarrel implements Listener {
 
         BarrelState state = barrels.computeIfAbsent(centerLoc, k -> new BarrelState());
 
-        // 1. Shift + ПКМ: Забор предметов/ингредиентов из бочки
+        // 1. Shift + ПКМ: забрать из бочки один ингредиент. Готовый напиток забирают
+        //    пустой бутылочкой (пункт 3): пока он настаивается, трогать нечего.
         if (player.isSneaking()) {
             if (!state.brewing && !state.ready) {
-                // Забор жидкости: требуется пустая бутылочка
-                if (held != null && held.getType() == Material.GLASS_BOTTLE && state.hotWaterCount > 0) {
-                    event.setCancelled(true);
-                    consumeOne(player, hand, held);
-                    ItemStack hotWater = Shaker.createHotWaterBottle();
-                    giveOrDrop(player, hotWater);
-                    state.hotWaterCount--;
-                    player.playSound(centerLoc, Sound.ITEM_BOTTLE_FILL, SoundCategory.BLOCKS, 0.8F, 1.0F);
-                    world.spawnParticle(Particle.SPLASH, block.getLocation().add(0.5, 0.8, 0.5), 4, 0.1, 0.1, 0.1, 0.02);
-                    if (state.isEmpty()) {
-                        barrels.remove(centerLoc);
-                    }
-                    return;
-                }
-
-                // Забор твёрдых ресурсов (сахарный тростник)
-                if (state.caneCount > 0) {
-                    event.setCancelled(true);
-                    state.caneCount--;
-                    giveOrDrop(player, new ItemStack(Material.SUGAR_CANE));
-                    player.playSound(centerLoc, Sound.ITEM_BUNDLE_REMOVE_ONE, SoundCategory.BLOCKS, 0.7F, 1.1F);
-                    world.spawnParticle(Particle.WAX_OFF, block.getLocation().add(0.5, 0.8, 0.5), 3, 0.1, 0.1, 0.1, 0.02);
-                    if (state.isEmpty()) {
-                        barrels.remove(centerLoc);
-                    }
-                    return;
-                }
-
-                // Забор твёрдых ресурсов (уголь)
-                if (state.coalCount > 0) {
-                    event.setCancelled(true);
-                    state.coalCount--;
-                    giveOrDrop(player, new ItemStack(Material.COAL));
-                    player.playSound(centerLoc, Sound.ITEM_BUNDLE_REMOVE_ONE, SoundCategory.BLOCKS, 0.7F, 1.1F);
-                    world.spawnParticle(Particle.WAX_OFF, block.getLocation().add(0.5, 0.8, 0.5), 3, 0.1, 0.1, 0.1, 0.02);
-                    if (state.isEmpty()) {
-                        barrels.remove(centerLoc);
-                    }
-                    return;
-                }
-
-                // Если в бочке только жидкость, а у игрока нет пустой бутылочки
-                if (state.hotWaterCount > 0) {
-                    event.setCancelled(true);
-                    player.playSound(centerLoc, Sound.BLOCK_WATER_AMBIENT, SoundCategory.BLOCKS, 0.4F, 1.5F);
-                    return;
+                takeIngredient(player, state, centerLoc, block, world);
+                if (state.isEmpty()) {
+                    barrels.remove(centerLoc);
                 }
             }
             return;
         }
 
-        // 2. Наливание готового пиратского рома обратно в бочку (до 9 бутылок)
-        if (isPirateRum(held)) {
+        // 2. Перелить готовый напиток обратно в бочку (только полная бутылочка, 3 глотка).
+        if (isBarrelDrink(held)) {
             int charges = getRumCharges(held);
-            // Если меньше полного хранилища (3 глотка), вылить нельзя
             if (charges < 3) {
                 return;
             }
-
             if (state.isEmpty() || (state.ready && state.bottlesCount < MAX_BOTTLES)) {
                 event.setCancelled(true);
+                String drinkId = getBarrelDrinkId(held);
                 int years = getRumYears(held);
                 int transfers = getRumTransfers(held);
 
@@ -594,13 +572,12 @@ public class BambooBarrel implements Listener {
                 }
 
                 if (state.isEmpty()) {
+                    state.items.clear();
+                    state.drink = drinkId;
                     state.ready = true;
                     state.brewing = false;
-                    state.coalCount = 0;
-                    state.caneCount = 0;
-                    state.hotWaterCount = 0;
                     state.bottlesCount = 1;
-                    state.ageTicks = (long) years * getTicksPerYear();
+                    state.ageTicks = years * BarrelDrinks.current().of(drinkId).ticksPerYear();
                     state.transfers = transfers;
                 } else {
                     state.bottlesCount++;
@@ -608,31 +585,32 @@ public class BambooBarrel implements Listener {
 
                 spawnAddParticles(world, block, centerLoc);
                 player.playSound(centerLoc, Sound.ITEM_BOTTLE_EMPTY, SoundCategory.BLOCKS, 0.8F, 1.0F);
-                return;
             }
             return;
         }
 
-        // 3. Забор готового рома пустой бутылочкой (обычный ПКМ)
+        // 3. Забор готового напитка пустой бутылочкой (обычный ПКМ).
         if (state.ready && state.bottlesCount > 0) {
             if (held != null && held.getType() == Material.GLASS_BOTTLE) {
                 event.setCancelled(true);
 
-                int years = (int) (state.ageTicks / getTicksPerYear());
+                long ticksPerYear = BarrelDrinks.current().of(state.drink).ticksPerYear();
+                int years = (int) (state.ageTicks / Math.max(1L, ticksPerYear));
                 int transfers = state.transfers + 1;
-                ItemStack rum = createPirateRum(years, transfers, 3);
+                ItemStack bottle = createBarrelDrink(state.drink, years, transfers, 3);
 
                 if (held.getAmount() > 1) {
                     held.setAmount(held.getAmount() - 1);
                     setHandItem(player, hand, held);
-                    giveOrDrop(player, rum);
+                    giveOrDrop(player, bottle);
                 } else {
-                    setHandItem(player, hand, rum);
+                    setHandItem(player, hand, bottle);
                 }
 
                 state.bottlesCount--;
                 if (state.bottlesCount <= 0) {
                     state.ready = false;
+                    state.drink = null;
                     state.ageTicks = 0L;
                     state.transfers = 0;
                     if (state.isEmpty()) {
@@ -641,7 +619,6 @@ public class BambooBarrel implements Listener {
                 }
 
                 player.playSound(centerLoc, Sound.ITEM_BOTTLE_FILL, SoundCategory.BLOCKS, 0.8F, 1.0F);
-                return;
             }
             return;
         }
@@ -652,50 +629,69 @@ public class BambooBarrel implements Listener {
 
         if (held == null || held.getType() == Material.AIR) return;
 
-        // 4. Добавление угля (требуется 1 шт.)
-        if (held.getType() == Material.COAL || held.getType() == Material.CHARCOAL) {
-            if (state.coalCount < 1) {
-                event.setCancelled(true);
-                consumeOne(player, hand, held);
-                state.coalCount++;
-                spawnAddParticles(world, block, centerLoc);
-                player.playSound(centerLoc, Sound.ITEM_BUNDLE_INSERT, SoundCategory.BLOCKS, 0.7F, 1.0F);
-                checkStartBrewing(centerLoc, state);
+        // 4. Положить ингредиент: уголь, тростник, вода, ягоды, сахар, костная мука.
+        //    Сколько чего бочка принимает, решают рецепты в settings/recipe-poilo.yml.
+        DrinkRecipes.BarrelIngredient ingredient = DrinkRecipes.BarrelIngredient.of(held);
+        if (ingredient == null) return;
+
+        int max = DrinkRecipes.current().maxBarrelCount(ingredient);
+        if (state.items.getOrDefault(ingredient, 0) >= max) return;
+
+        event.setCancelled(true);
+        if (ingredient == DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE
+                || ingredient == DrinkRecipes.BarrelIngredient.WATER_BOTTLE) {
+            ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
+            if (held.getAmount() > 1) {
+                held.setAmount(held.getAmount() - 1);
+                setHandItem(player, hand, held);
+                giveOrDrop(player, emptyBottle);
+            } else {
+                setHandItem(player, hand, emptyBottle);
+            }
+            player.playSound(centerLoc, Sound.ITEM_BOTTLE_EMPTY, SoundCategory.BLOCKS, 0.7F, 1.0F);
+        } else {
+            consumeOne(player, hand, held);
+            player.playSound(centerLoc, Sound.ITEM_BUNDLE_INSERT, SoundCategory.BLOCKS, 0.7F, 1.0F);
+        }
+        state.items.merge(ingredient, 1, Integer::sum);
+        spawnAddParticles(world, block, centerLoc);
+        checkStartBrewing(centerLoc, state);
+    }
+
+    /** Забрать из бочки один ингредиент — тот, что лежит первым по списку. */
+    private void takeIngredient(Player player, BarrelState state, Location centerLoc,
+                                Block block, World world) {
+        DrinkRecipes.BarrelIngredient ingredient = null;
+        for (Map.Entry<DrinkRecipes.BarrelIngredient, Integer> entry : state.items.entrySet()) {
+            if (entry.getValue() > 0) {
+                ingredient = entry.getKey();
+                break;
+            }
+        }
+        if (ingredient == null) {
+            // В бочке только жидкость — пусть игрок услышит, что там что-то есть.
+            if (state.items.isEmpty()) {
+                player.playSound(centerLoc, Sound.BLOCK_WATER_AMBIENT, SoundCategory.BLOCKS, 0.4F, 1.5F);
             }
             return;
         }
 
-        // 5. Добавление сахарного тростника (требуется 1 шт.)
-        if (held.getType() == Material.SUGAR_CANE) {
-            if (state.caneCount < 1) {
-                event.setCancelled(true);
-                consumeOne(player, hand, held);
-                state.caneCount++;
-                spawnAddParticles(world, block, centerLoc);
-                player.playSound(centerLoc, Sound.ITEM_BUNDLE_INSERT, SoundCategory.BLOCKS, 0.7F, 1.0F);
-                checkStartBrewing(centerLoc, state);
-            }
-            return;
+        int left = state.items.get(ingredient) - 1;
+        if (left > 0) {
+            state.items.put(ingredient, left);
+        } else {
+            state.items.remove(ingredient);
         }
+        giveOrDrop(player, ingredient.create());
 
-        // 6. Добавление бутылочки горячей воды (требуется 3 шт.)
-        if (Shaker.isHotWaterBottle(held)) {
-            if (state.hotWaterCount < 3) {
-                event.setCancelled(true);
-                ItemStack emptyBottle = new ItemStack(Material.GLASS_BOTTLE);
-                if (held.getAmount() > 1) {
-                    held.setAmount(held.getAmount() - 1);
-                    setHandItem(player, hand, held);
-                    giveOrDrop(player, emptyBottle);
-                } else {
-                    setHandItem(player, hand, emptyBottle);
-                }
-                state.hotWaterCount++;
-                spawnAddParticles(world, block, centerLoc);
-                player.playSound(centerLoc, Sound.ITEM_BOTTLE_EMPTY, SoundCategory.BLOCKS, 0.7F, 1.0F);
-                checkStartBrewing(centerLoc, state);
-            }
-            return;
+        Location clickPos = block.getLocation().add(0.5, 0.8, 0.5);
+        if (ingredient == DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE
+                || ingredient == DrinkRecipes.BarrelIngredient.WATER_BOTTLE) {
+            player.playSound(centerLoc, Sound.ITEM_BOTTLE_FILL, SoundCategory.BLOCKS, 0.8F, 1.0F);
+            world.spawnParticle(Particle.SPLASH, clickPos, 4, 0.1, 0.1, 0.1, 0.02);
+        } else {
+            player.playSound(centerLoc, Sound.ITEM_BUNDLE_REMOVE_ONE, SoundCategory.BLOCKS, 0.7F, 1.1F);
+            world.spawnParticle(Particle.WAX_OFF, clickPos, 3, 0.1, 0.1, 0.1, 0.02);
         }
     }
 
@@ -707,22 +703,34 @@ public class BambooBarrel implements Listener {
         world.spawnParticle(Particle.WAX_OFF, topCenter, 5, 0.3, 0.1, 0.3, 0.05);
     }
 
+    /**
+     * Начать варку, если в бочке лежит ровно то, что просит один из напитков.
+     *
+     * <p>Совпадение точное: лишний предмет останавливает варку. Поэтому сладкое вино
+     * получится и тогда, когда сахар положили раньше ягод, — но не превратится в обычное
+     * вино, если сахар лежит рядом.
+     */
     private void checkStartBrewing(Location centerLoc, BarrelState state) {
-        if (!state.brewing && !state.ready) {
-            if (state.coalCount >= 1 && state.caneCount >= 1 && state.hotWaterCount >= 3) {
-                state.coalCount = 0;
-                state.caneCount = 0;
-                state.hotWaterCount = 0;
-                state.brewing = true;
-                state.brewingTicks = BREWING_TIME_TICKS;
-                state.ageTicks = 0L;
-                state.transfers = 0;
+        if (state.brewing || state.ready) return;
 
-                World world = centerLoc.getWorld();
-                if (world != null) {
-                    world.playSound(centerLoc, Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.BLOCKS, 0.8F, 0.9F);
-                }
+        DrinkRecipes recipes = DrinkRecipes.current();
+        for (DrinkRecipes.Drink drink : recipes.barrelDrinks()) {
+            DrinkRecipes.BarrelRecipe recipe = recipes.barrelRecipe(drink.id());
+            if (recipe == null || !recipe.matches(state.items)) continue;
+
+            BarrelDrinks.Profile profile = BarrelDrinks.current().of(drink.id());
+            state.items.clear();
+            state.drink = drink.id();
+            state.brewing = true;
+            state.brewingTicks = profile.brewTicks();
+            state.ageTicks = 0L;
+            state.transfers = 0;
+
+            World world = centerLoc.getWorld();
+            if (world != null) {
+                world.playSound(centerLoc, Sound.BLOCK_BREWING_STAND_BREW, SoundCategory.BLOCKS, 0.8F, 0.9F);
             }
+            return;
         }
     }
 
@@ -731,39 +739,40 @@ public class BambooBarrel implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerItemConsume(PlayerItemConsumeEvent event) {
         ItemStack item = event.getItem();
-        if (isPirateRum(item)) {
-            Player player = event.getPlayer();
-            EquipmentSlot hand = event.getHand();
-            if (hand == null) hand = EquipmentSlot.HAND;
-            EquipmentSlot finalHand = hand;
+        if (!isBarrelDrink(item)) return;
 
-            player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_BURP, SoundCategory.PLAYERS, 0.8F, 0.9F);
+        String drinkId = getBarrelDrinkId(item);
+        Player player = event.getPlayer();
+        EquipmentSlot hand = event.getHand();
+        if (hand == null) hand = EquipmentSlot.HAND;
+        EquipmentSlot finalHand = hand;
 
-            int charges = getRumCharges(item);
-            int years = getRumYears(item);
-            int transfers = getRumTransfers(item);
+        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_BURP, SoundCategory.PLAYERS, 0.8F, 0.9F);
 
-            if (charges > 1 && plugin != null) {
-                ItemStack remainingRum = createPirateRum(years, transfers, charges - 1);
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    ItemStack inHand = finalHand == EquipmentSlot.OFF_HAND
-                            ? player.getInventory().getItemInOffHand()
-                            : player.getInventory().getItemInMainHand();
-                    if (inHand != null && inHand.getType() == Material.GLASS_BOTTLE) {
-                        if (inHand.getAmount() > 1) {
-                            inHand.setAmount(inHand.getAmount() - 1);
-                            if (finalHand == EquipmentSlot.OFF_HAND) player.getInventory().setItemInOffHand(inHand);
-                            else player.getInventory().setItemInMainHand(inHand);
-                            giveOrDrop(player, remainingRum);
-                        } else {
-                            if (finalHand == EquipmentSlot.OFF_HAND) player.getInventory().setItemInOffHand(remainingRum);
-                            else player.getInventory().setItemInMainHand(remainingRum);
-                        }
+        int charges = getRumCharges(item);
+        int years = getRumYears(item);
+        int transfers = getRumTransfers(item);
+
+        if (charges > 1 && plugin != null) {
+            ItemStack remaining = createBarrelDrink(drinkId, years, transfers, charges - 1);
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                ItemStack inHand = finalHand == EquipmentSlot.OFF_HAND
+                        ? player.getInventory().getItemInOffHand()
+                        : player.getInventory().getItemInMainHand();
+                if (inHand != null && inHand.getType() == Material.GLASS_BOTTLE) {
+                    if (inHand.getAmount() > 1) {
+                        inHand.setAmount(inHand.getAmount() - 1);
+                        if (finalHand == EquipmentSlot.OFF_HAND) player.getInventory().setItemInOffHand(inHand);
+                        else player.getInventory().setItemInMainHand(inHand);
+                        giveOrDrop(player, remaining);
                     } else {
-                        giveOrDrop(player, remainingRum);
+                        if (finalHand == EquipmentSlot.OFF_HAND) player.getInventory().setItemInOffHand(remaining);
+                        else player.getInventory().setItemInMainHand(remaining);
                     }
-                });
-            }
+                } else {
+                    giveOrDrop(player, remaining);
+                }
+            });
         }
     }
 
@@ -813,33 +822,35 @@ public class BambooBarrel implements Listener {
         Location dropLoc = loc.clone().add(0.5, 0.5, 0.5);
 
         if (state.ready) {
-            // Готовый ром (жидкость) разливается и не выпадает в виде предмета
+            // Готовый напиток (жидкость) разливается и не выпадает в виде предмета
             world.spawnParticle(Particle.SPLASH, dropLoc, 25, 0.6, 0.5, 0.6, 0.1);
             world.playSound(dropLoc, Sound.ITEM_BOTTLE_EMPTY, SoundCategory.BLOCKS, 0.8F, 0.9F);
             return;
         }
 
         if (state.brewing) {
-            // Твёрдые ресурсы выпадают в центре, а варящаяся жидкость разливается
-            world.dropItemNaturally(dropLoc, new ItemStack(Material.COAL));
-            world.dropItemNaturally(dropLoc, new ItemStack(Material.SUGAR_CANE));
+            // Твёрдые ресурсы уже ушли в закладку, а варящаяся жидкость разливается
             world.spawnParticle(Particle.SPLASH, dropLoc, 20, 0.5, 0.5, 0.5, 0.1);
             world.playSound(dropLoc, Sound.BLOCK_WATER_AMBIENT, SoundCategory.BLOCKS, 0.8F, 1.0F);
             return;
         }
 
-        // Твёрдые ресурсы выпадают в центре
-        if (state.coalCount > 0) {
-            world.dropItemNaturally(dropLoc, new ItemStack(Material.COAL, state.coalCount));
+        // Твёрдые ресурсы выпадают в центре, жидкость разливается
+        for (Map.Entry<DrinkRecipes.BarrelIngredient, Integer> entry : state.items.entrySet()) {
+            DrinkRecipes.BarrelIngredient ingredient = entry.getKey();
+            int count = entry.getValue();
+            if (count <= 0) continue;
+            if (ingredient == DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE
+                    || ingredient == DrinkRecipes.BarrelIngredient.WATER_BOTTLE) {
+                world.spawnParticle(Particle.SPLASH, dropLoc, 10 * count, 0.4, 0.4, 0.4, 0.1);
+                world.playSound(dropLoc, Sound.BLOCK_WATER_AMBIENT, SoundCategory.BLOCKS, 0.6F, 1.2F);
+                continue;
+            }
+            ItemStack stack = ingredient.create();
+            stack.setAmount(count);
+            world.dropItemNaturally(dropLoc, stack);
         }
-        if (state.caneCount > 0) {
-            world.dropItemNaturally(dropLoc, new ItemStack(Material.SUGAR_CANE, state.caneCount));
-        }
-        // Жидкость (горячая вода) разливается и не выпадает
-        if (state.hotWaterCount > 0) {
-            world.spawnParticle(Particle.SPLASH, dropLoc, 10 * state.hotWaterCount, 0.4, 0.4, 0.4, 0.1);
-            world.playSound(dropLoc, Sound.BLOCK_WATER_AMBIENT, SoundCategory.BLOCKS, 0.6F, 1.2F);
-        }
+        state.items.clear();
     }
 
     private static void consumeOne(Player player, EquipmentSlot hand, ItemStack item) {
