@@ -266,6 +266,15 @@ final class BarrelDrinksTest {
             assertEquals(5, wine.drunkFor(5), id);
             assertTrue(wine.drunkFor(5) < rum.drunkFor(5), "вино слабее рома того же качества");
         }
+
+        // Пиво — самое слабое: целая бутылка уносит меньше десяти единиц.
+        BarrelDrinks.Profile beer = shipped.of("beer");
+        assertEquals(1, beer.drunkFor(1));
+        assertEquals(3, beer.drunkFor(5), "даже безупречное пиво слабее худшего рома");
+        assertEquals(4, beer.bottles(), "пиво разливается по четыре бутылочки");
+        assertEquals(15, beer.brewTicks() / 20, "15 секунд брожения");
+        assertEquals(5, beer.tierFor(5), "пик пива — на пятом году");
+        assertEquals(3, beer.tierFor(6), "перестоявшее пиво выдыхается");
     }
 
     @Test
@@ -276,6 +285,9 @@ final class BarrelDrinksTest {
         assertEquals(8, defaults.of(Shaker.RECIPE_PIRATE_RUM).drunkFor(5));
         assertEquals(2, defaults.of("wine").drunkFor(1));
         assertEquals(5, defaults.of("wine").drunkFor(5));
+        // Даже без файла пиво остаётся слабым: 1…3 единицы за глоток.
+        assertEquals(1, defaults.of("beer").drunkFor(1));
+        assertEquals(3, defaults.of("beer").drunkFor(5));
     }
 
     @Test

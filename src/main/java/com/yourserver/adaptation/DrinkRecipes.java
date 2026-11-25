@@ -409,6 +409,10 @@ final class DrinkRecipes {
         wine(byId, barrels, "bitter_wine", "Горькое вино", 0x3E0C18, Map.of(
                 BarrelIngredient.HARD_SWEETIE_BERRY, 3,
                 BarrelIngredient.WATER_BOTTLE, 1));
+        // Пиво: «солод» у нас — сахарный тростник, плюс вода. Пьянит слабо, зато пьётся долго.
+        wine(byId, barrels, "beer", "Пиво", 0xC68B2E, Map.of(
+                BarrelIngredient.SUGAR_CANE, 3,
+                BarrelIngredient.WATER_BOTTLE, 2));
         return new DrinkRecipes(byId, barrels);
     }
 

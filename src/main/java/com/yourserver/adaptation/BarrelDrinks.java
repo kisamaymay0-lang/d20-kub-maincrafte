@@ -151,6 +151,9 @@ final class BarrelDrinks {
     /** Вино: те же ступени, но единиц меньше. */
     static final Map<Integer, Integer> DEFAULT_WINE_DRUNK = Map.of(1, 2, 2, 3, 3, 3, 4, 4, 5, 5);
 
+    /** Пиво: слабее всех, целая бутылка — это «навеселе», а не отключка. */
+    static final Map<Integer, Integer> DEFAULT_BEER_DRUNK = Map.of(1, 1, 2, 1, 3, 2, 4, 2, 5, 3);
+
     /** Что читать, пока файл не загружен. */
     private static volatile BarrelDrinks current = defaults();
 
@@ -205,6 +208,8 @@ final class BarrelDrinks {
         drinks.put("sweet_wine", base.withDrunk(DEFAULT_WINE_DRUNK));
         drinks.put("white_wine", base.withDrunk(DEFAULT_WINE_DRUNK));
         drinks.put("bitter_wine", base.withDrunk(DEFAULT_WINE_DRUNK));
+        // Даже если в файле про пиво ничего нет — оно всё равно слабое, а не как ром.
+        drinks.put("beer", base.withDrunk(DEFAULT_BEER_DRUNK));
         return new BarrelDrinks(base, drinks);
     }
 

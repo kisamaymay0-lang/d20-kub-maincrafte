@@ -33,9 +33,9 @@ final class DrinkRecipesTest {
     void поставляемыйФайлСовпадаетСоСтарымиНапитками() throws Exception {
         DrinkRecipes shipped = DrinkRecipes.load(Path.of("src/main/resources/settings/recipe-poilo.yml"));
 
-        assertEquals(10, shipped.size(), "пять напитков шейкера, ром и четыре вина");
+        assertEquals(11, shipped.size(), "пять напитков шейкера, ром, четыре вина и пиво");
         assertEquals(4, shipped.shakerDrinks().size(), "муть — запасной, а не рецепт");
-        assertEquals(5, shipped.barrelDrinks().size(), "в бочке ром и четыре вина");
+        assertEquals(6, shipped.barrelDrinks().size(), "в бочке ром, четыре вина и пиво");
 
         assertEquals("Медовуха?", shipped.get(Shaker.RECIPE_MEAD).name());
         assertEquals("Матча-чай", shipped.get(Shaker.RECIPE_MATCHA_TEA).name());
@@ -63,6 +63,9 @@ final class DrinkRecipesTest {
         assertEquals("Сладкое вино", shipped.get("sweet_wine").name());
         assertEquals("Белое вино", shipped.get("white_wine").name());
         assertEquals("Горькое вино", shipped.get("bitter_wine").name());
+        assertEquals("Пиво", shipped.get("beer").name());
+        assertEquals("#C68B2E", shipped.get("beer").color().asHexString());
+        assertEquals(DrinkRecipes.Method.BARREL, shipped.get("beer").method(), "пиво — бочковый напиток");
         assertEquals("", shipped.get("wine").model(), "модели у вина пока нет");
         assertEquals(DrinkRecipes.Method.BARREL, shipped.get("wine").method());
         assertEquals("#EBAF28", shipped.get(Shaker.RECIPE_MEAD).color().asHexString());
@@ -282,6 +285,9 @@ final class DrinkRecipesTest {
         assertEquals(1, shipped.barrelRecipe("sweet_wine").needed(DrinkRecipes.BarrelIngredient.SUGAR));
         assertEquals(1, shipped.barrelRecipe("white_wine").needed(DrinkRecipes.BarrelIngredient.BONE_MEAL));
         assertEquals(3, shipped.barrelRecipe("bitter_wine").needed(DrinkRecipes.BarrelIngredient.HARD_SWEETIE_BERRY));
+        assertEquals(5, shipped.barrelRecipe("beer").total(), "три тростника и две воды");
+        assertEquals(3, shipped.barrelRecipe("beer").needed(DrinkRecipes.BarrelIngredient.SUGAR_CANE));
+        assertEquals(2, shipped.barrelRecipe("beer").needed(DrinkRecipes.BarrelIngredient.WATER_BOTTLE));
         assertNull(shipped.barrelRecipe(Shaker.RECIPE_MEAD), "медовуха не бочковая");
     }
 
