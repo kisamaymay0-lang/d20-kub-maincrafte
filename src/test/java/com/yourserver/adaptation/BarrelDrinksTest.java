@@ -147,14 +147,15 @@ final class BarrelDrinksTest {
 
             List<Component> wine = BambooBarrel.buildDrinkLore("wine", 0, 1);
             PlainTextComponentSerializer plain = PlainTextComponentSerializer.plainText();
-            assertEquals(6, wine.size(), "пять строк и описание-заглушка");
+            assertEquals(7, wine.size(), "пять строк, опьянение и описание-заглушка");
             assertTrue(plain.serialize(wine.get(1)).contains("Ужасное! ☠"));
             assertEquals("Лет: 0", plain.serialize(wine.get(3)));
-            assertEquals("—", plain.serialize(wine.get(5)));
+            assertEquals("Опьянение: +2 за глоток", plain.serialize(wine.get(5)), "вино слабее рома");
+            assertEquals("—", plain.serialize(wine.get(6)));
 
             // У рома описание своё — прочерк его не задел.
             List<Component> rum = BambooBarrel.buildDrinkLore(Shaker.RECIPE_PIRATE_RUM, 0, 1);
-            assertEquals("Молодой сивушный спирт. Обжигает горло.", plain.serialize(rum.get(5)));
+            assertEquals("Молодой сивушный спирт. Обжигает горло.", plain.serialize(rum.get(6)));
         } finally {
             BarrelDrinks.install(previous);
         }
@@ -188,8 +189,8 @@ final class BarrelDrinksTest {
 
             List<Component> withText = BambooBarrel.buildDrinkLore(Shaker.RECIPE_PIRATE_RUM, 3, 1);
             PlainTextComponentSerializer plain = PlainTextComponentSerializer.plainText();
-            assertEquals(7, withText.size(), "описание напитка — отдельная строка в конце");
-            assertEquals("Пахнет палубой и приключениями.", plain.serialize(withText.get(6)));
+            assertEquals(8, withText.size(), "описание напитка — отдельная строка в конце");
+            assertEquals("Пахнет палубой и приключениями.", plain.serialize(withText.get(7)));
         } finally {
             DrinkRecipes.install(previousRecipes);
             BarrelDrinks.install(previous);
@@ -243,5 +244,63 @@ final class BarrelDrinksTest {
                       tier: 1
                 """));
         assertNotNull(badTicks.getMessage());
+    }
+
+    @Test
+    void силаОпьяненияПоКачествам() throws Exception {
+        BarrelDrinks shipped = BarrelDrinks.load(Path.of("src/main/resources/data/napitki/napitki.yml"));
+
+        BarrelDrinks.Profile rum = shipped.of(Shaker.RECIPE_PIRATE_RUM);
+        assertEquals(4, rum.drunkFor(1), "ужасный ром");
+        assertEquals(5, rum.drunkFor(2));
+        assertEquals(6, rum.drunkFor(3));
+        assertEquals(7, rum.drunkFor(4));
+        assertEquals(8, rum.drunkFor(5), "безупречный ром крепче всего");
+
+        for (String id : List.of("wine", "sweet_wine", "white_wine", "bitter_wine")) {
+            BarrelDrinks.Profile wine = shipped.of(id);
+            assertEquals(2, wine.drunkFor(1), id);
+            assertEquals(3, wine.drunkFor(2), id);
+            assertEquals(3, wine.drunkFor(3), id);
+            assertEquals(4, wine.drunkFor(4), id);
+            assertEquals(5, wine.drunkFor(5), id);
+            assertTrue(wine.drunkFor(5) < rum.drunkFor(5), "вино слабее рома того же качества");
+        }
+    }
+
+    @Test
+    void безФайлаСилаОпьяненияТожеЕсть() {
+        BarrelDrinks defaults = BarrelDrinks.defaults();
+
+        assertEquals(4, defaults.of(Shaker.RECIPE_PIRATE_RUM).drunkFor(1));
+        assertEquals(8, defaults.of(Shaker.RECIPE_PIRATE_RUM).drunkFor(5));
+        assertEquals(2, defaults.of("wine").drunkFor(1));
+        assertEquals(5, defaults.of("wine").drunkFor(5));
+    }
+
+    @Test
+    void качествоIZeroЕдиницНеПьянит() throws Exception {
+        BarrelDrinks settings = load("""
+                default:
+                  quality:
+                    - tier: 1
+                      name: 'Плохо'
+                    - tier: 2
+                      name: 'Хорошо'
+                  years:
+                    - up-to-years: 2
+                      tier: 1
+                    - up-to-years: '*'
+                      tier: 2
+                  drunk:
+                    1: 3
+                drinks:
+                  kvass:
+                    drunk:
+                      2: 0
+                """);
+
+        assertEquals(3, settings.of("kvass").drunkFor(1), "чего нет — берём у default");
+        assertEquals(0, settings.of("kvass").drunkFor(2), "ноль — напиток не пьянит");
     }
 }

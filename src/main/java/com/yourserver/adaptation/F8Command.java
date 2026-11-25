@@ -214,6 +214,11 @@ public class F8Command implements CommandExecutor, Listener {
             return true;
         }
 
+        // /f8 drunk — шкала опьянения: своя или чужая (для админа).
+        if (args.length > 0 && args[0].equalsIgnoreCase("drunk")) {
+            return drunk(sender, args);
+        }
+
         if (!(sender instanceof Player player)) {
             sender.sendMessage("§7Использование: /f8 reload — перечитать settings/*.yml, косметику и новые YAML-файлы");
             sender.sendMessage("§7             /f8 config — где что лежит и что не на месте");
@@ -904,5 +909,92 @@ public class F8Command implements CommandExecutor, Listener {
 
     private ItemStack createCopperBlock() {
         return copperBlockListener.createCopperBlockItem();
+    }
+
+    // ===== ОПЬЯНЕНИЕ =====
+
+    /**
+     * {@code /f8 drunk} — своё состояние; {@code /f8 drunk <ник>} — чужое;
+     * {@code /f8 drunk <ник|me> <число|clear>} — выставить (только админ).
+     */
+    private boolean drunk(CommandSender sender, String[] args) {
+        DrunkManager manager = DrunkManager.current();
+        if (manager == null) {
+            sender.sendMessage("§cОпьянение ещё не загружено.");
+            return true;
+        }
+
+        if (args.length == 1) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("§7Использование: /f8 drunk <ник> <число|clear>");
+                return true;
+            }
+            showDrunk(sender, manager, player);
+            return true;
+        }
+
+        if (!sender.hasPermission("f8.admin")) {
+            sender.sendMessage("§cНедостаточно прав.");
+            return true;
+        }
+
+        // /f8 drunk <ник> — посмотреть чужую шкалу
+        if (args.length == 2) {
+            Player target = Bukkit.getPlayerExact(args[1]);
+            if (target == null) {
+                if (sender instanceof Player self && isNumberOrClear(args[1])) {
+                    applyDrunk(sender, manager, self, args[1]);
+                    return true;
+                }
+                sender.sendMessage("§cИгрок " + args[1] + " не в сети.");
+                return true;
+            }
+            showDrunk(sender, manager, target);
+            return true;
+        }
+
+        Player target = "me".equalsIgnoreCase(args[1]) || "я".equalsIgnoreCase(args[1])
+                ? (sender instanceof Player self ? self : null)
+                : Bukkit.getPlayerExact(args[1]);
+        if (target == null) {
+            sender.sendMessage("§cИгрок " + args[1] + " не в сети.");
+            return true;
+        }
+        applyDrunk(sender, manager, target, args[2]);
+        return true;
+    }
+
+    private void showDrunk(CommandSender sender, DrunkManager manager, Player target) {
+        int points = manager.points(target.getUniqueId());
+        DrunkStage stage = DrunkStage.of(points, manager.scale());
+        int hangover = manager.hangoverTicks(target.getUniqueId()) / 20;
+        sender.sendMessage("§6Опьянение " + target.getName() + "§7: §f" + points + "/" + manager.scale()
+                + " §7— §f" + stage.title() + (hangover > 0 ? " §8(похмелье " + hangover + " c)" : ""));
+    }
+
+    private void applyDrunk(CommandSender sender, DrunkManager manager, Player target, String raw) {
+        if (raw.equalsIgnoreCase("clear") || raw.equalsIgnoreCase("трезв")) {
+            manager.clear(target);
+            sender.sendMessage("§a" + target.getName() + " протрезвел.");
+            return;
+        }
+        try {
+            int value = Integer.parseInt(raw);
+            manager.set(target, value);
+            sender.sendMessage("§aОпьянение " + target.getName() + ": "
+                    + manager.points(target.getUniqueId()) + "/" + manager.scale());
+        } catch (NumberFormatException ex) {
+            sender.sendMessage("§cНужно число, clear или ник игрока.");
+        }
+    }
+
+    private static boolean isNumberOrClear(String raw) {
+        if (raw.equalsIgnoreCase("clear") || raw.equalsIgnoreCase("трезв")) return true;
+        try {
+            Integer.parseInt(raw);
+            return true;
+        } catch (NumberFormatException ex) {
+            return false;
+        }
     }
 }

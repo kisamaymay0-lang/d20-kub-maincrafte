@@ -466,6 +466,12 @@ final class ProfileItems {
         lore.add(Component.empty());
         lore.add(text("Лайки: " + data.likes(), NamedTextColor.GREEN));
         lore.add(text("Дизлайки: " + data.dislikes(), NamedTextColor.RED));
+        // Шкала опьянения невидимая, но в профиле видно, если человек пьян.
+        int drunk = DrunkManager.pointsOf(data.skinOwner());
+        if (drunk > 0) {
+            lore.add(Component.empty());
+            lore.add(DrunkManager.statusLine(drunk));
+        }
         if (editHint) {
             lore.add(Component.empty());
             lore.add(text("Нажмите, чтобы изменить описание", NamedTextColor.DARK_GRAY));

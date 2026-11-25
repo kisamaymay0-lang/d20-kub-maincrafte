@@ -74,13 +74,25 @@ final class BarrelDrinks {
         }
     }
 
-    /** Настройки одного напитка: сроки, ступени и годы. */
+    /** Настройки одного напитка: сроки, ступени, годы и сила опьянения. */
     record Profile(int brewTicks, int bottles, long ticksPerYear, List<Level> levels, List<Years> years,
-                   String descriptionOverride) {
+                   String descriptionOverride, Map<Integer, Integer> drunk) {
 
         Profile {
             levels = List.copyOf(levels);
             years = List.copyOf(years);
+            drunk = Map.copyOf(drunk);
+        }
+
+        /** Сколько единиц опьянения даёт глоток этого качества; 0 — не пьянит. */
+        int drunkFor(int tier) {
+            Integer value = drunk.get(level(tier).tier());
+            return value == null ? 0 : Math.max(0, value);
+        }
+
+        /** Копия с другой силой опьянения — для комплекта по умолчанию. */
+        Profile withDrunk(Map<Integer, Integer> values) {
+            return new Profile(brewTicks, bottles, ticksPerYear, levels, years, descriptionOverride, values);
         }
 
         /** Ступень, которая действует в этот год выдержки. */
@@ -180,9 +192,21 @@ final class BarrelDrinks {
     /** Настройки из комплекта — ровно те, что были зашиты в код: ром со своей лестницей. */
     static BarrelDrinks defaults() {
         Profile base = new Profile(DEFAULT_BREW_TICKS, DEFAULT_BOTTLES, DEFAULT_TICKS_PER_YEAR,
-                defaultLevels(), defaultYears(), null);
-        return new BarrelDrinks(base, Map.of());
+                defaultLevels(), defaultYears(), null, DEFAULT_RUM_DRUNK);
+        // Вина слабее рома: свои значения на каждое качество.
+        Map<String, Profile> drinks = new LinkedHashMap<>();
+        drinks.put("wine", base.withDrunk(DEFAULT_WINE_DRUNK));
+        drinks.put("sweet_wine", base.withDrunk(DEFAULT_WINE_DRUNK));
+        drinks.put("white_wine", base.withDrunk(DEFAULT_WINE_DRUNK));
+        drinks.put("bitter_wine", base.withDrunk(DEFAULT_WINE_DRUNK));
+        return new BarrelDrinks(base, drinks);
     }
+
+    /** Сколько даёт глоток рома: 40 % крепости против 12 % у вина. */
+    static final Map<Integer, Integer> DEFAULT_RUM_DRUNK = Map.of(1, 4, 2, 5, 3, 6, 4, 7, 5, 8);
+
+    /** Вино: те же ступени, но единиц меньше. */
+    static final Map<Integer, Integer> DEFAULT_WINE_DRUNK = Map.of(1, 2, 2, 3, 3, 3, 4, 4, 5, 5);
 
     /** Пять ступеней рома: те же имена, цвета и описания, что были в коде. */
     static List<Level> defaultLevels() {
@@ -252,8 +276,33 @@ final class BarrelDrinks {
                 ? ProfileText.clean(section.getString("quality-description", ""))
                 : base.descriptionOverride();
         if (description != null && description.isEmpty()) description = null;
+        // Сила опьянения складывается с общими: чего у напитка нет — берём из default.
+        Map<Integer, Integer> drunk = new LinkedHashMap<>(base.drunk());
+        if (section.isConfigurationSection("drunk")) {
+            drunk.putAll(readDrunk(section.getConfigurationSection("drunk"), id));
+        }
         return new Profile(brewTicks, Math.min(bottles, BambooBarrel.MAX_BOTTLES), ticksPerYear, levels, years,
-                description);
+                description, drunk);
+    }
+
+    /** Сила опьянения: «ступень: единиц за глоток». */
+    private static Map<Integer, Integer> readDrunk(ConfigurationSection section, String id) {
+        Map<Integer, Integer> values = new LinkedHashMap<>();
+        for (String raw : section.getKeys(false)) {
+            int tier;
+            try {
+                tier = Integer.parseInt(raw.trim());
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException("Напиток " + id + ": в drunk ступень «" + raw + "» — не число");
+            }
+            int units = section.getInt(raw, 0);
+            if (units < 0) {
+                throw new IllegalArgumentException("Напиток " + id + ": в drunk у ступени " + tier
+                        + " отрицательное число единиц");
+            }
+            values.put(tier, units);
+        }
+        return Map.copyOf(values);
     }
 
     private static int positive(int value, String key, String id) {

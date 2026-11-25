@@ -69,6 +69,8 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     /** Рюмка из RP Engine: налить напиток прямо из шейкера. */
     private ShotGlass shotGlass;
     private BambooBarrel bambooBarrel;
+    /** Опьянение: невидимая шкала, стадии, тошнота и похмелье. */
+    private DrunkManager drunk;
     /** Сигарета из /f8: тикает шкалу тяги и дым, поэтому нужен доступ на выключении. */
     private Cigarette cigarette;
     /** Политые кораллы: список живёт в файле, поэтому нужен доступ на выключении. */
@@ -202,6 +204,11 @@ public void onEnable() {
     // Бамбуковая бочка для брожения пиратского рома.
     bambooBarrel = new BambooBarrel(this);
     getServer().getPluginManager().registerEvents(bambooBarrel, this);
+
+    // Опьянение: шкала, стадии и «шумные» эффекты (фантомные блоки, шатание, похмелье).
+    drunk = new DrunkManager(this);
+    getServer().getPluginManager().registerEvents(drunk, this);
+    drunk.start();
     // Миниигра особого предмета биома: вылавливается вместо обычной рыбы.
     specialCatch = new SpecialCatch(this, ancientJug, winterFishing);
     getServer().getPluginManager().registerEvents(specialCatch, this);
@@ -341,6 +348,10 @@ public void onEnable() {
         if (coralCare != null) {
             coralCare.flush();
         }
+        if (drunk != null) {
+            // Опьянение: убрать лужи из мира и сохранить шкалы на диск.
+            drunk.stop();
+        }
         if (dataWriter != null) {
             dataWriter.close();
         }
@@ -455,6 +466,10 @@ public void onEnable() {
         }
         if (bambooBarrel != null) {
             bambooBarrel.reloadSettings();
+        }
+        if (drunk != null) {
+            // Опьянение: settings/drunk.yml (шкала, затухание, тошнота).
+            drunk.loadSettings();
         }
         if (shotGlass != null) {
             // Список рюмок: shaker.glass-models.

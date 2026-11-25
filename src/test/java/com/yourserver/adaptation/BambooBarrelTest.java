@@ -104,7 +104,7 @@ class BambooBarrelTest {
     @DisplayName("Формирование лора рома из 6 строк")
     void testRumLoreStructure() {
         List<Component> lore = BambooBarrel.buildRumLore(10, 1);
-        assertEquals(6, lore.size());
+        assertEquals(7, lore.size(), "шесть строк и строка про опьянение");
 
         assertEquals("----------------------", plain.serialize(lore.get(0)));
         assertTrue(plain.serialize(lore.get(1)).startsWith("Качество: "));
@@ -112,7 +112,9 @@ class BambooBarrelTest {
         assertEquals("----------------------", plain.serialize(lore.get(2)));
         assertEquals("Лет: 10", plain.serialize(lore.get(3)));
         assertEquals("Переливаний: 1", plain.serialize(lore.get(4)));
-        assertEquals("Теперь ты можешь называть себя настоящим пиратом!", plain.serialize(lore.get(5)));
+        assertEquals("Опьянение: +8 за глоток", plain.serialize(lore.get(5)),
+                "безупречный ром даёт 8 единиц");
+        assertEquals("Теперь ты можешь называть себя настоящим пиратом!", plain.serialize(lore.get(6)));
     }
 
     @Test
