@@ -103,5 +103,12 @@ class ProfileIconsTest {
         assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_DAIQUIRI));
         assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_ICED_LATTE));
         assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_MURK));
+        // Напиток, добавленный в settings/recipe-poilo.yml, попадает в меню сам.
+        for (String id : F8Command.DRINK_CATALOG) {
+            assertTrue(F8Command.drinkCatalog().contains(id), id);
+        }
+        for (DrinkRecipes.Drink drink : DrinkRecipes.current().list()) {
+            assertTrue(F8Command.drinkCatalog().contains("drink_" + drink.id()), drink.id());
+        }
     }
 }

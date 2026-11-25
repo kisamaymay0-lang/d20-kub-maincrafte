@@ -69,7 +69,10 @@ import java.util.UUID;
  *       Запрещены любые блоки, кроме любого льда. При запрете проигрывается тихий звук без сообщений.
  *       При добавлении жидкостей из бутылочки пустая стеклянная бутылочка остаётся у игрока.
  *       При добавлении жидкостей из ведра (молоко, вода) пустое ведро остаётся у игрока.</li>
- *   <li><b>Напитки и добавки:</b> Напитки создаются из базовых ингредиентов без базовых эффектов.
+ *   <li><b>Напитки и добавки:</b> Рецепты, названия, цвета, модели и описания напитков
+ *       берутся из {@code settings/recipe-poilo.yml} — см. {@link DrinkRecipes}. Новый
+ *       напиток добавляется блоком в файле, без правки кода.
+ *       Напитки создаются из базовых ингредиентов без базовых эффектов.
  *       Дополнительные ингредиенты в шейкере становятся добавками (положительными или отрицательными).
  *       Отрицательные добавки при выпивании дают негативные эффекты (Тошнота / Отравление).
  *       В подсказке напитка всегда видны название (золотое), описание между двумя
@@ -129,29 +132,21 @@ public class Shaker implements Listener {
     /** Маркер описания-подсказки «может стоит добавить…». */
     public static final String DESC_MARKER_ADD = "▶";
 
-    /** Части описаний: до, жёлтая фраза, жёлтый подчёркнутый напиток, хвост. */
-    private static final String[] PARTS_MEAD = {
-            "Безалькогольная медовуха, ", "может стоит добавить в нее ", "пиво", "?..."
-    };
-    private static final String[] PARTS_DAIQUIRI = {
-            "Безалкогольный дайкири, ", "может стоит в него добавить ", "белое вино", "?..."
-    };
-    private static final String[] PARTS_MATCHA_TEA = {
-            "Чай с бархатистым вкусом, дающий легкую бодрость и яркость ума.", null, null, null
-    };
-    private static final String[] PARTS_ICED_LATTE = {
-            "Прохладный кофейный напиток с кубиками льда... освежает!", null, null, null
-    };
-    private static final String[] PARTS_MURK = {
-            "Какая-то болотная жижа, может стоит попробовать другие ингридиенты?)", null, null, null
-    };
-
-    /** Описания напитков без маркера (для справки и тестов). */
-    public static final String DESC_MEAD = joinParts(PARTS_MEAD);
-    public static final String DESC_MATCHA_TEA = joinParts(PARTS_MATCHA_TEA);
-    public static final String DESC_DAIQUIRI = joinParts(PARTS_DAIQUIRI);
-    public static final String DESC_ICED_LATTE = joinParts(PARTS_ICED_LATTE);
-    public static final String DESC_MURK = joinParts(PARTS_MURK);
+    /**
+     * Описания напитков без маркера и без оформления — ровно те, что по умолчанию
+     * лежат в {@code settings/recipe-poilo.yml} (для справки и тестов).
+     * Меняются они в файле, а не здесь.
+     */
+    public static final String DESC_MEAD =
+            "Безалькогольная медовуха, может стоит добавить в нее пиво?...";
+    public static final String DESC_MATCHA_TEA =
+            "Чай с бархатистым вкусом, дающий легкую бодрость и яркость ума.";
+    public static final String DESC_DAIQUIRI =
+            "Безалкогольный дайкири, может стоит в него добавить белое вино?...";
+    public static final String DESC_ICED_LATTE =
+            "Прохладный кофейный напиток с кубиками льда... освежает!";
+    public static final String DESC_MURK =
+            "Какая-то болотная жижа, может стоит попробовать другие ингридиенты?)";
 
     private final Plugin plugin;
     private final Map<UUID, ShakeTracker> shakeTrackers = new HashMap<>();
@@ -648,73 +643,37 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Определение совпадения базового рецепта и выделение добавок:
-     * - Медовуха: медовые соты + бутылочка горячей воды (положительные: сахар)
-     * - Дайкири: сладкие ягоды + сахар + обычная вода (положительные: лед, ягоды)
-     * - Айс-латте: какао-бобы + лед + молоко (положительные: бутылка меда, лед)
-     * - Матча-чай: зеленый краситель + бутылочка горячей воды (положительные: бутылка меда, молоко, лед)
+     * Определение совпадения базового рецепта и выделение добавок.
+     *
+     * <p>Рецепты берутся из {@code settings/recipe-poilo.yml}: побеждает первый
+     * напиток, все ингредиенты которого лежат в шейкере (порядок — как в файле).
+     * Если не подошёл ни один — «муть» без добавок. Напитки с {@code method: barrel}
+     * в шейкере не смешиваются.
      */
     public static RecipeMatch matchRecipeAndAdditives(List<ItemStack> contents) {
         if (contents == null || contents.isEmpty()) {
             return new RecipeMatch(null, Collections.emptyList());
         }
+        List<IngredientKind> kinds = new ArrayList<>(contents.size());
+        for (ItemStack item : contents) kinds.add(classify(item));
 
-        // 1. Медовуха
-        if (hasItem(contents, IngredientKind.HONEYCOMB) && hasItem(contents, IngredientKind.HOT_WATER_BOTTLE)) {
-            List<ItemStack> additives = new ArrayList<>(contents);
-            removeItemFirst(additives, IngredientKind.HONEYCOMB);
-            removeItemFirst(additives, IngredientKind.HOT_WATER_BOTTLE);
-            return new RecipeMatch(RECIPE_MEAD, additives);
-        }
+        DrinkRecipes.Drink drink = DrinkRecipes.current().match(kinds);
+        if (drink == null) return new RecipeMatch(RECIPE_MURK, Collections.emptyList());
 
-        // 2. Матча чай
-        if (hasItem(contents, IngredientKind.GREEN_DYE) && hasItem(contents, IngredientKind.HOT_WATER_BOTTLE)) {
-            List<ItemStack> additives = new ArrayList<>(contents);
-            removeItemFirst(additives, IngredientKind.GREEN_DYE);
-            removeItemFirst(additives, IngredientKind.HOT_WATER_BOTTLE);
-            return new RecipeMatch(RECIPE_MATCHA_TEA, additives);
-        }
-
-        // 3. Дайкири
-        if (hasItem(contents, IngredientKind.SWEET_BERRIES) && hasItem(contents, IngredientKind.SUGAR) && hasItem(contents, IngredientKind.WATER_BOTTLE)) {
-            List<ItemStack> additives = new ArrayList<>(contents);
-            removeItemFirst(additives, IngredientKind.SWEET_BERRIES);
-            removeItemFirst(additives, IngredientKind.SUGAR);
-            removeItemFirst(additives, IngredientKind.WATER_BOTTLE);
-            return new RecipeMatch(RECIPE_DAIQUIRI, additives);
-        }
-
-        // 4. Айс-латте
-        if (hasItem(contents, IngredientKind.COCOA_BEANS) && hasItem(contents, IngredientKind.ICE) && hasItem(contents, IngredientKind.MILK_BUCKET)) {
-            List<ItemStack> additives = new ArrayList<>(contents);
-            removeItemFirst(additives, IngredientKind.COCOA_BEANS);
-            removeItemFirst(additives, IngredientKind.ICE);
-            removeItemFirst(additives, IngredientKind.MILK_BUCKET);
-            return new RecipeMatch(RECIPE_ICED_LATTE, additives);
-        }
-
-        return new RecipeMatch(RECIPE_MURK, Collections.emptyList());
+        // Ингредиенты рецепта из шейкера уходят, всё остальное — добавки.
+        List<ItemStack> additives = new ArrayList<>(contents);
+        for (IngredientKind required : drink.ingredients()) removeItemFirst(additives, required);
+        return new RecipeMatch(drink.id(), additives);
     }
 
     /**
-     * Положительная ли добавка для данного напитка.
+     * Положительная ли добавка для данного напитка: только то, что перечислено
+     * в {@code additives} рецепта. Всё остальное — отрицательная добавка.
      */
     public static boolean isPositiveAdditive(String recipe, IngredientKind kind) {
         if (kind == null) return false;
-        if (RECIPE_MEAD.equals(recipe)) {
-            // Медовуха: сахар
-            return kind == IngredientKind.SUGAR;
-        } else if (RECIPE_DAIQUIRI.equals(recipe)) {
-            // Дайкири: лед, ягоды
-            return kind == IngredientKind.ICE || kind == IngredientKind.SWEET_BERRIES;
-        } else if (RECIPE_ICED_LATTE.equals(recipe)) {
-            // Айс-латте: бутылка меда, лед
-            return kind == IngredientKind.HONEY_BOTTLE || kind == IngredientKind.ICE;
-        } else if (RECIPE_MATCHA_TEA.equals(recipe)) {
-            // Матча-чай: бутылочка меда, молоко, лед
-            return kind == IngredientKind.HONEY_BOTTLE || kind == IngredientKind.MILK_BUCKET || kind == IngredientKind.ICE;
-        }
-        return false;
+        DrinkRecipes.Drink drink = DrinkRecipes.current().get(recipe);
+        return drink != null && drink.positive(kind);
     }
 
     public static boolean isPositiveAdditive(String recipe, ItemStack item) {
@@ -731,46 +690,34 @@ public class Shaker implements Listener {
     }
 
     /**
-     * Сопоставление классифицированных ингредиентов.
+     * Сопоставление классифицированных ингредиентов — по тем же рецептам, что и
+     * {@link #matchRecipeAndAdditives(List)}.
      */
     public static String matchRecipeFromKinds(List<IngredientKind> kinds) {
         if (kinds == null || kinds.isEmpty()) return null;
-        if (kinds.contains(IngredientKind.HONEYCOMB) && kinds.contains(IngredientKind.HOT_WATER_BOTTLE)) {
-            return RECIPE_MEAD;
-        }
-        if (kinds.contains(IngredientKind.GREEN_DYE) && kinds.contains(IngredientKind.HOT_WATER_BOTTLE)) {
-            return RECIPE_MATCHA_TEA;
-        }
-        if (kinds.contains(IngredientKind.SWEET_BERRIES) && kinds.contains(IngredientKind.SUGAR) && kinds.contains(IngredientKind.WATER_BOTTLE)) {
-            return RECIPE_DAIQUIRI;
-        }
-        if (kinds.contains(IngredientKind.COCOA_BEANS) && kinds.contains(IngredientKind.ICE) && kinds.contains(IngredientKind.MILK_BUCKET)) {
-            return RECIPE_ICED_LATTE;
-        }
-        return RECIPE_MURK;
+        DrinkRecipes.Drink drink = DrinkRecipes.current().match(kinds);
+        return drink == null ? RECIPE_MURK : drink.id();
     }
 
     /**
-     * Имя готового напитка. Все названия пока золотые.
+     * Имя готового напитка из {@code settings/recipe-poilo.yml}. Все названия пока золотые.
      */
     public static String getDrinkName(String recipe) {
-        if (recipe == null) return NAME_MURK;
-        return switch (recipe) {
-            case RECIPE_MEAD -> NAME_MEAD;
-            case RECIPE_MATCHA_TEA -> NAME_MATCHA_TEA;
-            case RECIPE_DAIQUIRI -> NAME_DAIQUIRI;
-            case RECIPE_ICED_LATTE -> NAME_ICED_LATTE;
-            case RECIPE_PIRATE_RUM -> NAME_PIRATE_RUM;
-            default -> NAME_MURK;
-        };
+        return DrinkRecipes.current().name(recipe);
+    }
+
+    /** Напиток из файла настроек; null — берём «муть» как запасной вариант. */
+    private static DrinkRecipes.Drink drinkOf(String recipe) {
+        DrinkRecipes.Drink drink = DrinkRecipes.current().get(recipe);
+        return drink != null ? drink : DrinkRecipes.current().murk();
     }
 
     /**
-     * Описание напитка для подсказки без маркера. У пиратского рома своя подсказка (выдержка в бочке).
+     * Описание напитка для подсказки без маркера. У пиратского рома своя подсказка
+     * (о выдержке в бочке), поэтому у него описания нет.
      */
     public static String getDrinkDescription(String recipe) {
-        String[] parts = descriptionParts(recipe);
-        return parts == null ? null : joinParts(parts);
+        return drinkOf(recipe).plainDescription();
     }
 
     /**
@@ -778,56 +725,17 @@ public class Shaker implements Listener {
      * предлагает что-то добавить.
      */
     public static String getDescriptionMarker(String recipe) {
-        String[] parts = descriptionParts(recipe);
-        if (parts != null && parts[1] != null && !parts[1].isEmpty()) {
-            return DESC_MARKER_ADD;
-        }
-        return DESC_MARKER;
+        DrinkRecipes.Drink drink = drinkOf(recipe);
+        return drink.hint() != null && !drink.hint().empty() ? DESC_MARKER_ADD : DESC_MARKER;
     }
 
     /**
      * Строка описания между тире: маркер, обычный текст белым, фраза «может стоит
-     * добавить…» жёлтым, название напитка жёлтым и подчёркнутым.
+     * добавить…» жёлтым, название напитка жёлтым и подчёркнутым. Всё берётся из
+     * {@code settings/recipe-poilo.yml}.
      */
     public static Component buildDescriptionLine(String recipe) {
-        String[] parts = descriptionParts(recipe);
-        if (parts == null) return Component.empty();
-        Component line = Component.text(getDescriptionMarker(recipe) + " " + parts[0], NamedTextColor.WHITE)
-                .decoration(TextDecoration.ITALIC, false);
-        if (parts[1] != null && !parts[1].isEmpty()) {
-            line = line.append(Component.text(parts[1], NamedTextColor.YELLOW)
-                    .decoration(TextDecoration.ITALIC, false));
-        }
-        if (parts[2] != null && !parts[2].isEmpty()) {
-            line = line.append(Component.text(parts[2], NamedTextColor.YELLOW)
-                    .decoration(TextDecoration.ITALIC, false)
-                    .decoration(TextDecoration.UNDERLINED, true));
-        }
-        if (parts[3] != null && !parts[3].isEmpty()) {
-            line = line.append(Component.text(parts[3], NamedTextColor.WHITE)
-                    .decoration(TextDecoration.ITALIC, false));
-        }
-        return line;
-    }
-
-    private static String[] descriptionParts(String recipe) {
-        if (recipe == null) return PARTS_MURK;
-        return switch (recipe) {
-            case RECIPE_MEAD -> PARTS_MEAD;
-            case RECIPE_MATCHA_TEA -> PARTS_MATCHA_TEA;
-            case RECIPE_DAIQUIRI -> PARTS_DAIQUIRI;
-            case RECIPE_ICED_LATTE -> PARTS_ICED_LATTE;
-            case RECIPE_PIRATE_RUM -> null;
-            default -> PARTS_MURK;
-        };
-    }
-
-    private static String joinParts(String[] parts) {
-        StringBuilder text = new StringBuilder();
-        for (String part : parts) {
-            if (part != null) text.append(part);
-        }
-        return text.toString();
+        return DrinkRecipes.descriptionLine(drinkOf(recipe));
     }
 
     public static ItemStack createDrinkItem(String recipe) {
@@ -863,20 +771,17 @@ public class Shaker implements Listener {
         meta.itemName(drinkName);
         meta.displayName(drinkName);
 
-        if (RECIPE_MEAD.equals(recipe)) {
-            meta.setItemModel(MODEL_MEAD_KEY);
-            meta.setColor(Color.fromRGB(0xEB, 0xAF, 0x28));
-        } else if (RECIPE_DAIQUIRI.equals(recipe)) {
-            meta.setItemModel(MODEL_DAIQUIRI_KEY);
-            meta.setColor(Color.fromRGB(0xF0, 0x46, 0x6E));
-        } else if (RECIPE_ICED_LATTE.equals(recipe)) {
-            meta.setItemModel(MODEL_ICED_LATTE_KEY);
-            meta.setColor(Color.fromRGB(0xE8, 0xC4, 0x99));
-        } else if (RECIPE_MATCHA_TEA.equals(recipe)) {
-            meta.setItemModel(MODEL_MATCHA_TEA_KEY);
-            meta.setColor(Color.fromRGB(0x78, 0xA8, 0x3C));
-        } else {
-            meta.setColor(Color.fromRGB(0x4E, 0x93, 0x31));
+        // Модель и цвет бутылочки — из settings/recipe-poilo.yml. Модель не задана
+        // (например у «мути») — остаётся только цвет.
+        DrinkRecipes.Drink drink = DrinkRecipes.current().get(recipe);
+        if (drink != null && !drink.model().isEmpty()) {
+            meta.setItemModel(new NamespacedKey("f8resurs", drink.model()));
+        }
+        TextColor drinkColor = drink != null ? drink.color() : null;
+        if (drinkColor != null) meta.setColor(Color.fromRGB(drinkColor.value()));
+
+        if (RECIPE_MURK.equals(recipe)) {
+            // «Муть» — это не напиток, а болотная жижа: тошнота и отравление сразу.
             meta.clearCustomEffects();
             meta.addCustomEffect(new PotionEffect(PotionEffectType.NAUSEA, 10 * 20, 0), true);
             meta.addCustomEffect(new PotionEffect(PotionEffectType.POISON, 5 * 20, 0), true);

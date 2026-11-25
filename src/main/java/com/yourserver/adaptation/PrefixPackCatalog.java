@@ -1,18 +1,14 @@
 package com.yourserver.adaptation;
 
 import net.kyori.adventure.text.format.TextColor;
-import org.bukkit.configuration.file.YamlConfiguration;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
-import java.util.stream.Stream;
 
 /**
  * Паки префиксов: по файлу на пак в {@code plugins/f8-plugin/content/prefixpacks/}.
@@ -26,7 +22,8 @@ import java.util.stream.Stream;
  * <h2>Файл пака</h2>
  *
  * Пак перечисляет только файлы префиксов, а имена и цвета берёт из
- * {@code settings/prefixes.yml} — по полю {@code file}:
+ * {@code settings/prefixes.yml} — по полю {@code file}. Сам формат файла
+ * читает {@link PackFile} (он же читает и паки косметики):
  *
  * <pre>
  * name: 'Тестовый пак'        # название на сундучке
@@ -58,7 +55,10 @@ import java.util.stream.Stream;
 final class PrefixPackCatalog {
 
     /** Срок, который означает «бессрочно». */
-    static final int INFINITE = -1;
+    static final int INFINITE = PackFile.INFINITE;
+
+    /** Название списка записей в файле пака префиксов. */
+    private static final String ENTRIES_KEY = "prefixes";
 
     private final Map<String, Pack> byId;
     private final List<Pack> ordered;
@@ -72,15 +72,23 @@ final class PrefixPackCatalog {
      * Пак: название, срок кейса и его префиксы. Префиксы уже с id и цветом,
      * номер для команды выдачи им раздаёт {@link PrefixCatalog}.
      */
-    record Pack(String id, String name, int timeHours, List<PrefixCatalog.Prefix> prefixes) {
+    record Pack(String id, String name, int timeHours, List<PrefixCatalog.Prefix> prefixes)
+            implements ItemPack {
 
-        int size() {
+        @Override
+        public int size() {
             return prefixes.size();
         }
 
         /** Бессрочный ли кейс ({@code time-hours: -1}). */
         boolean infinite() {
             return timeHours < 0;
+        }
+
+        /** id предметов пака — префиксов. */
+        @Override
+        public List<String> itemIds() {
+            return prefixes.stream().map(PrefixCatalog.Prefix::id).toList();
         }
     }
 
@@ -122,53 +130,20 @@ final class PrefixPackCatalog {
      */
     static PrefixPackCatalog load(Path folder, PrefixCatalog base, Consumer<String> warn) {
         Map<String, Pack> byId = new LinkedHashMap<>();
-        if (folder == null || !Files.isDirectory(folder)) return new PrefixPackCatalog(byId);
-        List<Path> files = new ArrayList<>();
-        try (Stream<Path> stream = Files.list(folder)) {
-            stream.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().endsWith(".yml"))
-                    .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                    .forEach(files::add);
-        } catch (Exception ignored) {
-            return new PrefixPackCatalog(byId);
-        }
-        for (Path file : files) {
-            try {
-                Pack pack = read(file, base, warn);
-                if (pack != null) byId.put(pack.id(), pack);
-            } catch (Exception ex) {
-                throw new IllegalArgumentException("Пак " + file.getFileName() + ": " + ex.getMessage(), ex);
-            }
+        for (PackFile.Header header : PackFile.readAll(folder, ENTRIES_KEY)) {
+            Pack pack = build(header, base, warn);
+            if (pack != null) byId.put(pack.id(), pack);
         }
         return new PrefixPackCatalog(byId);
     }
 
-    private static Pack read(Path file, PrefixCatalog base, Consumer<String> warn) throws Exception {
-        String fileName = file.getFileName().toString();
-        String id = fileName.substring(0, fileName.length() - ".yml".length());
-        YamlConfiguration yaml = new YamlConfiguration();
-        yaml.loadFromString(Files.readString(file));
-
-        String name = ProfileText.clean(yaml.getString("name", ""));
-        if (name.isEmpty()) name = id;
-        int timeHours = yaml.getInt("time-hours", yaml.getInt("time", INFINITE));
-
+    private static Pack build(PackFile.Header header, PrefixCatalog base, Consumer<String> warn) {
         List<PrefixCatalog.Prefix> prefixes = new ArrayList<>();
-        for (Object raw : yaml.getList("prefixes", List.of())) {
-            String entryFile;
-            String entryName = "";
-            String entryId = "";
-            String entryColor = "";
-            if (raw instanceof Map<?, ?> map) {
-                entryFile = ProfileText.clean(text(map.get("file")));
-                entryName = ProfileText.clean(text(map.get("name")));
-                entryId = ProfileText.clean(text(map.get("id")));
-                entryColor = ProfileText.clean(text(map.get("color")));
-            } else {
-                // Запись целиком — это и есть файл префикса: '- pref1'.
-                entryFile = ProfileText.clean(text(raw));
-            }
-            if (entryFile.isEmpty()) continue;
+        for (PackFile.Entry entry : header.entries()) {
+            String entryFile = entry.file();
+            String entryName = entry.name();
+            String entryId = entry.id();
+            String entryColor = entry.color();
 
             PrefixCatalog.Prefix known = base == null ? null : base.byFile(entryFile);
             String finalId;
@@ -187,40 +162,27 @@ final class PrefixPackCatalog {
                 finalColor = entryColor.isEmpty() ? known.color().asHexString() : entryColor;
             } else {
                 if (warn != null) {
-                    warn.accept("Пак " + id + ": файл префикса «" + entryFile
+                    warn.accept("Пак " + header.id() + ": файл префикса «" + entryFile
                             + "» не найден в settings/prefixes.yml — имя взято из файла, добавьте префикс в settings/prefixes.yml");
                 }
-                finalId = entryId.isEmpty() ? sanitize(id + "_" + entryFile) : entryId;
+                finalId = entryId.isEmpty() ? PackFile.sanitize(header.id() + "_" + entryFile) : entryId;
                 finalName = entryName.isEmpty() ? entryFile : entryName;
                 finalColor = entryColor.isEmpty() ? "#E6B94B" : entryColor;
             }
             TextColor color = TextColor.fromHexString(finalColor);
             if (color == null) throw new IllegalArgumentException("Неверный цвет префикса " + finalId);
             prefixes.add(known == null
-                    ? new PrefixCatalog.Prefix(sanitize(finalId), finalName, color, entryFile, 0)
-                    : new PrefixCatalog.Prefix(sanitize(finalId), finalName, color, entryFile, known.number(),
+                    ? new PrefixCatalog.Prefix(PackFile.sanitize(finalId), finalName, color, entryFile, 0)
+                    : new PrefixCatalog.Prefix(PackFile.sanitize(finalId), finalName, color, entryFile, known.number(),
                             known.frames(), known.intervalHundredths()));
         }
         if (prefixes.isEmpty()) return null;
-        return new Pack(sanitize(id), name, timeHours, List.copyOf(prefixes));
-    }
-
-    private static String text(Object value) {
-        return value == null ? "" : String.valueOf(value);
+        return new Pack(header.id(), header.name(), header.timeHours(), List.copyOf(prefixes));
     }
 
     /** id в безопасном виде: строчные буквы, цифры, точка, дефис и подчёркивание. */
     static String sanitize(String value) {
-        if (value == null) return "";
-        String cleaned = ProfileText.clean(value).toLowerCase(Locale.ROOT);
-        StringBuilder out = new StringBuilder(cleaned.length());
-        for (char c : cleaned.toCharArray()) {
-            boolean allowed = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
-            out.append(allowed ? c : '_');
-        }
-        String result = out.toString();
-        while (result.contains("__")) result = result.replace("__", "_");
-        return result;
+        return PackFile.sanitize(value);
     }
 
     // ===== СРОК КЕЙСА =====
@@ -230,21 +192,11 @@ final class PrefixPackCatalog {
      * {@link Long#MAX_VALUE}, то есть никогда.
      */
     static long expiresAt(long now, int timeHours) {
-        if (timeHours < 0) return Long.MAX_VALUE;
-        return now + timeHours * 3_600_000L;
+        return PackFile.expiresAt(now, timeHours);
     }
 
     /** Сколько осталось жить кейсу: коротко, для подписи сундучка. */
     static String leftText(long expiresAt, long now) {
-        if (expiresAt == Long.MAX_VALUE) return "бессрочный";
-        long millis = expiresAt - now;
-        if (millis <= 0) return "сгорел";
-        long minutes = millis / 60_000L;
-        if (minutes < 1) return "меньше минуты";
-        if (minutes < 60) return minutes + " мин";
-        long hours = minutes / 60L;
-        if (hours < 24) return hours + " ч";
-        long days = hours / 24L;
-        return days + " д";
+        return PackFile.leftText(expiresAt, now);
     }
 }

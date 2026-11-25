@@ -25,6 +25,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 public class AdaptationPlugin extends JavaPlugin implements Listener {
@@ -183,6 +185,9 @@ public void onEnable() {
 
     // Сигарета: слушает клики сама, поэтому registerEvents внутри конструктора.
     cigarette = new Cigarette(this);
+
+    // Напитки: рецепты, названия, цвета и модели — из settings/recipe-poilo.yml.
+    reloadDrinkRecipes();
 
     // Шейкер — инструмент для смешивания напитков и коктейлей.
     shaker = new Shaker(this);
@@ -381,9 +386,37 @@ public void onEnable() {
         // намеренно пусто
     }
 
+    /**
+     * Напитки из {@code settings/recipe-poilo.yml}: рецепты шейкера, бочка и подсказки.
+     * Файл копируется из комплекта при первом запуске, дальше живёт сам.
+     *
+     * <p>Ошибка в файле не снимает напитки: остаются прежние, а причина уходит в журнал.
+     */
+    public String reloadDrinkRecipes() {
+        Path path = Layout.settings(this, "recipe-poilo.yml");
+        if (!Files.exists(path)) {
+            saveResource("settings/recipe-poilo.yml", false);
+            getLogger().info("Создан файл напитков: " + path);
+        }
+        try {
+            DrinkRecipes next = DrinkRecipes.load(path);
+            DrinkRecipes.install(next);
+            return "Напитки: " + next.size() + " (шейкер: " + next.shakerDrinks().size()
+                    + ", бочка: " + next.barrelDrinks().size() + "), файл " + path;
+        } catch (Exception ex) {
+            getLogger().log(java.util.logging.Level.WARNING,
+                    "Ошибка settings/recipe-poilo.yml; остаются прежние напитки (" + ex.getMessage() + ")", ex);
+            return "Напитки не перечитаны: ошибка в settings/recipe-poilo.yml (причина в журнале сервера).";
+        }
+    }
+
     public String reloadPluginSettings() {
         ConfigSync.sync(this);   // /f8 reload тоже доводит файлы до полного вида
         reloadConfig();
+        if (shaker != null) {
+            // Рецепты напитков: settings/recipe-poilo.yml.
+            reloadDrinkRecipes();
+        }
         if (constellationManager != null) {
             constellationManager.reloadSettings();
         }

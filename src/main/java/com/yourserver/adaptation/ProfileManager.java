@@ -62,6 +62,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     /** Место кнопок в меню «Настроить косметику» (второй ряд инвентаря). */
     private static final int CUSTOMIZE_PREFIX_SLOT = 11;
     private static final int CUSTOMIZE_COSMETIC_SLOT = 13;
+    /** Кнопка «Наборы косметики» в меню косметики: сундучки-наборы и их кейсы. */
+    private static final int COSMETIC_PACKS_SLOT = 11;
     /** Третья кнопка «Настроить»: список своих префиксов, чтобы надеть любой. */
     private static final int CUSTOMIZE_MY_PREFIXES_SLOT = 15;
     /** Средний ряд меню паков: на нём стоят сундучки (до девяти паков). */
@@ -108,6 +110,12 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
     }
 
+    /**
+     * Что за паки открыты на экранах {@code PACKS} и {@code PACK}: префиксы или
+     * косметика. Экраны одни и те же — различается только содержимое.
+     */
+    private enum PackKind { PREFIX, COSMETIC }
+
     private static final class Menu implements InventoryHolder {
         final UUID viewer;
         final UUID owner;
@@ -120,15 +128,22 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         final Map<Integer, String> packsBySlot = new HashMap<>();
         /** Какой пак открыт на экране PACK (id пака). */
         final String pack;
+        /** Паки префиксов или паки косметики открыты на экране PACKS/PACK. */
+        final PackKind packKind;
         int page;
         Inventory inventory;
         Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen) {
-            this(viewer, owner, screen, page, chosen, null);
+            this(viewer, owner, screen, page, chosen, null, PackKind.PREFIX);
         }
 
         Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen, String pack) {
+            this(viewer, owner, screen, page, chosen, pack, PackKind.PREFIX);
+        }
+
+        Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen, String pack, PackKind packKind) {
             this.viewer = viewer; this.owner = owner; this.screen = screen; this.page = page; this.chosen = chosen;
             this.pack = pack;
+            this.packKind = packKind == null ? PackKind.PREFIX : packKind;
         }
         @Override public Inventory getInventory() { return inventory; }
     }
@@ -144,8 +159,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private final Path medalConfig;
     private final Path prefixConfig;
     private final Path cosmeticConfig;
-    /** Дополнительные каталоги: plugins/f8-plugin/content/cosmetics/*.yml. */
-    private final Path cosmeticFolder;
+    /** Папка с паками косметики: plugins/f8-plugin/content/cosmeticpacks/. */
+    private final Path cosmeticPackFolder;
+    /** Паки косметики: сундучки-наборы в меню косметики. */
+    private volatile CosmeticPackCatalog cosmeticPacks;
     private volatile PrefixCatalog prefixes;
     private volatile CosmeticCatalog cosmetics;
     /** Папка с паками префиксов: plugins/f8-plugin/content/prefixpacks/. */
@@ -202,26 +219,21 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 + ", паков " + packs.size()
                 + (prefixes.animatedCount() > 0 ? ", с анимацией " + prefixes.animatedCount() : ""));
         cosmeticConfig = Layout.settings(plugin, "cosmetics.yml");
-        cosmeticFolder = Layout.content(plugin, "cosmetics");
+        cosmeticPackFolder = Layout.content(plugin, "cosmeticpacks");
         if (!Files.exists(cosmeticConfig)) {
             plugin.saveResource("settings/cosmetics.yml", false);
             plugin.getLogger().info("Создан файл косметики: " + cosmeticConfig + " (правьте его и применяйте через /f8 reload)");
         }
-        try { Files.createDirectories(cosmeticFolder); }
-        catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не удалось создать папку дополнительной косметики", ex); }
-        // Пример с подсказками: однажды положенный, он дальше живёт сам.
-        if (!Files.exists(cosmeticFolder.resolve("example.yml"))) {
-            plugin.saveResource("content/cosmetics/example.yml", false);
-        }
-        CosmeticCatalog loadedCosmetics = CosmeticCatalog.defaults();
-        try { loadedCosmetics = CosmeticCatalog.load(cosmeticConfig, cosmeticFolder); }
+        CosmeticCatalog baseCosmetics = CosmeticCatalog.defaults();
+        try { baseCosmetics = CosmeticCatalog.load(cosmeticConfig); }
         catch (Exception ex) {
             plugin.getLogger().log(java.util.logging.Level.WARNING,
-                    "Ошибка settings/cosmetics.yml или дополнительного файла; используется стандартная косметика", ex);
+                    "Ошибка settings/cosmetics.yml; используется стандартная косметика", ex);
         }
-        cosmetics = loadedCosmetics;
-        plugin.getLogger().info("Косметика профиля: " + cosmetics.size() + " шт., файлы " + cosmeticConfig
-                + " и " + cosmeticFolder + "/*.yml");
+        cosmeticPacks = loadCosmeticPacks(baseCosmetics);
+        cosmetics = baseCosmetics.withPacks(cosmeticPacks);
+        plugin.getLogger().info("Косметика профиля: " + cosmetics.size() + " шт., файл " + cosmeticConfig
+                + ", наборов " + cosmeticPacks.size());
         storage = new ProfileStorage(Layout.data(plugin, "profiles"),
                 Layout.data(plugin, "medals/players"), writer, plugin.getLogger(), medal -> medalSettings.migrate(medal));
         ZoneId zone = ZoneId.systemDefault();
@@ -277,6 +289,30 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         } catch (Exception ex) {
             plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка паков префиксов; паки не используются", ex);
             return PrefixPackCatalog.load(null);
+        }
+    }
+
+    /**
+     * Паки косметики: plugins/f8-plugin/content/cosmeticpacks/*.yml. Папка создаётся
+     * при первом запуске, и в неё кладётся тестовый набор kosmetika-nabor1 —
+     * по нему видно, как писать свои. Имена и цвета косметики наборов берутся
+     * из {@code settings/cosmetics.yml}: в файле набора пишется только файл модели.
+     */
+    private CosmeticPackCatalog loadCosmeticPacks(CosmeticCatalog base) {
+        try {
+            if (!Files.isDirectory(cosmeticPackFolder)) {
+                Files.createDirectories(cosmeticPackFolder);
+                plugin.saveResource("content/cosmeticpacks/kosmetika-nabor1.yml", false);
+                plugin.getLogger().info("Создан тестовый набор косметики: "
+                        + cosmeticPackFolder.resolve("kosmetika-nabor1.yml"));
+            }
+            CosmeticPackCatalog loaded = CosmeticPackCatalog.load(cosmeticPackFolder, base,
+                    message -> plugin.getLogger().warning(message));
+            plugin.getLogger().info("Наборы косметики: " + loaded.size() + " шт., папка " + cosmeticPackFolder);
+            return loaded;
+        } catch (Exception ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка наборов косметики; наборы не используются", ex);
+            return CosmeticPackCatalog.load(null);
         }
     }
 
@@ -508,6 +544,52 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         open(player, data.owner, Screen.COSMETIC_CASE, 0, null);
         if (count == 1) {
             // Не выбитой косметики меньше двух: показываем единственную и забираем через 4 секунды.
+            run.victory = true;
+            run.victoryTick = 0;
+            player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.1f);
+            fireworks(player, run.slots.get(0), true);
+        }
+        run.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> caseStep(run), CASE_TICK, CASE_TICK);
+    }
+
+    /**
+     * Вскрыть кейс набора косметики: кейс списывается сразу, участвуют только
+     * косметика этого набора, которой у игрока ещё нет.
+     */
+    private void openCosmeticPackCase(Player player, ProfileData data, CosmeticPackCatalog.Pack pack) {
+        if (caseRuns.containsKey(data.owner)) {
+            player.sendMessage(ProfileItems.text("Вскрытие кейса уже идёт.", NamedTextColor.RED));
+            return;
+        }
+        if (data.cosmeticPackCases(pack.id()) <= 0) {
+            player.sendMessage(ProfileItems.text("У вас нет кейсов набора «" + pack.name() + "».", NamedTextColor.RED));
+            return;
+        }
+        List<CosmeticCatalog.Cosmetic> pool = pack.cosmetics().stream()
+                .filter(cosmetic -> !data.ownsCosmetic(cosmetic.id())).toList();
+        if (pool.isEmpty()) {
+            player.sendMessage(ProfileItems.text("Из набора «" + pack.name() + "» у вас уже вся косметика.", NamedTextColor.RED));
+            return;
+        }
+        if (!data.takeCosmeticPackCase(pack.id())) return;
+        try {
+            savePrefix(data);
+        } catch (RuntimeException ex) {
+            // Не записали — возвращаем кейс, чтобы он не пропал зря.
+            data.addCosmeticPackCase(pack.id(), CosmeticPackCatalog.expiresAt(System.currentTimeMillis(), pack.timeHours()));
+            player.sendMessage(ProfileItems.text("Не удалось открыть кейс: " + ex.getMessage(), NamedTextColor.RED));
+            return;
+        }
+        List<CosmeticCatalog.Cosmetic> shuffled = new ArrayList<>(pool);
+        Collections.shuffle(shuffled, new java.util.Random());
+        int count = Math.min(CASE_MAX, shuffled.size());
+        CaseRun run = new CaseRun(data.owner, count, true, pack.id());
+        for (int i = 0; i < count; i++) run.slots.add(shuffled.get(i).id());
+        caseRuns.put(data.owner, run);
+        clickSound(player);
+        open(player, data.owner, Screen.COSMETIC_CASE, 0, null);
+        if (count == 1) {
+            // Не выбитой косметики набора меньше двух: показываем единственную и забираем через 4 секунды.
             run.victory = true;
             run.victoryTick = 0;
             player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.1f);
@@ -761,6 +843,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     /** Открыть экран; для экрана пака ({@code Screen.PACK}) нужен ещё id пака. */
     private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen, String pack) {
+        open(viewer, owner, screen, page, chosen, pack, PackKind.PREFIX);
+    }
+
+    /** Открыть экран паков префиксов или паков косметики. */
+    private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen, String pack, PackKind kind) {
         if (stopping) return;
         if (screen != Screen.PROFILE && !viewer.getUniqueId().equals(owner)) return;
         editing.remove(viewer.getUniqueId());
@@ -768,11 +855,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             ProfileData data = profile(owner, owner.toString());
             if (screen == Screen.PLACE && !data.medals().containsKey(chosen)) return;
             // Пака могло не стать (файл убрали, пока меню открыто): покажем список паков.
-            if (screen == Screen.PACK && packs.get(pack) == null) {
+            if (screen == Screen.PACK && findPack(kind, pack) == null) {
                 screen = Screen.PACKS;
                 pack = null;
             }
-            Menu menu = new Menu(viewer.getUniqueId(), owner, screen, page, chosen, pack);
+            Menu menu = new Menu(viewer.getUniqueId(), owner, screen, page, chosen, pack, kind);
             Component titleComponent;
             if (screen == Screen.PROFILE) {
                 // Основное меню профиля: кастомная фоновая текстура profile-menu1.png
@@ -790,10 +877,12 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                     case CUSTOMIZE -> "Настроить";
                     case COSMETIC -> "Выбрать косметику";
                     case COSMETIC_CASE -> "Вскрытие кейса косметики";
-                    case PACKS -> "Префиксы";
+                    case PACKS -> menu.packKind == PackKind.COSMETIC ? "Наборы косметики" : "Префиксы";
                     case PACK -> {
-                        PrefixPackCatalog.Pack shown = menu.pack == null ? null : packs.get(menu.pack);
-                        yield shown == null ? "Пак префиксов" : shown.name();
+                        ItemPack shown = findPack(menu.packKind, menu.pack);
+                        yield shown == null
+                                ? (menu.packKind == PackKind.COSMETIC ? "Пак косметики" : "Пак префиксов")
+                                : shown.name();
                     }
                 };
                 titleComponent = Component.text(title, NamedTextColor.DARK_GRAY);
@@ -847,6 +936,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             if (menu.page > 0) inventory.setItem(9, items.page(false, menu.page, pages));
             if (menu.page + 1 < pages) inventory.setItem(17, items.page(true, menu.page, pages));
             inventory.setItem(13, items.cosmeticCase(data.cosmeticCases()));
+            inventory.setItem(COSMETIC_PACKS_SLOT, items.cosmeticPacksButton(cosmeticPackCaseTotal(data)));
             return;
         }
         if (menu.screen == Screen.COSMETIC_CASE) {
@@ -869,11 +959,13 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             return;
         }
         if (menu.screen == Screen.PACKS) {
-            populatePacks(menu, data);
+            if (menu.packKind == PackKind.COSMETIC) populateCosmeticPacks(menu, data);
+            else populatePacks(menu, data);
             return;
         }
         if (menu.screen == Screen.PACK) {
-            populatePack(menu, data);
+            if (menu.packKind == PackKind.COSMETIC) populateCosmeticPack(menu, data);
+            else populatePack(menu, data);
             return;
         }
         if (menu.screen == Screen.PREFIX) {
@@ -1039,7 +1131,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         inventory.setItem(41, invBtn);
 
         // [8] Сумма всех круток (слот 43)
-        int totalSpins = data.prefixCases() + data.cosmeticCases();
+        int totalSpins = data.prefixCases() + data.cosmeticCases()
+                + cosmeticPackCaseTotal(data);
         for (List<Long> list : data.packCasesSnapshot().values()) {
             if (list != null) totalSpins += list.size();
         }
@@ -1081,6 +1174,20 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     private static boolean isMedalSettingsSlot(int slot) {
         return slot == 25 || slot == 26 || slot == 34 || slot == 35;
+    }
+
+    /** Пак по виду и id: префиксов или косметики. */
+    private ItemPack findPack(PackKind kind, String id) {
+        return kind == PackKind.COSMETIC ? cosmeticPacks.get(id) : packs.get(id);
+    }
+
+    /** Сколько всего кейсов наборов косметики у игрока — для кнопки «Наборы косметики». */
+    private static int cosmeticPackCaseTotal(ProfileData data) {
+        int total = 0;
+        for (List<Long> list : data.cosmeticPackCasesSnapshot().values()) {
+            if (list != null) total += list.size();
+        }
+        return total;
     }
 
     /**
@@ -1161,6 +1268,76 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     /**
+     * Меню наборов косметики: средний ряд — сундучки наборов (до девяти),
+     * верхний и нижний — случайная косметика из всего каталога. Устройство
+     * ровно как у меню паков префиксов.
+     */
+    private void populateCosmeticPacks(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        menu.packsBySlot.clear();
+        menu.cosmeticsBySlot.clear();
+
+        List<CosmeticPackCatalog.Pack> all = cosmeticPacks.packs();
+        int shown = Math.min(all.size(), PACK_ROW_SIZE);
+        int start = PACK_ROW_START + Math.max(0, (PACK_ROW_SIZE - shown) / 2);
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < shown; i++) {
+            CosmeticPackCatalog.Pack pack = all.get(i);
+            int slot = start + i;
+            menu.packsBySlot.put(slot, pack.id());
+            inventory.setItem(slot, items.cosmeticPack(pack, data.cosmeticPackCases(pack.id()),
+                    data.nearestCosmeticPackExpiry(pack.id()), now));
+        }
+
+        List<CosmeticCatalog.Cosmetic> catalog = cosmetics.list();
+        if (catalog.isEmpty()) return;
+        for (int row : new int[] {0, 2}) {
+            for (int column = 0; column < 9; column++) {
+                CosmeticCatalog.Cosmetic cosmetic = catalog.get(
+                        java.util.concurrent.ThreadLocalRandom.current().nextInt(catalog.size()));
+                int slot = row * 9 + column;
+                menu.cosmeticsBySlot.put(slot, cosmetic.id());
+                inventory.setItem(slot, items.cosmeticEntry(cosmetic, data.ownsCosmetic(cosmetic.id()),
+                        cosmetic.id().equals(data.equippedCosmetic())));
+            }
+        }
+    }
+
+    /**
+     * Экран одного набора косметики: что внутри — сверху и снизу, в середине
+     * кнопка «крутить кейс набора» и отмена назад к списку наборов.
+     */
+    private void populateCosmeticPack(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        menu.packsBySlot.clear();
+        menu.cosmeticsBySlot.clear();
+
+        CosmeticPackCatalog.Pack pack = menu.pack == null ? null : cosmeticPacks.get(menu.pack);
+        if (pack == null) {
+            populateCosmeticPacks(menu, data);
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        int slot = PACK_TOP_ROW;
+        for (CosmeticCatalog.Cosmetic raw : pack.cosmetics()) {
+            // Показываем запись из общего каталога: у неё тот же номер, что при выдаче
+            // командой. Косметику, которой в каталоге уже нет, показываем как есть.
+            CosmeticCatalog.Cosmetic cosmetic = cosmetics.get(raw.id()) == null ? raw : cosmetics.get(raw.id());
+            if (slot > PACK_TOP_ROW + 8) slot = PACK_BOTTOM_ROW;
+            if (slot > PACK_BOTTOM_ROW + 8) break; // Больше восемнадцати в меню не поместят.
+            menu.cosmeticsBySlot.put(slot, cosmetic.id());
+            inventory.setItem(slot, items.cosmeticEntry(cosmetic, data.ownsCosmetic(cosmetic.id()),
+                    cosmetic.id().equals(data.equippedCosmetic())));
+            slot++;
+        }
+
+        inventory.setItem(PACK_BACK_SLOT, items.backToPacks());
+        inventory.setItem(PACK_SPIN_SLOT, items.cosmeticPackCase(pack, data.cosmeticPackCases(pack.id()),
+                data.nearestCosmeticPackExpiry(pack.id()), now));
+    }
+
+    /**
      * Нажать префикс в меню: надеть свой, снять шифтом, если надет. Чужой не
      * трогаем — просто говорим, что его нет.
      */
@@ -1175,6 +1352,24 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         if (shift && picked.equals(data.equippedPrefix())) unequipPrefix(player, data);
         else if (!picked.equals(data.equippedPrefix())) equipPrefix(player, data, picked);
+        else clickSound(player);
+    }
+
+    /**
+     * Нажать косметику в меню (список косметики, наборы): надеть свою, снять
+     * шифтом, если надета. Чужую не трогаем — просто говорим, что её нет.
+     */
+    private void pickCosmetic(Player player, Menu menu, ProfileData data, int slot, boolean shift) {
+        String picked = menu.cosmeticsBySlot.get(slot);
+        if (picked == null) return;
+        CosmeticCatalog.Cosmetic cosmetic = cosmetics.get(picked);
+        if (cosmetic == null) return;
+        if (!data.ownsCosmetic(picked)) {
+            player.sendMessage(ProfileItems.text("У вас нету этой косметики!", NamedTextColor.RED));
+            return;
+        }
+        if (shift && picked.equals(data.equippedCosmetic())) unequipCosmetic(player, data);
+        else if (!picked.equals(data.equippedCosmetic())) equipCosmetic(player, data, picked);
         else clickSound(player);
     }
 
@@ -1368,20 +1563,34 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             String packId = menu.packsBySlot.get(slot);
             if (packId != null) {
                 // Сундучок пака — не сразу кейс: сначала показываем, что внутри.
-                if (packs.get(packId) != null) { clickSound(player); open(player, data.owner, Screen.PACK, 0, null, packId); }
+                if (findPack(menu.packKind, packId) != null) {
+                    clickSound(player);
+                    open(player, data.owner, Screen.PACK, 0, null, packId, menu.packKind);
+                }
                 return;
             }
-            pickPrefix(player, menu, data, slot, shift);
+            if (menu.packKind == PackKind.COSMETIC) pickCosmetic(player, menu, data, slot, shift);
+            else pickPrefix(player, menu, data, slot, shift);
             return;
         }
         if (menu.screen == Screen.PACK) {
-            if (slot == PACK_BACK_SLOT) { clickSound(player); open(player, data.owner, Screen.PACKS, 0, null); return; }
-            if (slot == PACK_SPIN_SLOT) {
-                PrefixPackCatalog.Pack pack = menu.pack == null ? null : packs.get(menu.pack);
-                if (pack != null) { clickSound(player); openPackCase(player, data, pack); }
+            if (slot == PACK_BACK_SLOT) {
+                clickSound(player);
+                open(player, data.owner, Screen.PACKS, 0, null, null, menu.packKind);
                 return;
             }
-            pickPrefix(player, menu, data, slot, shift);
+            if (slot == PACK_SPIN_SLOT) {
+                if (menu.packKind == PackKind.COSMETIC) {
+                    CosmeticPackCatalog.Pack pack = menu.pack == null ? null : cosmeticPacks.get(menu.pack);
+                    if (pack != null) { clickSound(player); openCosmeticPackCase(player, data, pack); }
+                } else {
+                    PrefixPackCatalog.Pack pack = menu.pack == null ? null : packs.get(menu.pack);
+                    if (pack != null) { clickSound(player); openPackCase(player, data, pack); }
+                }
+                return;
+            }
+            if (menu.packKind == PackKind.COSMETIC) pickCosmetic(player, menu, data, slot, shift);
+            else pickPrefix(player, menu, data, slot, shift);
             return;
         }
         if (menu.screen == Screen.PREFIX) {
@@ -1409,21 +1618,13 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             if (slot == 9 && menu.page > 0) { clickSound(player); open(player, data.owner, Screen.COSMETIC, menu.page - 1, null); return; }
             if (slot == 17 && (menu.page + 1) * 18 < cosmetics.size()) { clickSound(player); open(player, data.owner, Screen.COSMETIC, menu.page + 1, null); return; }
             if (slot == 13) { clickSound(player); openCosmeticCase(player, data); return; }
-            String id = menu.cosmeticsBySlot.get(slot);
-            if (id == null) return;
-            CosmeticCatalog.Cosmetic cosmetic = cosmetics.get(id);
-            if (cosmetic == null) return;
-            if (!data.ownsCosmetic(id)) {
-                player.sendMessage(ProfileItems.text("У вас нету этой косметики!", NamedTextColor.RED));
+            if (slot == COSMETIC_PACKS_SLOT) {
+                // Наборы косметики — те же экраны паков, только с косметикой внутри.
+                clickSound(player);
+                open(player, data.owner, Screen.PACKS, 0, null, null, PackKind.COSMETIC);
                 return;
             }
-            if (shift && id.equals(data.equippedCosmetic())) {
-                unequipCosmetic(player, data);
-            } else if (!id.equals(data.equippedCosmetic())) {
-                equipCosmetic(player, data, id);
-            } else {
-                clickSound(player);
-            }
+            pickCosmetic(player, menu, data, slot, shift);
             return;
         }
         if (menu.screen == Screen.PREFIX_CASE || menu.screen == Screen.COSMETIC_CASE) return; // Вскрытие идёт само; клики по меню не мешают.
@@ -1792,38 +1993,51 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     /**
      * /profile case pack give|take <ник> <пак> [число] — выдать или забрать
-     * кейсы пака, /profile case pack list <ник> — сколько их у игрока.
+     * кейсы пака префиксов, /profile case pack list <ник> — сколько их у игрока.
      *
-     * Срок кейса считается с момента выдачи: {@code time-hours} из файла пака
+     * <p>То же самое для наборов косметики — {@code /profile case cpack ...}
+     * (можно писать и {@code cosmeticpack}). Команды одинаковые, различается
+     * только вид пака, поэтому метод один.
+     *
+     * <p>Срок кейса считается с момента выдачи: {@code time-hours} из файла пака
      * ({@code -1} — бессрочный).
      */
-    private void packCaseCommand(CommandSender sender, String[] args) throws Exception {
+    private void packCaseCommand(CommandSender sender, String[] args, boolean cosmetic) throws Exception {
+        String command = cosmetic ? "cpack" : "pack";
+        String what = cosmetic ? "набора" : "пака";
         if (args.length < 4) {
-            throw new IllegalArgumentException("Использование: /profile case pack give|take <ник> <пак> [число] | /profile case pack list <ник>");
+            throw new IllegalArgumentException("Использование: /profile case " + command
+                    + " give|take <ник> <пак> [число] | /profile case " + command + " list <ник>");
         }
         String action = args[2].toLowerCase(java.util.Locale.ROOT);
         if (!action.equals("give") && !action.equals("take") && !action.equals("list")) {
             throw new IllegalArgumentException("Действие: give, take или list");
         }
+        List<ItemPack> all = new ArrayList<>();
+        if (cosmetic) all.addAll(cosmeticPacks.packs());
+        else all.addAll(packs.packs());
         if (action.equals("list")) {
             Target target = medalTarget(args[3]);
             ProfileData data = profile(target.id(), target.name());
-            sender.sendMessage(ProfileItems.text("Кейсы паков: " + data.name(), NamedTextColor.GRAY));
+            sender.sendMessage(ProfileItems.text((cosmetic ? "Кейсы наборов косметики: " : "Кейсы паков: ") + data.name(),
+                    NamedTextColor.GRAY));
             boolean any = false;
-            for (PrefixPackCatalog.Pack pack : packs.packs()) {
-                int count = data.packCases(pack.id());
+            for (ItemPack pack : all) {
+                int count = packCaseCount(data, cosmetic, pack.id());
                 if (count <= 0) continue;
                 any = true;
                 sender.sendMessage(ProfileItems.text("  " + pack.name() + " — " + count + " (" + pack.id() + ")",
                         NamedTextColor.WHITE));
             }
-            if (!any) sender.sendMessage(ProfileItems.text("  кейсов паков нет", NamedTextColor.DARK_GRAY));
+            if (!any) sender.sendMessage(ProfileItems.text("  кейсов нет", NamedTextColor.DARK_GRAY));
             return;
         }
         if (args.length < 5) {
-            throw new IllegalArgumentException("Использование: /profile case pack give|take <ник> <пак> [число]");
+            throw new IllegalArgumentException("Использование: /profile case " + command + " give|take <ник> <пак> [число]");
         }
-        PrefixPackCatalog.Pack pack = packs.resolve(args[4]);
+        ItemPack pack;
+        if (cosmetic) pack = cosmeticPacks.resolve(args[4]);
+        else pack = packs.resolve(args[4]);
         if (pack == null) throw new IllegalArgumentException("Нет такого пака: " + args[4]);
         int amount = 1;
         if (args.length >= 6) {
@@ -1839,13 +2053,13 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         long now = System.currentTimeMillis();
         if (action.equals("give")) {
             for (int i = 0; i < amount; i++) {
-                data.addPackCase(pack.id(), PrefixPackCatalog.expiresAt(now, pack.timeHours()));
+                packCaseAdd(data, cosmetic, pack.id(), PackFile.expiresAt(now, pack.timeHours()));
             }
         } else {
             int taken = 0;
-            for (int i = 0; i < amount; i++) if (data.takePackCase(pack.id())) taken++;
+            for (int i = 0; i < amount; i++) if (packCaseTake(data, cosmetic, pack.id())) taken++;
             if (taken == 0) {
-                sender.sendMessage(ProfileItems.text("У игрока «" + data.name() + "» нет кейсов пака «"
+                sender.sendMessage(ProfileItems.text("У игрока «" + data.name() + "» нет кейсов " + what + " «"
                         + pack.name() + "».", NamedTextColor.RED));
                 return;
             }
@@ -1856,7 +2070,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         Player online = Bukkit.getPlayer(data.owner);
         if (online != null && online.isOnline()) {
             online.sendMessage(ProfileItems.text((action.equals("give") ? "Вы получили " : "У вас забрали ")
-                    + amount + " " + ProfileItems.plural(amount, "кейс", "кейса", "кейсов") + " пака «"
+                    + amount + " " + ProfileItems.plural(amount, "кейс", "кейса", "кейсов") + " " + what + " «"
                     + pack.name() + "»" + (action.equals("give") ? " (" + tail + ")" : "") + "!",
                     action.equals("give") ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
             if (action.equals("give")) {
@@ -1865,10 +2079,26 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         if (!(sender instanceof Player self) || !self.getUniqueId().equals(data.owner)) {
             sender.sendMessage("§7" + (action.equals("give") ? "Выдано " : "Забрано ") + amount + " "
-                    + ProfileItems.plural(amount, "кейс", "кейса", "кейсов") + " пака «" + pack.name()
+                    + ProfileItems.plural(amount, "кейс", "кейса", "кейсов") + " " + what + " «" + pack.name()
                     + "» (" + pack.id() + "): " + data.name());
         }
         refresh(data.owner);
+    }
+
+    /** Сколько кейсов пака у игрока — пака префиксов или набора косметики. */
+    private static int packCaseCount(ProfileData data, boolean cosmetic, String packId) {
+        return cosmetic ? data.cosmeticPackCases(packId) : data.packCases(packId);
+    }
+
+    /** Забрать один кейс пака — префиксов или косметики. */
+    private static boolean packCaseTake(ProfileData data, boolean cosmetic, String packId) {
+        return cosmetic ? data.takeCosmeticPackCase(packId) : data.takePackCase(packId);
+    }
+
+    /** Выдать кейс пака — префиксов или косметики. */
+    private static void packCaseAdd(ProfileData data, boolean cosmetic, String packId, long expiresAt) {
+        if (cosmetic) data.addCosmeticPackCase(packId, expiresAt);
+        else data.addPackCase(packId, expiresAt);
     }
 
     /** /profile prefix give|take <игрок или UUID> <номер|all>, /profile prefix list <игрок>, /profile prefix reload. */
@@ -2000,7 +2230,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     /** /profile case prefix|cosmetic give <ник> — выдать игроку кейс. */
     private void caseCommand(CommandSender sender, String[] args) throws Exception {
         if (args.length >= 2 && args[1].equalsIgnoreCase("pack")) {
-            packCaseCommand(sender, args);
+            packCaseCommand(sender, args, false);
+            return;
+        }
+        if (args.length >= 2 && (args[1].equalsIgnoreCase("cpack") || args[1].equalsIgnoreCase("cosmeticpack"))) {
+            packCaseCommand(sender, args, true);
             return;
         }
         boolean cosmetic = args.length >= 2 && args[1].equalsIgnoreCase("cosmetic");
@@ -2033,9 +2267,15 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
      */
     public String reloadCosmetics() {
         CosmeticCatalog previous = cosmetics;
+        CosmeticPackCatalog nextPacks;
         CosmeticCatalog next;
         try {
-            next = CosmeticCatalog.load(cosmeticConfig, cosmeticFolder);
+            // Наборы читаются раньше каталога: косметика наборов входит в общий список,
+            // иначе выигранную из набора вещь некуда надеть.
+            CosmeticCatalog base = CosmeticCatalog.load(cosmeticConfig);
+            nextPacks = CosmeticPackCatalog.load(cosmeticPackFolder, base,
+                    message -> plugin.getLogger().warning(message));
+            next = base.withPacks(nextPacks);
         } catch (Exception ex) {
             plugin.getLogger().log(java.util.logging.Level.WARNING,
                     "Не перечитана косметика: прежний каталог сохранён (" + ex.getMessage() + ")", ex);
@@ -2048,6 +2288,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             if (previous.get(cosmetic.id()) == null) added++;
         }
         cosmetics = next;
+        cosmeticPacks = nextPacks;
         for (Player player : Bukkit.getOnlinePlayers()) {
             try {
                 ProfileData data = profile(player);
@@ -2070,7 +2311,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
         return "Косметика перезагружена: " + next.size() + " (№" + next.numbersText() + "), новых: " + added
-                + ". Файлы: " + cosmeticConfig + " и " + cosmeticFolder + "/*.yml";
+                + ", наборов " + nextPacks.size()
+                + ". Файл: " + cosmeticConfig + ", наборы: " + cosmeticPackFolder + "/*.yml";
     }
 
     /**
@@ -2306,8 +2548,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             sender.sendMessage("§7/profile prefix test [игрок] — проверить глифы ресурспака (картинки, а не квадраты)");
             sender.sendMessage("§6/profile prefix list <игрок> — какие префиксы есть у игрока");
             sender.sendMessage("§6/profile prefix reload — перечитать prefixes.yml и паки");
-            sender.sendMessage("§6/profile case pack give|take <ник> <пак> [число] — кейсы пака");
+            sender.sendMessage("§6/profile case pack give|take <ник> <пак> [число] — кейсы пака префиксов");
             sender.sendMessage("§6/profile case pack list <ник> — сколько кейсов паков у игрока");
+            sender.sendMessage("§6/profile case cpack give|take <ник> <набор> [число] — кейсы набора косметики");
+            sender.sendMessage("§6/profile case cpack list <ник> — сколько кейсов наборов у игрока");
             sender.sendMessage("§6/profile cosmetic give|take <игрок> <номер|all> — выдать/забрать косметику по номеру или всю сразу");
             sender.sendMessage("§6/profile cosmetic list <игрок> — какая косметика есть у игрока");
             sender.sendMessage("§6/profile cosmetic reload — перечитать settings/cosmetics.yml");
@@ -2327,11 +2571,16 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         else if (admin(sender) && args.length == 2 && args[0].equalsIgnoreCase("clone")) options = List.of("remove");
         else if (admin(sender) && args[0].equalsIgnoreCase("case")) {
             boolean any = args.length >= 2 && (args[1].equalsIgnoreCase("prefix") || args[1].equalsIgnoreCase("cosmetic"));
-            if (args.length == 2) options = List.of("prefix", "cosmetic", "pack");
+            boolean cosmeticPack = args.length >= 2 && (args[1].equalsIgnoreCase("cpack")
+                    || args[1].equalsIgnoreCase("cosmeticpack"));
+            boolean packAction = cosmeticPack || (args.length >= 2 && args[1].equalsIgnoreCase("pack"));
+            if (args.length == 2) options = List.of("prefix", "cosmetic", "pack", "cpack");
             else if (args.length == 3 && any) options = List.of("give");
-            else if (args.length == 3 && args[1].equalsIgnoreCase("pack")) options = List.of("give", "take", "list");
-            else if (args.length >= 5 && args[1].equalsIgnoreCase("pack") && !args[2].equalsIgnoreCase("list")) {
-                options = packs.packs().stream().map(PrefixPackCatalog.Pack::id).toList();
+            else if (args.length == 3 && packAction) options = List.of("give", "take", "list");
+            else if (args.length >= 5 && packAction && !args[2].equalsIgnoreCase("list")) {
+                options = cosmeticPack
+                        ? cosmeticPacks.packs().stream().map(CosmeticPackCatalog.Pack::id).toList()
+                        : packs.packs().stream().map(PrefixPackCatalog.Pack::id).toList();
             }
             else if (args.length == 4 && any && args[2].equalsIgnoreCase("give"))
                 options = Bukkit.getOnlinePlayers().stream()

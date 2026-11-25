@@ -436,9 +436,23 @@ public class F8Command implements CommandExecutor, Listener {
         };
     }
 
-    /** Все напитки плагина, которые можно получить из /f8 → предметы → напитки. */
+    /** Напитки из комплекта — они в меню всегда и в этом порядке. */
     static final List<String> DRINK_CATALOG = List.of(
             "drink_mead", "drink_matcha_tea", "drink_daiquiri", "drink_iced_latte", "drink_murk", "drink_pirate_rum");
+
+    /**
+     * Все напитки, которые можно получить из /f8 → предметы → напитки: сначала
+     * привычный комплект, потом всё, что владелец дописал в
+     * {@code settings/recipe-poilo.yml}. Новый напиток появляется в меню сам.
+     */
+    static List<String> drinkCatalog() {
+        List<String> ids = new ArrayList<>(DRINK_CATALOG);
+        for (DrinkRecipes.Drink drink : DrinkRecipes.current().list()) {
+            String id = "drink_" + drink.id();
+            if (!ids.contains(id)) ids.add(id);
+        }
+        return ids;
+    }
 
     private ItemStack drinkItem(String id) {
         return switch (id) {
@@ -448,7 +462,14 @@ public class F8Command implements CommandExecutor, Listener {
             case "drink_iced_latte" -> Shaker.createDrinkItem(Shaker.RECIPE_ICED_LATTE);
             case "drink_murk" -> Shaker.createDrinkItem(Shaker.RECIPE_MURK);
             case "drink_pirate_rum" -> BambooBarrel.createPirateRum();
-            default -> throw new IllegalArgumentException("Неизвестный напиток каталога");
+            default -> {
+                // Напиток, добавленный в settings/recipe-poilo.yml: готовим по рецепту из файла.
+                if (id.startsWith("drink_")
+                        && DrinkRecipes.current().get(id.substring("drink_".length())) != null) {
+                    yield Shaker.createDrinkItem(id.substring("drink_".length()));
+                }
+                throw new IllegalArgumentException("Неизвестный напиток каталога");
+            }
         };
     }
 
@@ -456,9 +477,10 @@ public class F8Command implements CommandExecutor, Listener {
     private void openDrinkMenu(Player player) {
         Inventory inventory = Bukkit.createInventory(null, 54, DRINK_TITLE);
         fill(inventory);
-        int[] slots = {19, 20, 21, 22, 23, 24};
-        for (int i = 0; i < DRINK_CATALOG.size(); i++) {
-            String id = DRINK_CATALOG.get(i);
+        int[] slots = {19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34, 37, 38, 39, 40, 41, 42, 43};
+        List<String> drinks = drinkCatalog();
+        for (int i = 0; i < drinks.size() && i < slots.length; i++) {
+            String id = drinks.get(i);
             inventory.setItem(slots[i], createTaggedItem(drinkItem(id), id));
         }
         inventory.setItem(49, createMenuItem(Material.ARROW, "§7Назад", Collections.emptyList(), "back_items"));
@@ -684,7 +706,7 @@ public class F8Command implements CommandExecutor, Listener {
         }
 
         if (!player.hasPermission("f8.admin")) return;
-        if (title.equals(DRINK_TITLE) && DRINK_CATALOG.contains(id)) {
+        if (title.equals(DRINK_TITLE) && drinkCatalog().contains(id)) {
             Inventory source = event.getView().getTopInventory();
             Bukkit.getScheduler().runTask(plugin, () -> {
                 if (player.isOnline() && player.hasPermission("f8.admin") && player.getOpenInventory().getTopInventory() == source) {

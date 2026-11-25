@@ -23,7 +23,7 @@ import java.util.List;
  * <ul>
  *   <li>{@code settings/} — всё, что правит владелец: бой, питомцы, небо, медь,
  *       напитки, рыбалка, Gouge, профили, префиксы, косметика, медали, голос;</li>
- *   <li>{@code content/} — каталоги-контенты: паки префиксов и файлы косметики;</li>
+ *   <li>{@code content/} — каталоги-контенты: паки префиксов и наборы косметики;</li>
  *   <li>{@code data/} — всё, что плагин пишет сам: прогресс, ноты медных блоков,
  *       кувшины, кораллы, созвездия, профили игроков, записи голоса.</li>
  * </ul>
@@ -35,7 +35,7 @@ final class Layout {
 
     /** Настройки: правит владелец. */
     static final String SETTINGS = "settings";
-    /** Контент: паки префиксов, файлы косметики. */
+    /** Контент: паки префиксов и наборы косметики. */
     static final String CONTENT = "content";
     /** Данные: плагин пишет сам. */
     static final String DATA = "data";
@@ -102,7 +102,7 @@ final class Layout {
     };
 
     /** Что раньше лежало в корне, а теперь живёт в {@code content/}. */
-    private static final String[] LEGACY_CONTENT = {"prefixpacks", "cosmetics"};
+    private static final String[] LEGACY_CONTENT = {"prefixpacks", "cosmeticpacks"};
 
     /**
      * Что где лежит — для {@code /f8 config}: только путь и есть ли он.

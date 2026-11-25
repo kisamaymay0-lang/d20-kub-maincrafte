@@ -302,6 +302,81 @@ final class ProfileItems {
         return item;
     }
 
+    /**
+     * Сундучок пака косметики: название набора, сколько кейсов лежит у игрока
+     * и что внутри. Рисуется так же, как сундучок пака префиксов, — только
+     * вместо имён префиксов показывает косметику.
+     */
+    ItemStack cosmeticPack(CosmeticPackCatalog.Pack pack, int cases, long nearestExpiry, long now) {
+        List<Component> lore = packLore(pack.size(), "косметика", "косметики", "косметик", cases, nearestExpiry, now,
+                cases > 0 ? "Нажмите, чтобы открыть" : "Кейсы выдаёт администратор",
+                cosmeticNames(pack));
+        ItemStack item = named(Material.CHEST, medals.title(pack.name(), ProfileMedal.Metal.GOLD), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** Кнопка «крутить кейс пака косметики» на экране пака. */
+    ItemStack cosmeticPackCase(CosmeticPackCatalog.Pack pack, int cases, long nearestExpiry, long now) {
+        List<Component> lore = packLore(pack.size(), "косметика", "косметики", "косметик", cases, nearestExpiry, now,
+                cases > 0 ? "Нажмите, чтобы крутить кейс" : "Кейсы выдаёт администратор",
+                cosmeticNames(pack));
+        ItemStack item = named(Material.CHEST, medals.title("Крутить кейс пака", ProfileMedal.Metal.GOLD), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /**
+     * Кнопка «наборы косметики» в меню косметики: сколько всего кейсов наборов
+     * лежит у игрока. Ноль кейсов — кнопка всё равно открывается: там видно,
+     * что бывает в наборах.
+     */
+    ItemStack cosmeticPacksButton(int cases) {
+        List<Component> lore = new ArrayList<>();
+        lore.add(text(cases == 0 ? "Кейсов наборов нет"
+                        : "В наборах " + cases + " " + plural(cases, "кейс", "кейса", "кейсов"),
+                cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED));
+        lore.add(text("Нажмите, чтобы посмотреть наборы", NamedTextColor.DARK_GRAY));
+        ItemStack item = named(Material.ENDER_CHEST, medals.title("Наборы косметики", ProfileMedal.Metal.GOLD), lore);
+        ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(cases > 0);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** Имена косметики пака: по строке на предмет. */
+    private static List<Component> cosmeticNames(CosmeticPackCatalog.Pack pack) {
+        List<Component> lines = new ArrayList<>();
+        for (CosmeticCatalog.Cosmetic cosmetic : pack.cosmetics()) {
+            lines.add(text(" §7§l•§r ", NamedTextColor.DARK_GRAY).append(text(cosmetic.name(), cosmetic.color())));
+        }
+        return lines;
+    }
+
+    /** Общая подпись пака: сколько кейсов, что делать, что внутри и когда сгорит ближайший. */
+    private static List<Component> packLore(int size, String one, String few, String many, int cases,
+                                            long nearestExpiry, long now, String action, List<Component> inside) {
+        List<Component> lore = new ArrayList<>();
+        lore.add(text(cases > 0 ? countText(cases) : "Нет кейсов этого пака",
+                cases > 0 ? NamedTextColor.GRAY : NamedTextColor.RED));
+        lore.add(text(action, NamedTextColor.DARK_GRAY));
+        lore.add(Component.empty());
+        lore.add(text("Внутри " + size + " " + plural(size, one, few, many), NamedTextColor.GOLD));
+        lore.addAll(inside);
+        if (cases > 0) {
+            lore.add(Component.empty());
+            lore.add(text(nearestExpiry == Long.MAX_VALUE
+                            ? "Кейсы бессрочные"
+                            : "Ближайший сгорит через " + PackFile.leftText(nearestExpiry, now),
+                    NamedTextColor.DARK_GRAY));
+        }
+        return lore;
+    }
+
     /** Кнопка отмены на экране пака: обратно к списку паков. */
     ItemStack backToPacks() {
         return item(Material.ARROW, "Назад к пакам", NamedTextColor.GOLD, List.of(

@@ -376,11 +376,19 @@ public class BambooBarrel implements Listener {
         PotionMeta meta = (PotionMeta) potion.getItemMeta();
         if (meta != null) {
             meta.setBasePotionType(PotionType.WATER);
-            Component name = Component.text("Пиратский ром", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false);
+            // Название, модель и цвет рома — из settings/recipe-poilo.yml (method: barrel).
+            DrinkRecipes.Drink recipe = DrinkRecipes.current().get(Shaker.RECIPE_PIRATE_RUM);
+            Component name = Component.text(recipe != null ? recipe.name() : Shaker.NAME_PIRATE_RUM,
+                    NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false);
             meta.itemName(name);
             meta.displayName(name);
-            meta.setItemModel(MODEL_PIRATE_RUM_KEY);
-            meta.setColor(Color.fromRGB(0x8B, 0x3A, 0x14));
+            if (recipe != null && !recipe.model().isEmpty()) {
+                meta.setItemModel(new NamespacedKey("f8resurs", recipe.model()));
+            } else {
+                meta.setItemModel(MODEL_PIRATE_RUM_KEY);
+            }
+            if (recipe != null) meta.setColor(Color.fromRGB(recipe.color().value()));
+            else meta.setColor(Color.fromRGB(0x8B, 0x3A, 0x14));
             meta.getPersistentDataContainer().set(PIRATE_RUM_KEY, PersistentDataType.BYTE, (byte) 1);
             meta.getPersistentDataContainer().set(RUM_YEARS_KEY, PersistentDataType.INTEGER, years);
             meta.getPersistentDataContainer().set(RUM_TRANSFERS_KEY, PersistentDataType.INTEGER, transfers);

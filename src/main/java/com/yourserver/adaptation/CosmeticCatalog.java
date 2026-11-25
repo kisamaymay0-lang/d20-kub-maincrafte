@@ -6,23 +6,25 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Stream;
 
 /**
- * Неизменяемый список косметики из settings/cosmetics.yml и дополнительных
- * {@code content/cosmetics/*.yml}. Устройство ровно как у {@link PrefixCatalog}:
- * «номер» косметики берётся из имени модели (kosmetika1 → №1), по нему косметику
- * выдают и забирают командой. Модель без цифр получает первый свободный номер.
+ * Неизменяемый список косметики из {@code settings/cosmetics.yml}. Устройство
+ * ровно как у {@link PrefixCatalog}: «номер» косметики берётся из имени модели
+ * (kosmetika1 → №1), по нему косметику выдают и забирают командой. Модель без
+ * цифр получает первый свободный номер.
  *
- * Отличие от префикса только в том, КАК косметика показывается: префикс — это
+ * <p>Дополнительных файлов у косметики нет: всё описано в
+ * {@code settings/cosmetics.yml}. Наборы (кейсы) описываются отдельно — файлами
+ * в {@code content/cosmeticpacks/}, см. {@link CosmeticPackCatalog}: пак только
+ * перечисляет файлы моделей, а имя и цвет берёт отсюда.
+ *
+ * <p>Отличие от префикса только в том, КАК косметика показывается: префикс — это
  * картинка перед ником, а косметика — предмет, который визуально надет на
  * голову игрока (модель из ресурспака: {@code file: kosmetika1} → предмет
  * {@code f8resurs:kosmetika1}).
@@ -52,75 +54,65 @@ final class CosmeticCatalog {
         return new CosmeticCatalog(byId);
     }
 
-    static CosmeticCatalog load(Path path) throws Exception {
-        return loadFiles(List.of(path));
-    }
-
     /**
-     * Загрузить основной файл и все дополнительные {@code cosmetics/*.yml}.
-     * Папка перечисляется заново при каждом вызове, поэтому новый файл не
-     * требует перезапуска сервера. Основной файл всегда идёт первым — его
-     * старые номера не сдвигаются при добавлении дополнительного файла.
+     * Прочитать {@code settings/cosmetics.yml}: только свои записи, без паков.
+     * По этому каталогу паки косметики находят имена и цвета: пак перечисляет
+     * файлы моделей, а всё остальное берётся отсюда.
      */
-    static CosmeticCatalog load(Path primary, Path additionalFolder) throws Exception {
-        List<Path> files = new ArrayList<>();
-        files.add(primary);
-        if (additionalFolder != null && Files.isDirectory(additionalFolder)) {
-            try (Stream<Path> stream = Files.list(additionalFolder)) {
-                stream.filter(Files::isRegularFile)
-                        .filter(CosmeticCatalog::isYaml)
-                        .sorted(Comparator.comparing((Path path) -> path.getFileName().toString(),
-                                String.CASE_INSENSITIVE_ORDER).thenComparing(path -> path.getFileName().toString()))
-                        .forEach(files::add);
-            }
-        }
-        return loadFiles(files);
-    }
-
-    private static boolean isYaml(Path path) {
-        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
-        return name.endsWith(".yml") || name.endsWith(".yaml");
-    }
-
-    private static CosmeticCatalog loadFiles(List<Path> paths) throws Exception {
+    static CosmeticCatalog load(Path path) throws Exception {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.loadFromString(Files.readString(path));
+        ConfigurationSection section = yaml.getConfigurationSection("cosmetics");
+        if (section == null) throw new IllegalArgumentException("В settings/cosmetics.yml нет раздела cosmetics");
         Map<String, Cosmetic> byId = new LinkedHashMap<>();
         Set<Integer> used = new LinkedHashSet<>();
         int fallback = 1;
-        boolean primary = true;
-        for (Path path : paths) {
-            YamlConfiguration yaml = new YamlConfiguration();
-            yaml.loadFromString(Files.readString(path));
-            ConfigurationSection section = yaml.getConfigurationSection("cosmetics");
-            if (section == null) {
-                // Основной файл без раздела cosmetics — ошибка. Дополнительный —
-                // просто чужой/пустой файл в папке: пропускаем, остальные читаются.
-                if (primary) throw new IllegalArgumentException("В " + path + " нет раздела cosmetics");
-                primary = false;
-                continue;
+        for (String id : section.getKeys(false)) {
+            String cleanId = ProfileText.clean(id);
+            if (cleanId.isEmpty()) continue;
+            String name = ProfileText.clean(section.getString(id + ".name", ""));
+            String file = ProfileText.clean(section.getString(id + ".file", cleanId));
+            if (name.isEmpty() || file.isEmpty()) {
+                throw new IllegalArgumentException("Не заполнена косметика " + cleanId + " в " + path);
             }
-            primary = false;
-            for (String id : section.getKeys(false)) {
-                String cleanId = ProfileText.clean(id);
-                if (cleanId.isEmpty()) continue;
-                String name = ProfileText.clean(section.getString(id + ".name", ""));
-                String file = ProfileText.clean(section.getString(id + ".file", cleanId));
-                if (name.isEmpty() || file.isEmpty()) {
-                    throw new IllegalArgumentException("Не заполнена косметика " + cleanId + " в " + path);
-                }
-                TextColor color = TextColor.fromHexString(section.getString(id + ".color", "#E6B94B"));
-                if (color == null) throw new IllegalArgumentException("Неверный цвет косметики " + cleanId + " в " + path);
-                // Номер — из имени модели (kosmetika1 → №1), как у префиксов: перестановка
-                // записей в файле не сдвигает номера выдачи. Нет цифр — первый свободный.
-                int number = PrefixCatalog.allocateNumber(file, used, fallback);
-                fallback = Math.max(fallback, number + 1);
-                Cosmetic cosmetic = new Cosmetic(cleanId, name, color, file, number);
-                if (byId.putIfAbsent(cleanId, cosmetic) != null) {
-                    throw new IllegalArgumentException("Повторяется id косметики " + cleanId + " в " + path);
-                }
+            TextColor color = TextColor.fromHexString(section.getString(id + ".color", "#E6B94B"));
+            if (color == null) throw new IllegalArgumentException("Неверный цвет косметики " + cleanId + " в " + path);
+            // Номер — из имени модели (kosmetika1 → №1), как у префиксов: перестановка
+            // записей в файле не сдвигает номера выдачи. Нет цифр — первый свободный.
+            int number = PrefixCatalog.allocateNumber(file, used, fallback);
+            fallback = Math.max(fallback, number + 1);
+            Cosmetic cosmetic = new Cosmetic(cleanId, name, color, file, number);
+            if (byId.putIfAbsent(cleanId, cosmetic) != null) {
+                throw new IllegalArgumentException("Повторяется id косметики " + cleanId + " в " + path);
             }
         }
         if (byId.isEmpty()) throw new IllegalArgumentException("Список косметики пуст");
         return new CosmeticCatalog(byId);
+    }
+
+    /**
+     * Тот же каталог, но с косметикой паков. Косметика пака, чей id уже есть
+     * (обычно так и бывает: пак ссылается на модель из {@code settings/cosmetics.yml}
+     * по её файлу), не добавляется второй раз — имя, цвет и номер остаются от
+     * файла настроек.
+     */
+    CosmeticCatalog withPacks(CosmeticPackCatalog packs) {
+        if (packs == null || packs.size() == 0) return this;
+        Map<String, Cosmetic> merged = new LinkedHashMap<>(byId);
+        Set<Integer> used = new LinkedHashSet<>();
+        for (Cosmetic cosmetic : ordered) {
+            used.add(cosmetic.number());
+        }
+        int fallback = 1;
+        for (CosmeticPackCatalog.Pack pack : packs.packs()) {
+            for (Cosmetic entry : pack.cosmetics()) {
+                if (merged.containsKey(entry.id())) continue;
+                int number = PrefixCatalog.allocateNumber(entry.file(), used, fallback);
+                fallback = Math.max(fallback, number + 1);
+                merged.put(entry.id(), new Cosmetic(entry.id(), entry.name(), entry.color(), entry.file(), number));
+            }
+        }
+        return new CosmeticCatalog(merged);
     }
 
     List<Cosmetic> list() { return ordered; }
@@ -131,6 +123,15 @@ final class CosmeticCatalog {
     Cosmetic byNumber(int number) {
         for (Cosmetic cosmetic : ordered) {
             if (cosmetic.number() == number) return cosmetic;
+        }
+        return null;
+    }
+
+    /** Косметика по файлу модели (file: kosmetika1) или null. По этому файлу паки косметики находят имя и цвет. */
+    Cosmetic byFile(String file) {
+        if (file == null || file.isEmpty()) return null;
+        for (Cosmetic cosmetic : ordered) {
+            if (cosmetic.file().equalsIgnoreCase(file)) return cosmetic;
         }
         return null;
     }

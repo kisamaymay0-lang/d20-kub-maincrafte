@@ -61,6 +61,7 @@ final class ProfileCodec {
         yaml.set("cosmetics.equipped", data.equippedCosmetic() == null ? "" : data.equippedCosmetic());
         yaml.set("cosmetics.cases", data.cosmeticCases());
         writePackCases(yaml, data);
+        writeCosmeticPackCases(yaml, data);
         List<String> slots = new ArrayList<>();
         for (UUID id : data.layout()) slots.add(id == null ? "" : id.toString());
         yaml.set("display", slots);
@@ -72,9 +73,13 @@ final class ProfileCodec {
      * пишется как есть — он и означает «бессрочный».
      */
     private static void writePackCases(YamlConfiguration yaml, ProfileData data) {
-        Map<String, List<Long>> cases = data.packCasesSnapshot();
+        writeSection(yaml, "prefix-packs", data.packCasesSnapshot());
+    }
+
+    /** Общая запись стопки кейсов пака: id пака -> сроки в миллисекундах. */
+    private static void writeSection(YamlConfiguration yaml, String root, Map<String, List<Long>> cases) {
         if (cases.isEmpty()) return;
-        ConfigurationSection section = yaml.createSection("prefix-packs");
+        ConfigurationSection section = yaml.createSection(root);
         for (Map.Entry<String, List<Long>> entry : cases.entrySet()) {
             List<String> deadlines = new ArrayList<>();
             for (Long deadline : entry.getValue()) deadlines.add(Long.toString(deadline));
@@ -82,9 +87,23 @@ final class ProfileCodec {
         }
     }
 
+    /** Кейсы паков косметики: id пака -> список сроков (мс). Раздел отдельный от паков префиксов. */
+    private static void writeCosmeticPackCases(YamlConfiguration yaml, ProfileData data) {
+        writeSection(yaml, "cosmetic-packs", data.cosmeticPackCasesSnapshot());
+    }
+
     private static Map<String, List<Long>> readPackCases(YamlConfiguration yaml) {
+        return readSection(yaml, "prefix-packs");
+    }
+
+    /** Кейсы паков косметики из файла профиля. */
+    private static Map<String, List<Long>> readCosmeticPackCases(YamlConfiguration yaml) {
+        return readSection(yaml, "cosmetic-packs");
+    }
+
+    private static Map<String, List<Long>> readSection(YamlConfiguration yaml, String root) {
         Map<String, List<Long>> cases = new LinkedHashMap<>();
-        ConfigurationSection section = yaml.getConfigurationSection("prefix-packs");
+        ConfigurationSection section = yaml.getConfigurationSection(root);
         if (section == null) return cases;
         for (String id : section.getKeys(false)) {
             List<Long> deadlines = new ArrayList<>();
@@ -157,6 +176,7 @@ final class ProfileCodec {
                     cosmetics.getString("equipped", ""), cosmetics.getInt("cases", 0));
         }
         data.restorePackCases(readPackCases(yaml));
+        data.restoreCosmeticPackCases(readCosmeticPackCases(yaml));
         if (version == 1) data.replaceMedals(readMedals(yaml));
         if (!yaml.isList("display")) throw new IllegalArgumentException("Неверные слоты профиля");
         List<?> display = yaml.getList("display", List.of());

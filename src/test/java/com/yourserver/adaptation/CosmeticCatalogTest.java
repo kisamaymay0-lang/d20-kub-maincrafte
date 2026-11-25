@@ -61,10 +61,8 @@ class CosmeticCatalogTest {
     }
 
     @Test
-    void reloadDiscoversAdditionalYamlFilesWithoutChangingExistingNumbers() throws Exception {
+    void packMakeupIsMergedIntoCatalogWithoutChangingExistingNumbers() throws Exception {
         Path primary = directory.resolve("cosmetics.yml");
-        Path additional = directory.resolve("cosmetics");
-        Files.createDirectories(additional);
         Files.writeString(primary, """
                 cosmetics:
                   base:
@@ -72,7 +70,42 @@ class CosmeticCatalogTest {
                     color: '#8FE3F5'
                     file: kosmetika1
                 """);
-        Files.writeString(additional.resolve("02-new.yml"), """
+        Path packs = directory.resolve("cosmeticpacks");
+        Files.createDirectories(packs);
+        Files.writeString(packs.resolve("nabor.yml"), """
+                name: 'Набор'
+                time-hours: -1
+                cosmetics:
+                  - kosmetika1
+                  - new_hat
+                """);
+
+        CosmeticCatalog base = CosmeticCatalog.load(primary);
+        CosmeticPackCatalog catalog = CosmeticPackCatalog.load(packs, base, null);
+        CosmeticCatalog merged = base.withPacks(catalog);
+
+        // Косметика из настроек не задваивается, а новая из набора получает свободный номер.
+        assertEquals(2, merged.size());
+        assertEquals(1, merged.get("base").number());
+        assertEquals(2, merged.get("nabor_new_hat").number());
+        assertEquals("new_hat", merged.get("nabor_new_hat").file());
+    }
+
+    @Test
+    void additionalFolderIsGoneAndOnlyOneFileIsRead() throws Exception {
+        // Дополнительных файлов у косметики больше нет: папка рядом с основным
+        // файлом игнорируется, читается только settings/cosmetics.yml.
+        Path primary = directory.resolve("cosmetics.yml");
+        Files.writeString(primary, """
+                cosmetics:
+                  base:
+                    name: 'Базовая'
+                    color: '#8FE3F5'
+                    file: kosmetika1
+                """);
+        Path extra = directory.resolve("cosmetics");
+        Files.createDirectories(extra);
+        Files.writeString(extra.resolve("02-new.yml"), """
                 cosmetics:
                   new_hat:
                     name: 'Новая шапка'
@@ -80,39 +113,9 @@ class CosmeticCatalogTest {
                     file: new_hat
                 """);
 
-        CosmeticCatalog first = CosmeticCatalog.load(primary, additional);
-        assertEquals(2, first.size());
-        assertEquals(1, first.get("base").number());
-        assertEquals(2, first.get("new_hat").number());
-
-        // Файл появился уже после первой загрузки: следующий reload обязан его увидеть.
-        Files.writeString(additional.resolve("03-later.yaml"), """
-                cosmetics:
-                  later:
-                    name: 'Добавленная в игре'
-                    color: '#C79BF0'
-                """);
-        CosmeticCatalog reloaded = CosmeticCatalog.load(primary, additional);
-        assertEquals(3, reloaded.size());
-        assertEquals(1, reloaded.get("base").number());
-        assertEquals("later", reloaded.byNumber(3).id());
-        assertEquals("later", reloaded.get("later").file());
-    }
-
-    @Test
-    void duplicateIdsInAdditionalFilesAreRejectedAsOneTransaction() throws Exception {
-        Path primary = directory.resolve("cosmetics.yml");
-        Path additional = directory.resolve("cosmetics");
-        Files.createDirectories(additional);
-        String yaml = """
-                cosmetics:
-                  same:
-                    name: 'Одна'
-                    color: '#8FE3F5'
-                """;
-        Files.writeString(primary, yaml);
-        Files.writeString(additional.resolve("duplicate.yml"), yaml);
-        assertThrows(IllegalArgumentException.class, () -> CosmeticCatalog.load(primary, additional));
+        CosmeticCatalog catalog = CosmeticCatalog.load(primary);
+        assertEquals(1, catalog.size());
+        assertNull(catalog.get("new_hat"));
     }
 
     @Test

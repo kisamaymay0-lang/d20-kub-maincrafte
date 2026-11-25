@@ -29,6 +29,7 @@ final class PluginSettings {
             "sky.yml",
             "copper.yml",
             "drinks.yml",
+            "recipe-poilo.yml",
             "fishing.yml",
             "gouge.yml",
             "profiles.yml",
