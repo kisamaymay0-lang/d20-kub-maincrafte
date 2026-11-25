@@ -655,15 +655,45 @@ public class Shaker implements Listener {
             return new RecipeMatch(null, Collections.emptyList());
         }
         List<IngredientKind> kinds = new ArrayList<>(contents.size());
-        for (ItemStack item : contents) kinds.add(classify(item));
+        List<String> drinkIds = new ArrayList<>(contents.size());
+        for (ItemStack item : contents) {
+            // Готовый напиток — не «вода» и не ингредиент: рецепт может просить его
+            // по id (коктейль из напитков: дайкири + белое вино).
+            String drinkId = drinkIdOf(item);
+            if (drinkId != null) {
+                drinkIds.add(drinkId);
+                continue;
+            }
+            kinds.add(classify(item));
+        }
 
-        DrinkRecipes.Drink drink = DrinkRecipes.current().match(kinds);
+        DrinkRecipes.Drink drink = DrinkRecipes.current().match(kinds, drinkIds);
         if (drink == null) return new RecipeMatch(RECIPE_MURK, Collections.emptyList());
 
         // Ингредиенты рецепта из шейкера уходят, всё остальное — добавки.
         List<ItemStack> additives = new ArrayList<>(contents);
         for (IngredientKind required : drink.ingredients()) removeItemFirst(additives, required);
+        for (String required : drink.baseDrinks()) removeDrinkFirst(additives, required);
         return new RecipeMatch(drink.id(), additives);
+    }
+
+    /** id готового напитка в предмете: шейкерного или бочкового; null — это не напиток. */
+    public static String drinkIdOf(ItemStack item) {
+        if (item == null) return null;
+        if (isDrink(item)) return getDrinkType(item);
+        if (BambooBarrel.isBarrelDrink(item)) return BambooBarrel.getBarrelDrinkId(item);
+        return null;
+    }
+
+    /** Убрать из списка один предмет — готовый напиток с этим id. */
+    private static void removeDrinkFirst(List<ItemStack> list, String drinkId) {
+        if (drinkId == null) return;
+        for (int i = 0; i < list.size(); i++) {
+            if (drinkId.equals(drinkIdOf(list.get(i)))) {
+                list.remove(i);
+                return;
+            }
+        }
     }
 
     /**

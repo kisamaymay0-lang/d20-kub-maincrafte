@@ -88,6 +88,8 @@ final class DrinkRecipesTest {
             assertEquals(drink.ingredients(), fromFile.ingredients(), drink.id());
             assertEquals(drink.additives(), fromFile.additives(), drink.id());
             assertEquals(drink.plainDescription(), fromFile.plainDescription(), drink.id());
+            assertEquals(drink.alcohol(), fromFile.alcohol(), drink.id());
+            assertEquals(drink.baseDrinks(), fromFile.baseDrinks(), drink.id());
         }
     }
 
@@ -298,7 +300,7 @@ final class DrinkRecipesTest {
                 DrinkRecipes.BarrelIngredient.WATER_BOTTLE, 1));
 
         java.util.Map<DrinkRecipes.BarrelIngredient, Integer> have =
-                new java.util.EnumMap<>(DrinkRecipes.BarrelIngredient.class);
+                new java.util.LinkedHashMap<>();
         have.put(DrinkRecipes.BarrelIngredient.LOW_SWEETIE_BERRY, 3);
         have.put(DrinkRecipes.BarrelIngredient.WATER_BOTTLE, 1);
         assertTrue(wine.matches(have), "ровно три ягоды и вода");
@@ -309,7 +311,7 @@ final class DrinkRecipesTest {
 
         // Горячая вода годится вместо обычной.
         java.util.Map<DrinkRecipes.BarrelIngredient, Integer> hot =
-                new java.util.EnumMap<>(DrinkRecipes.BarrelIngredient.class);
+                new java.util.LinkedHashMap<>();
         hot.put(DrinkRecipes.BarrelIngredient.LOW_SWEETIE_BERRY, 3);
         hot.put(DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE, 1);
         assertTrue(wine.matches(hot));
@@ -320,7 +322,7 @@ final class DrinkRecipesTest {
                 DrinkRecipes.BarrelIngredient.SUGAR_CANE, 1,
                 DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE, 3));
         java.util.Map<DrinkRecipes.BarrelIngredient, Integer> cold =
-                new java.util.EnumMap<>(DrinkRecipes.BarrelIngredient.class);
+                new java.util.LinkedHashMap<>();
         cold.put(DrinkRecipes.BarrelIngredient.COAL, 1);
         cold.put(DrinkRecipes.BarrelIngredient.SUGAR_CANE, 1);
         cold.put(DrinkRecipes.BarrelIngredient.WATER_BOTTLE, 3);
@@ -366,6 +368,92 @@ final class DrinkRecipesTest {
         assertTrue(text.contains("2 × бутылочка воды"), text);
         assertEquals(3, recipes.maxBarrelCount(DrinkRecipes.BarrelIngredient.WHEAT),
                 "пшеницу теперь тоже можно класть в бочку");
+    }
+
+    @Test
+    void кривойНапитокНеЛомаетОстальные() throws Exception {
+        DrinkRecipes recipes = load("""
+                recipes:
+                  pivo:
+                    name: 'Пиво'
+                    color: '#EBBB40'
+                    method: barrel
+                    ingredients:
+                      wheat: 3
+                  brak:
+                    name: 'Кривой'
+                    color: 'не-цвет'
+                    method: shaker
+                  chai:
+                    name: 'Чай'
+                    color: '#8FE3F5'
+                    method: shaker
+                    ingredients: [honeycomb, hot_water_bottle]
+                """);
+
+        assertEquals(2, recipes.size(), "кривой напиток пропущен, остальные на месте");
+        assertNotNull(recipes.get("pivo"));
+        assertNotNull(recipes.get("chai"));
+        assertNull(recipes.get("brak"));
+        assertEquals(1, recipes.problems().size());
+        assertTrue(recipes.problems().get(0).contains("brak"), recipes.problems().get(0));
+    }
+
+    @Test
+    void любойПредметМожетБытьИнгредиентомБочки() throws Exception {
+        DrinkRecipes recipes = load("""
+                recipes:
+                  pivo:
+                    name: 'Пиво'
+                    color: '#EBBB40'
+                    model: ''
+                    description: ''
+                    method: barrel
+                    ingredients:
+                      wheat: 3
+                      brown_mushroom: 1
+                      water_bottle: 1
+                    additives: []
+                """);
+
+        assertEquals(1, recipes.size(), "гриб не должен ронять напиток");
+        assertEquals(5, recipes.barrelRecipe("pivo").total(), "3 пшеницы, гриб и вода");
+        assertTrue(recipes.recipeText("pivo").contains("brown mushroom"),
+                recipes.recipeText("pivo"));
+    }
+
+    @Test
+    void коктейльИзНапитков() throws Exception {
+        DrinkRecipes recipes = load("""
+                recipes:
+                  daiquiri:
+                    name: 'Дайкири'
+                    color: '#F0466E'
+                    method: shaker
+                    ingredients: [sweet_berries, sugar, water_bottle]
+                  true_daiquiri:
+                    name: 'Дайкири'
+                    color: '#EA9087'
+                    method: shaker
+                    ingredients: [daiquiri, white_wine]
+                    alcohol: 4
+                  white_wine:
+                    name: 'Белое вино'
+                    color: '#E4D9A0'
+                    method: barrel
+                    ingredients:
+                      low_sweetie_berry: 3
+                      water_bottle: 1
+                """);
+
+        DrinkRecipes.Drink cocktail = recipes.get("true_daiquiri");
+        assertNotNull(cocktail, "коктейль из готовых напитков читается");
+        assertEquals(List.of("daiquiri", "white_wine"), cocktail.baseDrinks());
+        assertEquals(List.of(), cocktail.ingredients(), "сырых ингредиентов у него нет");
+        assertEquals(4, cocktail.alcohol(), "alcohol — единиц опьянения за порцию");
+        assertEquals("true_daiquiri",
+                recipes.match(List.of(), List.of("daiquiri", "white_wine")).id(),
+                "пара напитков — это коктейль, а не обычный дайкири");
     }
 
     @Test

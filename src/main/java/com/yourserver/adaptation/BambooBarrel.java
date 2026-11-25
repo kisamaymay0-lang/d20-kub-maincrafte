@@ -133,7 +133,7 @@ public class BambooBarrel implements Listener {
     public static final class BarrelState {
         /** Ингредиенты в бочке: чего сколько лежит. */
         public final Map<DrinkRecipes.BarrelIngredient, Integer> items =
-                new java.util.EnumMap<>(DrinkRecipes.BarrelIngredient.class);
+                new java.util.LinkedHashMap<>();
         /** id напитка из recipe-poilo.yml, когда закладка уже варится или настоялась. */
         public String drink = null;
         public boolean brewing = false;

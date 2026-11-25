@@ -720,6 +720,10 @@ public class F8Command implements CommandExecutor, Listener {
         if (plugin.lastBarrelError() != null) {
             lines.add("§cОшибка napitki.yml: §f" + plugin.lastBarrelError());
         }
+        if (!recipes.problems().isEmpty()) {
+            lines.add("§8— пропущено при чтении —");
+            for (String problem : recipes.problems()) lines.add("§c" + problem);
+        }
 
         lines.add("§8— бочковые —");
         for (DrinkRecipes.Drink drink : recipes.barrelDrinks()) {
@@ -738,6 +742,7 @@ public class F8Command implements CommandExecutor, Listener {
                 line.append(" §8· год ").append(profile.ticksPerYear()).append(" тиков");
                 line.append(" §8· годы ").append(yearsText(profile));
                 line.append(" §8· за глоток ").append(drunkText(profile));
+                if (drink.alcohol() > 0) line.append(" §8· alcohol: §f").append(drink.alcohol());
             }
             lines.add(line.toString());
             if (text.isEmpty()) {
@@ -753,8 +758,14 @@ public class F8Command implements CommandExecutor, Listener {
 
         lines.add("§8— шейкер —");
         for (DrinkRecipes.Drink drink : recipes.shakerDrinks()) {
+            StringBuilder line = new StringBuilder("§e" + drink.id() + " §f" + drink.name());
             String text = recipes.shakerText(drink.id());
-            lines.add("§e" + drink.id() + " §f" + drink.name() + (text.isEmpty() ? "" : " §8· §f" + text));
+            if (!text.isEmpty()) line.append(" §8· §f").append(text);
+            if (!drink.baseDrinks().isEmpty()) {
+                line.append(" §8· §fнапитки: ").append(String.join(" + ", drink.baseDrinks()));
+            }
+            line.append(" §8· alcohol: §f").append(drink.alcohol());
+            lines.add(line.toString());
         }
 
         List<String> notes = new ArrayList<>();

@@ -907,6 +907,13 @@ final class DrunkManager implements Listener {
             if (units > 0) add(player, units);
             return;
         }
+        // Напиток из шейкера: крепость задаётся строкой alcohol в recipe-poilo.yml.
+        String shakerDrink = Shaker.isDrink(item) ? Shaker.getDrinkType(item) : null;
+        if (shakerDrink != null) {
+            int units = DrinkRecipes.current().alcoholOf(shakerDrink);
+            if (units > 0) add(player, units);
+            return;
+        }
         if (item.getType() == Material.MILK_BUCKET) {
             hangover.remove(player.getUniqueId());
             add(player, -1);
@@ -927,6 +934,11 @@ final class DrunkManager implements Listener {
     int unitsOf(ItemStack item) {
         String drinkId = BambooBarrel.getBarrelDrinkId(item);
         if (drinkId == null) return 0;
+        // Своего профиля в napitki.yml нет — работает alcohol из recipe-poilo.yml.
+        if (BarrelDrinks.current().ownKeys(drinkId).isEmpty()) {
+            int alcohol = DrinkRecipes.current().alcoholOf(drinkId);
+            if (alcohol > 0) return alcohol;
+        }
         BarrelDrinks.Profile profile = BarrelDrinks.current().of(drinkId);
         int tier = profile.tierAfterTransfers(BambooBarrel.getRumYears(item),
                 BambooBarrel.getRumTransfers(item));

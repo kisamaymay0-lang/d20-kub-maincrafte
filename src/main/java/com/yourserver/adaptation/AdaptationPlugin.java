@@ -427,8 +427,16 @@ public void onEnable() {
             DrinkRecipes next = DrinkRecipes.load(path);
             DrinkRecipes.install(next);
             lastDrinkError = null;
+            // Напиток с ошибкой не отменяет остальные, но в журнале должно быть видно,
+            // какой именно пропущен и почему.
+            for (String problem : next.problems()) {
+                getLogger().warning("settings/recipe-poilo.yml: " + problem);
+            }
+            String skipped = next.problems().isEmpty()
+                    ? ""
+                    : " Пропущено напитков: " + next.problems().size() + " (разбор: /f8 drinks).";
             return "Напитки: " + next.size() + " (шейкер: " + next.shakerDrinks().size()
-                    + ", бочка: " + next.barrelDrinks().size() + "), файл " + path + ".";
+                    + ", бочка: " + next.barrelDrinks().size() + "), файл " + path + "." + skipped;
         } catch (Exception ex) {
             lastDrinkError = ex.getMessage();
             getLogger().log(java.util.logging.Level.WARNING,
