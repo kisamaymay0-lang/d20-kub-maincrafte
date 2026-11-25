@@ -210,7 +210,8 @@ final class BarrelDrinksTest {
         assertTrue(shipped.ownKeys("wine").contains("drunk"), "вина задают только крепость");
         assertFalse(shipped.ownKeys("wine").contains("quality"),
                 "ступени и годы вина наследуют из default — так и задумано");
-        assertTrue(shipped.ownKeys("pirate_rum").contains("drunk"));
+        assertTrue(shipped.ownKeys("pirate_rum").isEmpty(),
+                "ром и есть default: своих ключей у него нет, всё наследуется");
     }
 
     @Test

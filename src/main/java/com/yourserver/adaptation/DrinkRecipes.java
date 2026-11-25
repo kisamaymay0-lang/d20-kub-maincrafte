@@ -181,7 +181,11 @@ final class DrinkRecipes {
     record BarrelRecipe(Map<BarrelIngredient, Integer> ingredients) {
 
         BarrelRecipe {
-            ingredients = Map.copyOf(ingredients);
+            // EnumMap, а не Map.copyOf: порядок ингредиентов должен совпадать с enum,
+            // иначе «3 × тростник + 2 × вода» в чате каждый раз перемешивается.
+            EnumMap<BarrelIngredient, Integer> ordered = new EnumMap<>(BarrelIngredient.class);
+            ordered.putAll(ingredients);
+            ingredients = java.util.Collections.unmodifiableMap(ordered);
         }
 
         /** Сколько всего предметов нужно. */
