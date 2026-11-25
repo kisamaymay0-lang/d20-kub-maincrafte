@@ -234,7 +234,7 @@ final class PrefixPackCatalogTest {
     @Test
     void shippedТестовыйПакРаскладывается() throws Exception {
         // Тот самый файл, что уезжает в jar и копируется игроку при первом запуске.
-        Path shipped = Path.of("src/main/resources/prefixpacks/pref-pack1.yml");
+        Path shipped = Path.of("src/main/resources/content/prefixpacks/pref-pack1.yml");
         assertTrue(Files.exists(shipped), "Тестовый пак должен лежать в ресурсах плагина");
         PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(shipped.getParent()).get("pref-pack1");
         assertNotNull(pack);
