@@ -148,38 +148,14 @@ final class DrinkRecipes {
         }
 
         /**
-         * Подходит ли материал как ингредиент бочки «сам по себе». Инструменты, броня и
-         * блоки — нет: иначе бочка ела бы кирки, а бамбук уходил бы в бочку вместо стройки.
-         * Съедобные блоки (грибы) — да.
+         * Ингредиент, который бочка уже знает по этому материалу: свой предмет или тот,
+         * что назван в каком-нибудь рецепте. Новых ингредиентов тут не заводим — иначе
+         * бочка ела бы любой предмет из рук, включая бамбук, которым её же и строят.
          */
-        private static boolean isPlain(Material material) {
-            if (material == null || material == Material.AIR || material == Material.POTION) return false;
-            try {
-                if (!material.isItem()) return false;
-                if (material.getMaxStackSize() <= 1) return false;
-                return !material.isBlock() || material.isEdible();
-            } catch (Throwable ignored) {
-                // Без запущенного сервера (в unit-тестах) реестры блоков недоступны:
-                // решаем по имени — инструменты и броня не годятся, остальное годится.
-                String name = material.name();
-                return !(name.endsWith("_BLOCK") || name.endsWith("_ORE") || name.endsWith("_PLANKS")
-                        || name.endsWith("_LOG") || name.endsWith("_WOOD") || name.endsWith("_SLAB")
-                        || name.endsWith("_STAIRS") || name.endsWith("_WALL") || name.endsWith("_FENCE")
-                        || name.endsWith("_SWORD") || name.endsWith("_PICKAXE") || name.endsWith("_AXE")
-                        || name.endsWith("_SHOVEL") || name.endsWith("_HOE") || name.endsWith("_HELMET")
-                        || name.endsWith("_CHESTPLATE") || name.endsWith("_LEGGINGS") || name.endsWith("_BOOTS")
-                        || name.equals("STONE") || name.equals("DIRT") || name.equals("COBBLESTONE")
-                        || name.equals("OBSIDIAN") || name.equals("BEDROCK") || name.equals("SAND")
-                        || name.equals("GRAVEL") || name.equals("GRASS_BLOCK"));
-            }
-        }
-
-        /** Ингредиент по материалу; null — такой материал бочке не годится. */
         static BarrelIngredient byMaterial(Material material) {
             if (material == null) return null;
             BarrelIngredient known = BY_MATERIAL.get(material);
-            if (known != null) return known;
-            return isPlain(material) ? vanilla(material) : null;
+            return known != null ? known : VANILLA.get(material);
         }
 
         String id() {
@@ -240,7 +216,17 @@ final class DrinkRecipes {
                     return null;
                 }
             }
-            return byMaterial(material);
+            if (material == Material.AIR || material == Material.POTION) return null;
+            // Блоки, грибы, водоросли — всё, что владелец назвал сам. Бочка примет
+            // такой предмет, только если он есть в каком-то рецепте (см. byMaterial).
+            BarrelIngredient known = BY_MATERIAL.get(material);
+            if (known != null) return known;
+            try {
+                if (!material.isItem()) return null;
+            } catch (Throwable ignored) {
+                // без сервера (unit-тесты) реестр недоступен — считаем, что предмет есть
+            }
+            return vanilla(material);
         }
 
         /** Все «свои» имена — для подсказки в сообщении об ошибке. */

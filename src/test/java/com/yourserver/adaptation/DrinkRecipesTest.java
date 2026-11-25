@@ -541,6 +541,18 @@ final class DrinkRecipesTest {
     }
 
     @Test
+    void блокиИГрибыТожеМожноНазвать() {
+        DrinkRecipes.BarrelIngredient mushroom = DrinkRecipes.BarrelIngredient.of("brown_mushroom");
+        assertNotNull(mushroom, "гриб — обычный предмет, его можно назвать в рецепте");
+        assertEquals("brown_mushroom", mushroom.id());
+
+        assertNotNull(DrinkRecipes.BarrelIngredient.of("bamboo"), "блок тоже годится, если назван");
+        assertNotNull(DrinkRecipes.BarrelIngredient.of("kelp"));
+        assertNull(DrinkRecipes.BarrelIngredient.of("такого_предмета_нет"));
+        assertNull(DrinkRecipes.BarrelIngredient.of("potion"), "зелья бочке не нужны");
+    }
+
+    @Test
     void именаИнгредиентовБочкиПоРазному() {
         assertEquals(DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE,
                 DrinkRecipes.BarrelIngredient.of("hot_water_bottle"));

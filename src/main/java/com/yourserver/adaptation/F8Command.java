@@ -713,7 +713,8 @@ public class F8Command implements CommandExecutor, Listener {
         }
         lines.add("§7Id в recipe-poilo.yml: §f" + String.join(", ", recipes.ids()));
         lines.add("§7Id в napitki.yml: §f" + String.join(", ", barrel.ids()));
-        lines.add("§7Бочка берёт только это: §f" + allowed);
+        lines.add("§7Свои предметы бочки: §f" + allowed);
+        lines.add("§7Плюс любые предметы, названные в рецептах (по имени материала: brown_mushroom).");
         lines.add("§7Бочковому напитку нужен свой блок в napitki.yml — без него он не создаётся.");
 
         if (plugin.lastDrinkError() != null) {
