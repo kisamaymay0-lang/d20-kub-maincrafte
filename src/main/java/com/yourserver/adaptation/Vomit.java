@@ -30,45 +30,53 @@ import java.util.Random;
  *
  * <ul>
  *   <li><b>Фантомные блоки</b> — сущности {@link BlockDisplay}: выглядят как настоящий
- *       блок, но не имеют коллизии, не ставятся в мир и не дропаются. Вылетают прямо
- *       изо рта (половинного размера, по центру головы), летят вперёд-вниз и
- *       рассыпаются частицами. Их видит любой рядом — в этом и зрелище.</li>
- *   <li><b>Лужи</b> — настоящие блоки (ил, слизь), но их ставит сам плагин: только на
- *       природный пол (земля, песок, камень, ил), только в пустое место, и через
- *       {@code puddles-seconds} они убираются сами. Старый блок запоминается и
- *       возвращается — то есть даже если что-то задело, мир вернётся как был.</li>
+ *       блок, но не имеют коллизии, не ставятся в мир и не дропаются. Вылетают из
+ *       <b>лицевой части головы</b> (чуть впереди глаз и чуть ниже), летят по инерции
+ *       туда, куда игрок смотрит, и по дуге падают вниз. Долетев до земли, шлёпаются,
+ *       брызгают частицами и растворяются. Их видит любой рядом — в этом и зрелище.</li>
+ *   <li><b>Лужи</b> — настоящие блоки (ил, слизь, земля), но их ставит сам плагин: только
+ *       на природный пол, только в пустое место, и через {@code puddles-seconds} они
+ *       убираются сами. Старый блок запоминается и возвращается — мир не портится.</li>
  * </ul>
  *
  * <p>Лужи не появляются на постройках: пол под ними должен быть из «природного» списка
- * ({@code natural-floor} в настройках). Доски, кирпич и стекло в этот список не входят,
- * поэтому чужие стены и полы не пачкаются.
+ * ({@code natural-floor} в настройках). Доски, кирпич и стекло в него не входят.
  *
  * <p>Всё считается по лимитам: одновременно не больше {@code phantom-max} фантомов и
  * {@code puddles-max} луж, поэтому даже вечеринка на двадцать человек не просадит TPS.
  */
 final class Vomit {
 
-    /** Один фантомный блок: летит, крутится и исчезает. */
+    /** Сколько «шагов» живёт фантом: один шаг — два тика. */
+    private static final int FLIGHT_STEPS = 60;
+    /** Гравитация за шаг: сначала блок летит вперёд, потом всё быстрее падает. */
+    private static final double GRAVITY = 0.022;
+    /** Предел падения, чтобы не телепортироваться сквозь пол. */
+    private static final double TERMINAL = 0.30;
+
+    /** Один фантомный блок: летит, крутится, шлёпается и растворяется. */
     private static final class Phantom {
         final BlockDisplay display;
+        final BlockData data;
+        final float size;
         Vector velocity;
         int life;
+        boolean landed;
+        double spin;
+        float shrink = 1.0f;
 
-        Phantom(BlockDisplay display, Vector velocity, int life) {
+        Phantom(BlockDisplay display, BlockData data, float size, Vector velocity) {
             this.display = display;
+            this.data = data;
+            this.size = size;
             this.velocity = velocity;
-            this.life = life;
+            this.life = FLIGHT_STEPS;
         }
     }
 
     /** Одна лужа: где стоит, что было до неё и когда убирать. */
     private record Puddle(World world, int x, int y, int z, BlockData old, long expireTick) {
     }
-
-    /** Размер фантомного блока: половина куба, чтобы он родился ровно во рту. */
-    private static final Transformation MOUTH_TRANSFORM = new Transformation(
-            new Vector3f(-0.25f, -0.25f, -0.25f), new Quaternionf(),
-            new Vector3f(0.5f, 0.5f, 0.5f), new Quaternionf());
 
     /** Блоки, которые бросаем: песок душ, керамика, ил и прочая пакость. */
     private static final Material[] PHANTOM_BLOCKS = {
@@ -110,7 +118,7 @@ final class Vomit {
     }
 
     /**
-     * Приступ: облако фантомных блоков и несколько луж вокруг игрока.
+     * Приступ: облако фантомных блоков изо рта и несколько луж вокруг игрока.
      *
      * @param strong сильная стадия — блоков и луж больше
      */
@@ -119,44 +127,58 @@ final class Vomit {
         World world = player.getWorld();
         Location eyes = player.getEyeLocation();
         Vector forward = eyes.getDirection().normalize();
+        // Рот: чуть впереди глаз и чуть ниже — там, где лицо, а не над головой.
+        Location mouth = eyes.clone()
+                .add(forward.clone().multiply(0.32))
+                .add(0, -0.10, 0);
 
-        // 1. Фантомные блоки: ровно изо рта, вперёд и вниз — как будто и правда вырвало.
-        int count = settings.phantomBlocks() ? (strong ? 10 : 6) : 0;
-        for (int i = 0; i < count && phantoms.size() < settings.phantomMax(); i++) {
-            Material material = PHANTOM_BLOCKS[random.nextInt(PHANTOM_BLOCKS.length)];
-            // БлокDisplay висит углом в точке спавна, поэтому половинку центруем во рту.
-            Location spawn = eyes.clone().add(forward.clone().multiply(0.25));
-            try {
-                BlockDisplay display = world.spawn(spawn, BlockDisplay.class, entity -> {
-                    entity.setBlock(material.createBlockData());
-                    entity.setTransformation(MOUTH_TRANSFORM);
-                    entity.setPersistent(false);
-                    entity.setSilent(true);
-                    entity.setInvulnerable(true);
-                });
-                Vector velocity = forward.clone().multiply(0.18 + random.nextDouble() * 0.18)
-                        .add(new Vector((random.nextDouble() - 0.5) * 0.25,
-                                -0.05 + random.nextDouble() * 0.10,
-                                (random.nextDouble() - 0.5) * 0.25));
-                phantoms.add(new Phantom(display, velocity, 24 + random.nextInt(12)));
-            } catch (RuntimeException ignored) {
-                // Сущность не создалась (чужой мир, лимит) — просто обойдёмся частицами.
+        if (settings.phantomBlocks()) {
+            int count = strong ? 10 : 6;
+            for (int i = 0; i < count && phantoms.size() < settings.phantomMax(); i++) {
+                spawnPhantom(world, mouth, forward);
             }
         }
 
-        // 2. Лужи — настоящие блоки, которые плагин сам уберёт.
         if (settings.puddles()) {
             int puddleCount = strong ? 4 : 2;
             for (int i = 0; i < puddleCount; i++) placePuddle(player, settings);
         }
 
-        // 3. Звук и брызги: без графики, но слышно, что человеку плохо.
         world.playSound(eyes, Sound.ENTITY_PLAYER_BURP, SoundCategory.PLAYERS, 0.9F, 0.7F);
         world.playSound(eyes, Sound.BLOCK_MUD_BREAK, SoundCategory.PLAYERS, 0.7F, 0.9F);
-        world.spawnParticle(Particle.ITEM_SLIME, eyes.clone().add(forward.clone().multiply(0.5)),
-                strong ? 18 : 10, 0.25, 0.2, 0.25, 0.02);
-        world.spawnParticle(Particle.CRIT, eyes.clone().add(forward.clone().multiply(0.4)),
-                8, 0.2, 0.2, 0.2, 0.05);
+        world.spawnParticle(Particle.ITEM_SLIME, mouth, strong ? 18 : 10, 0.16, 0.12, 0.16, 0.02);
+        world.spawnParticle(Particle.CRIT, mouth, 8, 0.12, 0.12, 0.12, 0.05);
+    }
+
+    /**
+     * Один фантом: родился во рту, полетел по инерции взгляда и дальше падает сам.
+     * Размер — меньше куба, поэтому он и правда вылетает изо рта, а не из угла блока.
+     */
+    private void spawnPhantom(World world, Location mouth, Vector forward) {
+        Material material = PHANTOM_BLOCKS[random.nextInt(PHANTOM_BLOCKS.length)];
+        BlockData data = material.createBlockData();
+        float size = 0.40f + random.nextFloat() * 0.18f;
+        Location spawn = mouth.clone().add(
+                (random.nextDouble() - 0.5) * 0.10,
+                (random.nextDouble() - 0.5) * 0.08,
+                (random.nextDouble() - 0.5) * 0.10);
+        try {
+            BlockDisplay display = world.spawn(spawn, BlockDisplay.class, entity -> {
+                entity.setBlock(data);
+                entity.setTransformation(transform(size, 0));
+                entity.setPersistent(false);
+                entity.setSilent(true);
+                entity.setInvulnerable(true);
+            });
+            // Небольшая инерция туда, куда смотрит игрок, плюс чуть-чуть разброса.
+            Vector velocity = forward.clone().multiply(0.070 + random.nextDouble() * 0.035)
+                    .add(new Vector((random.nextDouble() - 0.5) * 0.030,
+                            0.004 + random.nextDouble() * 0.012,
+                            (random.nextDouble() - 0.5) * 0.030));
+            phantoms.add(new Phantom(display, data, size, velocity));
+        } catch (RuntimeException ignored) {
+            // Сущность не создалась (чужой мир, лимит) — обойдёмся частицами.
+        }
     }
 
     /** Поставить лужу рядом с игроком: только на природный пол и только в пустое место. */
@@ -220,21 +242,25 @@ final class Vomit {
         Iterator<Phantom> iterator = phantoms.iterator();
         while (iterator.hasNext()) {
             Phantom phantom = iterator.next();
-            phantom.life -= 2;
-            if (phantom.display == null || !phantom.display.isValid() || phantom.life <= 0) {
+            if (phantom.display == null || !phantom.display.isValid()) {
+                iterator.remove();
+                continue;
+            }
+            if (--phantom.life <= 0) {
                 finish(phantom);
                 iterator.remove();
                 continue;
             }
-            phantom.velocity = phantom.velocity.subtract(new Vector(0, 0.045, 0));
-            Location next = phantom.display.getLocation().add(phantom.velocity);
-            phantom.display.teleport(next);
-            if (phantom.life % 6 == 0) {
-                next.getWorld().spawnParticle(Particle.ITEM_SLIME, next, 2, 0.1, 0.1, 0.1, 0.01);
+            if (phantom.landed) {
+                // Шлёпнулся: медленно растворяется, оставляя капли.
+                phantom.shrink = Math.max(0f, phantom.shrink - 0.045f);
+                applyTransform(phantom);
+                if (phantom.life % 6 == 0) splatter(phantom);
+                continue;
             }
+            fly(phantom);
         }
 
-        // Лужи проверяем пореже: раз в секунду.
         if (tick % 20 == 0) {
             Iterator<Puddle> puddlesIterator = puddles.iterator();
             while (puddlesIterator.hasNext()) {
@@ -244,6 +270,97 @@ final class Vomit {
                 puddlesIterator.remove();
             }
         }
+    }
+
+    /** Шаг полёта: инерция вперёд, гравитация, вращение. На земле — шлёпок. */
+    private void fly(Phantom phantom) {
+        phantom.velocity = phantom.velocity
+                .multiply(new Vector(0.985, 1.0, 0.985))
+                .subtract(new Vector(0, GRAVITY, 0));
+        if (phantom.velocity.getY() < -TERMINAL) phantom.velocity.setY(-TERMINAL);
+
+        Location next = phantom.display.getLocation().add(phantom.velocity);
+        Block block = next.getBlock();
+        if (!block.isPassable()) {
+            land(phantom, block);
+            return;
+        }
+
+        phantom.spin += 0.16 + random.nextDouble() * 0.10;
+        phantom.display.teleport(next);
+        applyTransform(phantom);
+        if (phantom.life % 4 == 0) trail(next, phantom.data);
+    }
+
+    /** Блок долетел до препятствия: кладём его на поверхность и брызгаем. */
+    private void land(Phantom phantom, Block block) {
+        phantom.landed = true;
+        phantom.life = 18 + random.nextInt(12);
+        phantom.shrink = 1.0f;
+        Location rest = new Location(block.getWorld(),
+                block.getX() + 0.5,
+                block.getY() + 1.0 + phantom.size / 2.0,
+                block.getZ() + 0.5);
+        phantom.display.teleport(rest);
+        phantom.velocity = new Vector(0, 0, 0);
+        applyTransform(phantom);
+        splatter(phantom);
+        block.getWorld().playSound(rest, Sound.BLOCK_MUD_BREAK, SoundCategory.PLAYERS, 0.35F, 1.4F);
+    }
+
+    /** Брызги от шлёпнувшегося блока. */
+    private void splatter(Phantom phantom) {
+        splat(phantom.display.getLocation(), phantom.data, 6);
+    }
+
+    /** След в воздухе: капли слизи и крошки того самого блока. */
+    private void trail(Location at, BlockData data) {
+        World world = at.getWorld();
+        if (world == null) return;
+        try {
+            world.spawnParticle(Particle.ITEM_SLIME, at, 2, 0.07, 0.07, 0.07, 0.01);
+        } catch (RuntimeException ignored) {
+            // Частицы — украшение: если сервер их не знает, плевок всё равно летит.
+        }
+        try {
+            world.spawnParticle(Particle.BLOCK_CRUMBLE, at, 2, 0.08, 0.08, 0.08, data);
+        } catch (RuntimeException ignored) {
+            // То же самое: без крошек полёт не ломается.
+        }
+    }
+
+    /** Шлёпок: крошки блока и капли. */
+    private void splat(Location at, BlockData data, int count) {
+        World world = at.getWorld();
+        if (world == null) return;
+        try {
+            world.spawnParticle(Particle.BLOCK_CRUMBLE, at, count, 0.20, 0.10, 0.20, data);
+        } catch (RuntimeException ignored) {
+            // Без крошек шлёпок переживём.
+        }
+        try {
+            world.spawnParticle(Particle.SPLASH, at, Math.max(2, count / 2), 0.15, 0.05, 0.15, 0.02);
+        } catch (RuntimeException ignored) {
+            // И без капель.
+        }
+    }
+
+    /** Превращение блока: размер и проворот. Центр куба — в точке сущности. */
+    private static void applyTransform(Phantom phantom) {
+        float size = Math.max(0.02f, phantom.size * phantom.shrink);
+        phantom.display.setTransformation(transform(size, phantom.spin));
+    }
+
+    private static Transformation transform(float size, double spin) {
+        Quaternionf rotation = new Quaternionf()
+                .rotationX((float) (spin * 0.7))
+                .rotateY((float) spin)
+                .rotateZ((float) (spin * 0.4));
+        return new Transformation(
+                new Vector3f(-size / 2f, -size / 2f, -size / 2f),
+                rotation,
+                new Vector3f(size, size, size),
+                new Quaternionf());
     }
 
     /** Лужа исчезла: вернуть на её место прежний блок и брызнуть напоследок. */
@@ -262,8 +379,9 @@ final class Vomit {
         if (phantom.display == null) return;
         Location place = phantom.display.getLocation();
         if (phantom.display.isValid()) phantom.display.remove();
-        if (place.getWorld() != null) {
-            place.getWorld().spawnParticle(Particle.ITEM_SLIME, place, 3, 0.1, 0.1, 0.1, 0.01);
+        World world = place.getWorld();
+        if (world != null) {
+            world.spawnParticle(Particle.ITEM_SLIME, place, 3, 0.1, 0.1, 0.1, 0.01);
         }
     }
 

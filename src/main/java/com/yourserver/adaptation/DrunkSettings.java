@@ -52,8 +52,8 @@ record DrunkSettings(int scale,
                         Material.STONE, Material.DEEPSLATE, Material.SOUL_SAND, Material.SOUL_SOIL,
                         Material.TUFF, Material.SNOW_BLOCK, Material.PACKED_MUD),
                 true,
-                100,
-                200,
+                160,
+                160,
                 16);
     }
 

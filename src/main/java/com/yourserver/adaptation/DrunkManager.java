@@ -80,14 +80,16 @@ final class DrunkManager implements Listener {
     /** Файл с показателями: {@code data/drunk.yml}. */
     static final String FILE = "drunk.yml";
 
-    /** Отключка: игрок ложится на землю и не может встать 16–28 секунд. */
+    /**
+     * Отключка в две фазы: сначала целую минуту игрок ещё на ногах, но шкалу нельзя
+     * сбить ничем, а потом он ложится и не встаёт 16–28 секунд.
+     */
+    private static final int BLACKOUT_HOLD_SECONDS = 60;
     private static final int BLACKOUT_MIN_SECONDS = 16;
     private static final int BLACKOUT_MAX_SECONDS = 28;
     /** «Просто прилёг» на высоких стадиях: 2–4 секунды, встать нельзя. */
     private static final int LIE_MIN_TICKS = 40;
     private static final int LIE_MAX_TICKS = 80;
-    /** Пока лежим без сознания, блевать каждые две секунды. */
-    private static final int BLACKOUT_PUKE_TICKS = 40;
     /** Баффы, которые выдаём мы сами, — их же и снимаем при смене стадии. */
     private static final PotionEffectType[] BOONS = {
             PotionEffectType.ABSORPTION,
@@ -113,10 +115,23 @@ final class DrunkManager implements Listener {
     private final Map<UUID, Integer> decayProgress = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> hangover = new ConcurrentHashMap<>();
     private final Map<UUID, Lie> lie = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> hold = new ConcurrentHashMap<>();
+    private final Map<UUID, Sway> sway = new ConcurrentHashMap<>();
     private final Map<UUID, Set<PotionEffectType>> boons = new ConcurrentHashMap<>();
     private final Map<UUID, Long> nextPuke = new ConcurrentHashMap<>();
     private final Map<UUID, DrunkStage> lastStage = new ConcurrentHashMap<>();
     private final Path storePath;
+
+    /** Плавное покачивание при ходьбе: фаза и скорость у каждого своя. */
+    private static final class Sway {
+        double phase;
+        double speed;
+
+        Sway(Random random) {
+            this.phase = random.nextDouble() * Math.PI * 2;
+            this.speed = 0.09 + random.nextDouble() * 0.08;
+        }
+    }
 
     /** Игрок лежит на земле: где упал, сколько ещё лежать и отключка ли это. */
     private static final class Lie {
@@ -134,6 +149,7 @@ final class DrunkManager implements Listener {
     private DrunkSettings settings = DrunkSettings.defaults();
     private BukkitTask playersTask;
     private BukkitTask pukeTask;
+    private BukkitTask swayTask;
     private BukkitTask saveTask;
 
     DrunkManager(AdaptationPlugin plugin) {
@@ -197,6 +213,8 @@ final class DrunkManager implements Listener {
         if (playersTask != null) return;
         playersTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickPlayers, 20L, 20L);
         pukeTask = Bukkit.getScheduler().runTaskTimer(plugin, vomit::tick, 2L, 2L);
+        // Покачивание считаем каждые два тика: так оно плавное, а не рывками.
+        swayTask = Bukkit.getScheduler().runTaskTimer(plugin, this::swayTick, 2L, 2L);
         saveTask = Bukkit.getScheduler().runTaskTimer(plugin, this::save, 20L * 60L, 20L * 60L);
     }
 
@@ -204,9 +222,11 @@ final class DrunkManager implements Listener {
     void stop() {
         if (playersTask != null) playersTask.cancel();
         if (pukeTask != null) pukeTask.cancel();
+        if (swayTask != null) swayTask.cancel();
         if (saveTask != null) saveTask.cancel();
         playersTask = null;
         pukeTask = null;
+        swayTask = null;
         saveTask = null;
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (lie.remove(player.getUniqueId()) != null) player.setPose(Pose.STANDING, true);
@@ -237,9 +257,13 @@ final class DrunkManager implements Listener {
         return DrunkStage.of(points(player.getUniqueId()), settings.scale());
     }
 
-    /** Добавить единицы: выпитая бутылочка, команда, отладка. */
+    /**
+     * Добавить единицы: выпитая бутылочка, команда, отладка. Пока идёт «отключка»,
+     * шкалу нельзя сбить ничем: ни едой, ни молоком, ни водой.
+     */
     void add(Player player, int units) {
         if (player == null || units == 0) return;
+        if (hold.containsKey(player.getUniqueId())) return;
         set(player, points(player.getUniqueId()) + units);
     }
 
@@ -250,6 +274,8 @@ final class DrunkManager implements Listener {
         int scale = settings.scale();
         int next = Math.max(0, Math.min(scale, value));
         int previous = points.getOrDefault(id, 0);
+        // Пока держится отключка, админ может только протрезвить (clear), но не сбить на число.
+        if (hold.containsKey(id) && next < scale) return;
         points.put(id, next);
 
         DrunkStage oldStage = DrunkStage.of(previous, scale);
@@ -258,7 +284,7 @@ final class DrunkManager implements Listener {
             onStageChanged(player, oldStage, newStage);
         }
         if (next >= scale && previous < scale) {
-            startBlackout(player);
+            startHold(player);
         }
         if (next == 0) {
             decayProgress.remove(id);
@@ -274,6 +300,8 @@ final class DrunkManager implements Listener {
         hangover.remove(id);
         nextPuke.remove(id);
         lastStage.remove(id);
+        hold.remove(id);
+        sway.remove(id);
         if (lie.remove(id) != null) player.setPose(Pose.STANDING, true);
         clearEffects(player);
     }
@@ -297,8 +325,10 @@ final class DrunkManager implements Listener {
             UUID id = player.getUniqueId();
             if (player.isDead() || player.getGameMode() == GameMode.SPECTATOR) continue;
 
+            tickHold(player, id);
+
             int value = points.getOrDefault(id, 0);
-            if (value > 0 && lie.get(id) == null) {
+            if (value > 0 && lie.get(id) == null && hold.get(id) == null) {
                 int progress = decayProgress.merge(id, 20, Integer::sum);
                 if (progress >= settings.decayTicks()) {
                     int left = progress - settings.decayTicks();
@@ -332,6 +362,27 @@ final class DrunkManager implements Listener {
         }
     }
 
+    /**
+     * Первая фаза отключки: минуту игрок ещё на ногах, но шкала заперта на максимуме —
+     * её не сбить ни временем, ни едой, ни молоком. Через минуту он падает.
+     */
+    private void tickHold(Player player, UUID id) {
+        Integer left = hold.get(id);
+        if (left == null) return;
+
+        int next = left - 20;
+        points.put(id, settings.scale());
+        if (next > 0) {
+            hold.put(id, next);
+            return;
+        }
+        hold.remove(id);
+        decayProgress.remove(id);
+        nextPuke.remove(id);
+        int ticks = randomBetween(BLACKOUT_MIN_SECONDS, BLACKOUT_MAX_SECONDS) * 20;
+        startLie(player, ticks, true);
+    }
+
     /** Игрок лежит: держим позу, считаем секунды и не даём встать. */
     private void tickLie(Player player, UUID id) {
         Lie state = lie.get(id);
@@ -348,26 +399,19 @@ final class DrunkManager implements Listener {
         // Клиент время от времени «встаёт» сам — возвращаем на землю.
         if (player.getPose() != Pose.SLEEPING) player.setPose(Pose.SLEEPING, true);
         player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 40, 200, true, false, false));
-        if (state.blackout) {
-            points.put(id, settings.scale());
-            if (state.ticks % BLACKOUT_PUKE_TICKS == 0) vomit.burst(player, settings, true);
-        }
+        if (state.blackout) points.put(id, settings.scale());
     }
 
-    /**
-     * Отключка: игрок ложится там, где стоял, и не может встать 16–28 секунд.
-     * Просыпается с половиной шкалы и похмельем.
-     */
-    private void startBlackout(Player player) {
+    /** Вход в отключку: минута на ногах с запертой шкалой, потом падение. */
+    private void startHold(Player player) {
         UUID id = player.getUniqueId();
+        if (hold.containsKey(id)) return;
         Lie current = lie.get(id);
         if (current != null && current.blackout) return;
 
-        int ticks = randomBetween(BLACKOUT_MIN_SECONDS, BLACKOUT_MAX_SECONDS) * 20;
-        lie.put(id, new Lie(player.getLocation(), ticks, true));
+        hold.put(id, BLACKOUT_HOLD_SECONDS * 20);
+        points.put(id, settings.scale());
         dropBoons(player, Set.of());
-        player.setPose(Pose.SLEEPING, true);
-        player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, ticks + 40, 200, true, false, false));
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_PLAYER_BURP,
                 SoundCategory.PLAYERS, 1.0F, 0.5F);
         vomit.burst(player, settings, true);
@@ -381,27 +425,52 @@ final class DrunkManager implements Listener {
         vomit.burst(player, settings, false);
     }
 
-    /** Прилёг прямо на землю — на высоких стадиях это бывает само собой. */
-    private void startLie(Player player, int ticks) {
+    /** Прилёг прямо на землю: на высоких стадиях само собой, после минуты — отключка. */
+    private void startLie(Player player, int ticks, boolean blackout) {
         UUID id = player.getUniqueId();
         Lie current = lie.get(id);
         if (current != null) return;
-        lie.put(id, new Lie(player.getLocation(), ticks, false));
+        lie.put(id, new Lie(player.getLocation(), ticks, blackout));
+        player.setVelocity(new Vector(0, 0, 0));
         player.setPose(Pose.SLEEPING, true);
         player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, ticks + 20, 200, true, false, false));
+        if (blackout) {
+            vomit.burst(player, settings, true);
+            player.getWorld().playSound(player.getLocation(), Sound.BLOCK_MUD_BREAK,
+                    SoundCategory.PLAYERS, 0.8F, 0.6F);
+        }
     }
 
-    /** Лежачего не двигаем: держим на месте, разрешая только вертеть головой. */
+    /**
+     * Лежачего не двигаем: держим на месте и разрешаем только вертеть головой.
+     *
+     * <p>Позу обновляем прямо здесь, на каждом шаге клиента: если этого не делать,
+     * анимация лежания слетает, стоит игроку нажать ходьбу. И любое движение вверх
+     * гасим — прыгать лёжа нельзя.
+     */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onMove(PlayerMoveEvent event) {
-        Lie state = lie.get(event.getPlayer().getUniqueId());
+        Player player = event.getPlayer();
+        Lie state = lie.get(player.getUniqueId());
         if (state == null) return;
         Location to = event.getTo();
         Location anchor = state.anchor;
         if (to.getWorld() != anchor.getWorld()) return;
+
+        if (player.getPose() != Pose.SLEEPING) player.setPose(Pose.SLEEPING, true);
+
         double dx = to.getX() - anchor.getX();
         double dz = to.getZ() - anchor.getZ();
-        if (dx * dx + dz * dz <= 0.16) return;
+        double dy = to.getY() - anchor.getY();
+
+        if (dy > 0.05) {
+            // Прыжок лёжа: гасим подъём и оставляем на земле.
+            Vector velocity = player.getVelocity();
+            player.setVelocity(new Vector(velocity.getX(), 0, velocity.getZ()));
+        }
+        boolean escaped = dx * dx + dz * dz > 0.16 || dy > 0.05 || dy < -0.5;
+        if (!escaped) return;
+
         Location stay = anchor.clone();
         stay.setYaw(to.getYaw());
         stay.setPitch(to.getPitch());
@@ -498,53 +567,76 @@ final class DrunkManager implements Listener {
     }
 
     /**
-     * Пьяного ведёт: чем выше стадия, тем чаще и сильнее его тащит в случайную сторону.
-     * На «В стельку» и выше добавляются подскоки, развороты и «прилёг отдохнуть».
+     * Самая первая стадия: короткие рывки и маленькие подскоки. Дальше рывков нет —
+     * там игрока плавно ведёт в стороны ({@link #swayTick()}).
      */
     private void wobble(Player player, DrunkStage stage) {
-        if (!settings.wobble() || !stage.atLeast(DrunkStage.SWAYING)) return;
+        if (!settings.wobble() || stage != DrunkStage.TIPSY) return;
         if (lie.containsKey(player.getUniqueId())) return;
-        if (!player.isOnGround() || player.isInsideVehicle() || player.isGliding()
-                || player.isSwimming() || player.isSleeping()) return;
+        if (!standing(player)) return;
+        if (random.nextDouble() > 0.35) return;
+
+        double strength = 0.05 + random.nextDouble() * 0.04;
+        player.setVelocity(player.getVelocity().add(new Vector(
+                (random.nextDouble() - 0.5) * 2 * strength,
+                0.02,
+                (random.nextDouble() - 0.5) * 2 * strength)));
+        // Маленький подскок: ноги уже чуть заплетаются.
+        if (random.nextDouble() < 0.25) {
+            player.setVelocity(player.getVelocity().add(new Vector(0, 0.22, 0)));
+        }
+    }
+
+    /** Можно ли сейчас качать этого игрока: живой, на земле, не в транспорте и не лежит. */
+    private boolean standing(Player player) {
+        if (player.isDead() || player.isInsideVehicle() || player.isGliding()
+                || player.isSwimming() || player.isSleeping() || !player.isOnGround()) return false;
+        if (lie.containsKey(player.getUniqueId())) return false;
         GameMode mode = player.getGameMode();
-        if (mode != GameMode.SURVIVAL && mode != GameMode.ADVENTURE) return;
+        return mode == GameMode.SURVIVAL || mode == GameMode.ADVENTURE;
+    }
 
-        double chance = switch (stage) {
-            case SWAYING -> 0.35;
-            case QUEASY -> 0.55;
-            case WASTED -> 0.75;
-            case EDGE, BLACKOUT -> 0.9;
-            default -> 0.0;
-        };
-        if (random.nextDouble() > chance) return;
+    /**
+     * Плавное покачивание: каждые два тика игрока мягко тянет в сторону, причём сторона
+     * меняется по синусу, а направление его же скорости мы чуть-чуть подкручиваем —
+     * поэтому он идёт дугами, а не по прямой. На высоких стадиях качает даже стоящего.
+     */
+    private void swayTick() {
+        if (!settings.wobble()) return;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            DrunkStage stage = stage(player);
+            if (!DrunkWalk.sways(stage)) continue;
+            if (!standing(player)) continue;
 
-        double strength = switch (stage) {
-            case SWAYING -> 0.10;
-            case QUEASY -> 0.16;
-            case WASTED -> 0.22;
-            case EDGE, BLACKOUT -> 0.28;
-            default -> 0.0;
-        };
-        Vector push = new Vector((random.nextDouble() - 0.5) * 2 * strength,
-                0.03 + random.nextDouble() * 0.03,
-                (random.nextDouble() - 0.5) * 2 * strength);
-        player.setVelocity(player.getVelocity().add(push));
+            Sway walk = sway.computeIfAbsent(player.getUniqueId(), key -> new Sway(random));
+            walk.phase += walk.speed;
+            if (walk.phase > Math.PI * 2) walk.phase -= Math.PI * 2;
 
-        // Колени подкосились — подкинуло.
-        if (stage.atLeast(DrunkStage.QUEASY) && random.nextDouble() < 0.18) {
-            player.setVelocity(player.getVelocity().add(new Vector(0, 0.32, 0)));
-        }
-        // Развернуло на месте.
-        if (stage.atLeast(DrunkStage.QUEASY) && random.nextDouble() < 0.15) {
-            Location spin = player.getLocation();
-            spin.setYaw(spin.getYaw() + (random.nextFloat() - 0.5f) * 160f);
-            spin.setPitch(Math.max(-80f, Math.min(80f, spin.getPitch() + (random.nextFloat() - 0.5f) * 40f)));
-            player.teleport(spin);
-        }
-        // Просто прилёг: на «В стельку» редко, на «Краю» — часто.
-        double lieChance = stage.atLeast(DrunkStage.EDGE) ? 0.14 : 0.06;
-        if (stage.atLeast(DrunkStage.WASTED) && random.nextDouble() < lieChance) {
-            startLie(player, randomBetween(LIE_MIN_TICKS, LIE_MAX_TICKS));
+            Vector velocity = player.getVelocity();
+            Vector flat = new Vector(velocity.getX(), 0, velocity.getZ());
+            double speed = flat.length();
+            boolean moving = speed > 0.06;
+            // Стоять на месте на высоких стадиях не получается вовсе.
+            if (!moving && !stage.atLeast(DrunkStage.WASTED)) continue;
+
+            Vector direction = moving
+                    ? flat.clone().multiply(1 / speed)
+                    : player.getLocation().getDirection().setY(0);
+            if (direction.lengthSquared() < 1e-6) continue;
+            direction.normalize();
+
+            double factor = moving ? 1.0 : DrunkWalk.standingFactor(stage);
+            if (factor <= 0) continue;
+            double amp = DrunkWalk.sway(stage) * factor;
+            double wave = Math.sin(walk.phase);
+            Vector side = new Vector(-direction.getZ(), 0, direction.getX()).multiply(wave * amp);
+            Vector next = velocity.clone().add(side);
+            if (moving) {
+                double[] curved = DrunkWalk.rotate(next.getX(), next.getZ(), wave * DrunkWalk.curve(stage));
+                next = new Vector(curved[0], next.getY(), curved[1]);
+            }
+            if (Math.hypot(next.getX(), next.getZ()) > 0.62) continue;
+            player.setVelocity(next);
         }
     }
 
@@ -602,10 +694,7 @@ final class DrunkManager implements Listener {
         player.getWorld().playSound(at, Sound.ENTITY_ITEM_PICKUP, SoundCategory.PLAYERS, 0.4F, 0.6F);
     }
 
-    /**
-     * Приступ тошноты по расписанию: на «Укачало» раз в 5–10 секунд, выше — чаще
-     * (это нижняя граница из настроек, стадия добавляет свою частоту).
-     */
+    /** Приступ тошноты по расписанию: с «Укачало» и выше — ровно раз в 8 секунд. */
     private void schedulePuke(Player player, DrunkStage stage) {
         UUID id = player.getUniqueId();
         if (!stage.atLeast(DrunkStage.QUEASY)) {
@@ -627,16 +716,10 @@ final class DrunkManager implements Listener {
         nextPuke.put(id, now + pukeInterval(stage));
     }
 
-    /** Чем выше стадия, тем короче пауза: «Край» блюёт почти без остановки. */
+    /** Пауза между приступами: 160 тиков = 8 секунд (можно поменять в настройках). */
     private long pukeInterval(DrunkStage stage) {
         int base = randomBetween(settings.pukeMinTicks(), settings.pukeMaxTicks());
-        double factor = switch (stage) {
-            case QUEASY -> 1.0;
-            case WASTED -> 0.7;
-            case EDGE, BLACKOUT -> 0.5;
-            default -> 1.0;
-        };
-        return Math.max(1_000L, (long) (base * factor) * 50L);
+        return Math.max(1_000L, base * 50L);
     }
 
     private int randomBetween(int min, int max) {
@@ -733,6 +816,8 @@ final class DrunkManager implements Listener {
         lastStage.remove(id);
         hangover.remove(id);
         boons.remove(id);
+        hold.remove(id);
+        sway.remove(id);
         if (lie.remove(id) != null) event.getPlayer().setPose(Pose.STANDING, true);
         save();
     }
@@ -747,6 +832,8 @@ final class DrunkManager implements Listener {
     public void onWakeUp(PlayerBedLeaveEvent event) {
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
+        // Отключку не сбить даже сном: минута заперта наглухо.
+        if (hold.containsKey(id)) return;
         int value = points.getOrDefault(id, 0);
         if (value <= 0) return;
         clear(player);
