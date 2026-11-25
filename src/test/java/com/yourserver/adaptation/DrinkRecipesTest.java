@@ -328,9 +328,82 @@ final class DrinkRecipesTest {
     }
 
     @Test
+    void новыйБочковойНапитокИзФайлаВиденЦеликом() throws Exception {
+        DrinkRecipes recipes = load("""
+                recipes:
+                  kvass:
+                    name: 'Квас'
+                    color: '#8B5A2B'
+                    model: ''
+                    method: barrel
+                    ingredients:
+                      sugar_cane: 2
+                      water_bottle: 1
+                """);
+
+        assertEquals(1, recipes.size(), "в файле ровно один напиток");
+        assertEquals(1, recipes.barrelDrinks().size());
+        assertEquals("2 × сахарный тростник + 1 × бутылочка воды", recipes.recipeText("kvass"));
+        assertEquals(2, recipes.maxBarrelCount(DrinkRecipes.BarrelIngredient.SUGAR_CANE),
+                "бочка примет ровно столько тростника, сколько просит рецепт");
+        assertNull(recipes.barrelHint(Map.of(
+                DrinkRecipes.BarrelIngredient.SUGAR_CANE, 2,
+                DrinkRecipes.BarrelIngredient.WATER_BOTTLE, 1)), "набор совпал — подсказывать нечего");
+    }
+
+    @Test
+    void бочкаПодсказываетЧегоНеХватает() {
+        DrinkRecipes recipes = DrinkRecipes.defaults();
+
+        assertNull(recipes.barrelHint(Map.of(
+                        DrinkRecipes.BarrelIngredient.SUGAR_CANE, 3,
+                        DrinkRecipes.BarrelIngredient.WATER_BOTTLE, 2)),
+                "пиво: тростник и вода — ровно то, что просит рецепт");
+
+        String missing = recipes.barrelHint(Map.of(DrinkRecipes.BarrelIngredient.SUGAR_CANE, 3));
+        assertNotNull(missing);
+        assertTrue(missing.contains("не хватает 2 × бутылочка воды"), missing);
+
+        Map<DrinkRecipes.BarrelIngredient, Integer> extra =
+                new java.util.EnumMap<>(DrinkRecipes.BarrelIngredient.class);
+        extra.put(DrinkRecipes.BarrelIngredient.SUGAR_CANE, 3);
+        extra.put(DrinkRecipes.BarrelIngredient.WATER_BOTTLE, 2);
+        extra.put(DrinkRecipes.BarrelIngredient.COAL, 1);
+        String withExtra = recipes.barrelHint(extra);
+        assertNotNull(withExtra);
+        assertTrue(withExtra.contains("лишнее 1 × уголь"), withExtra);
+        assertTrue(withExtra.contains("Пиво"), "подсказка называет ближайший напиток: " + withExtra);
+    }
+
+    @Test
+    void обычныеПредметыТожеСчитаютсяИнгредиентами() throws Exception {
+        DrinkRecipes recipes = load("""
+                recipes:
+                  kvass:
+                    name: 'Квас'
+                    color: '#8B5A2B'
+                    method: barrel
+                    ingredients:
+                      wheat: 3
+                      water_bottle: 2
+                """);
+
+        String text = recipes.recipeText("kvass");
+        assertTrue(text.contains("3 × пшеница"), text);
+        assertTrue(text.contains("2 × бутылочка воды"), text);
+        assertNull(recipes.barrelHint(Map.of(
+                DrinkRecipes.BarrelIngredient.WHEAT, 3,
+                DrinkRecipes.BarrelIngredient.WATER_BOTTLE, 2)), "пшеница + вода — готовый квас");
+    }
+
+    @Test
     void именаИнгредиентовБочкиПоРазному() {
         assertEquals(DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE,
                 DrinkRecipes.BarrelIngredient.of("hot_water_bottle"));
+        assertEquals(DrinkRecipes.BarrelIngredient.WHEAT, DrinkRecipes.BarrelIngredient.of("wheat"));
+        assertEquals(DrinkRecipes.BarrelIngredient.SWEET_BERRIES,
+                DrinkRecipes.BarrelIngredient.of("Sweet-Berries"));
+        assertEquals(DrinkRecipes.BarrelIngredient.COCOA_BEANS, DrinkRecipes.BarrelIngredient.of("cocoa_beans"));
         assertEquals(DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE,
                 DrinkRecipes.BarrelIngredient.of("Hot-Water-Bottle"));
         assertEquals(DrinkRecipes.BarrelIngredient.LOW_SWEETIE_BERRY,

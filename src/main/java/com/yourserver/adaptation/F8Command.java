@@ -17,9 +17,12 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 public class F8Command implements CommandExecutor, Listener {
 
@@ -214,6 +217,17 @@ public class F8Command implements CommandExecutor, Listener {
             return true;
         }
 
+        // /f8 drinks — что плагин на самом деле прочитал из файлов напитков.
+        if (args.length > 0 && (args[0].equalsIgnoreCase("drinks")
+                || args[0].equalsIgnoreCase("напитки"))) {
+            if (!sender.hasPermission("f8.admin")) {
+                sender.sendMessage("§cНедостаточно прав.");
+                return true;
+            }
+            for (String line : drinkReport()) sender.sendMessage(line);
+            return true;
+        }
+
         // /f8 drunk — шкала опьянения: своя или чужая (для админа).
         if (args.length > 0 && args[0].equalsIgnoreCase("drunk")) {
             return drunk(sender, args);
@@ -222,6 +236,7 @@ public class F8Command implements CommandExecutor, Listener {
         if (!(sender instanceof Player player)) {
             sender.sendMessage("§7Использование: /f8 reload — перечитать settings/*.yml, косметику и новые YAML-файлы");
             sender.sendMessage("§7             /f8 config — где что лежит и что не на месте");
+            sender.sendMessage("§7             /f8 drinks — что прочитано из recipe-poilo.yml и napitki.yml");
             return true;
         }
 
@@ -667,6 +682,119 @@ public class F8Command implements CommandExecutor, Listener {
         player.sendMessage("§7Тишина? Смотрите клиентский §flogs/latest.log§7: "
                 + "§fUnable to play unknown soundEvent§7 — нет ключа в sounds.json; "
                 + "§fis stereo§7 — ogg должен быть моно.");
+    }
+
+    // ===== /f8 drinks: что реально прочитано =====
+
+    /**
+     * Подробный отчёт по напиткам: откуда читаются файлы, какие напитки загрузились,
+     * что каждый просит в бочку, сколько варится и когда какое качество. Нужен, когда
+     * «добавил рецепт — а он не работает»: тут видно и ошибку файла, и забытый id,
+     * и рецепт, который пишет ингредиенты не в том виде.
+     */
+    List<String> drinkReport() {
+        List<String> lines = new ArrayList<>();
+        DrinkRecipes recipes = DrinkRecipes.current();
+        BarrelDrinks barrel = BarrelDrinks.current();
+
+        lines.add("§8==== §6Напитки §8====");
+        Path recipePath = Layout.settings(plugin, "recipe-poilo.yml");
+        Path barrelPath = Layout.data(plugin, BarrelDrinks.FILE);
+        lines.add("§7Рецепты: §f" + recipePath + (Files.exists(recipePath) ? "" : " §c(файла нет)"));
+        lines.add("§7Выдержка: §f" + barrelPath + (Files.exists(barrelPath) ? "" : " §c(файла нет)"));
+        lines.add("§7Загружено: §f" + recipes.size() + " §7(шейкер: §f" + recipes.shakerDrinks().size()
+                + "§7, бочка: §f" + recipes.barrelDrinks().size() + "§7), профилей в napitki: §f"
+                + barrel.ids().size());
+
+        StringBuilder allowed = new StringBuilder();
+        for (DrinkRecipes.BarrelIngredient ingredient : DrinkRecipes.BarrelIngredient.values()) {
+            if (allowed.length() > 0) allowed.append(", ");
+            allowed.append(ingredient.label());
+        }
+        lines.add("§7Бочка берёт только это: §f" + allowed);
+
+        if (plugin.lastDrinkError() != null) {
+            lines.add("§cОшибка recipe-poilo.yml: §f" + plugin.lastDrinkError());
+            lines.add("§cПока файл с ошибкой, работают СТАРЫЕ напитки — новых в списке не будет.");
+        }
+        if (plugin.lastBarrelError() != null) {
+            lines.add("§cОшибка napitki.yml: §f" + plugin.lastBarrelError());
+        }
+
+        lines.add("§8— бочковые —");
+        for (DrinkRecipes.Drink drink : recipes.barrelDrinks()) {
+            String id = drink.id();
+            String text = recipes.recipeText(id);
+            BarrelDrinks.Profile profile = barrel.of(id);
+            StringBuilder line = new StringBuilder("§e" + id + " §f" + drink.name());
+            if (text.isEmpty()) {
+                line.append(" §c— рецепта нет!");
+            } else {
+                line.append(" §8· §f").append(text);
+                line.append(" §8· варка ")
+                        .append(String.format(java.util.Locale.ROOT, "%.1f", profile.brewTicks() / 20.0))
+                        .append(" с");
+                line.append(" §8· ").append(profile.bottles()).append(" бут.");
+                line.append(" §8· год ").append(profile.ticksPerYear()).append(" тиков");
+                line.append(" §8· годы ").append(yearsText(profile));
+                line.append(" §8· за глоток ").append(drunkText(profile));
+            }
+            lines.add(line.toString());
+            if (text.isEmpty()) {
+                lines.add("  §c  почему: у напитка method: barrel, но ingredients пустые "
+                        + "или записаны списком. Бочка читает только «предмет: сколько».");
+            } else if (barrel.ownKeys(id).isEmpty()) {
+                lines.add("  §e  своих настроек в napitki.yml нет: сроки и качества — из default "
+                        + "(а там годы рома, 10 лет до безупречного и ромовая крепость).");
+            } else if (!barrel.ownKeys(id).contains("drunk")) {
+                lines.add("  §e  в napitki.yml нет drunk: крепость взята из default — как у рома.");
+            }
+        }
+
+        lines.add("§8— шейкер —");
+        for (DrinkRecipes.Drink drink : recipes.shakerDrinks()) {
+            String text = recipes.shakerText(drink.id());
+            lines.add("§e" + drink.id() + " §f" + drink.name() + (text.isEmpty() ? "" : " §8· §f" + text));
+        }
+
+        List<String> notes = new ArrayList<>();
+        for (String id : barrel.ids()) {
+            if (recipes.get(id) == null) {
+                notes.add("§cпрофиль «" + id + "» в napitki.yml ни к чему не относится: "
+                        + "в recipe-poilo.yml нет напитка с таким id");
+            }
+        }
+        if (recipes.barrelDrinks().isEmpty()) {
+            notes.add("§cбочковых напитков нет вообще: в recipe-poilo.yml ни у кого нет method: barrel");
+        }
+        if (!notes.isEmpty()) {
+            lines.add("§8— замечания —");
+            lines.addAll(notes);
+        }
+        lines.add("§8Годы пишутся как «до какого года»: 1, 2, 5, '*' (и дальше). "
+                + "Ступени — tier из раздела quality.");
+        return lines;
+    }
+
+    /** «1→1, 2→2, 5→5, 7→3, 8+→2». */
+    private static String yearsText(BarrelDrinks.Profile profile) {
+        StringBuilder text = new StringBuilder();
+        for (BarrelDrinks.Years entry : profile.years()) {
+            if (text.length() > 0) text.append(", ");
+            text.append(entry.upToYears() < 0 ? "старше" : String.valueOf(entry.upToYears()))
+                    .append("→").append(entry.tier());
+        }
+        return text.length() == 0 ? "нет" : text.toString();
+    }
+
+    /** «1→1, 2→1, 3→2, 4→2, 5→3» — единицы за глоток по ступеням. */
+    private static String drunkText(BarrelDrinks.Profile profile) {
+        StringBuilder text = new StringBuilder();
+        for (Map.Entry<Integer, Integer> entry : new java.util.TreeMap<>(profile.drunk()).entrySet()) {
+            if (text.length() > 0) text.append(", ");
+            text.append(entry.getKey()).append("→").append(entry.getValue());
+        }
+        return text.length() == 0 ? "не пьянит" : text.toString();
     }
 
     private void giveItem(Player player, ItemStack item) {

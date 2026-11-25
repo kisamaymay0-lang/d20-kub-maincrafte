@@ -66,6 +66,12 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private Apvsh apvsh;
     private SweetBerryBlock sweetBerryBlock;
     private Shaker shaker;
+
+    /** Последняя ошибка чтения settings/recipe-poilo.yml — её показывает /f8 drinks. */
+    private volatile String lastDrinkError = null;
+
+    /** Последняя ошибка чтения data/napitki/napitki.yml — её показывает /f8 drinks. */
+    private volatile String lastBarrelError = null;
     /** Рюмка из RP Engine: налить напиток прямо из шейкера. */
     private ShotGlass shotGlass;
     private BambooBarrel bambooBarrel;
@@ -189,7 +195,8 @@ public void onEnable() {
     cigarette = new Cigarette(this);
 
     // Напитки: рецепты, названия, цвета и модели — из settings/recipe-poilo.yml.
-    reloadDrinkRecipes();
+    // Итог пишем в журнал сразу: иначе опечатка в файле выглядит как «плагин не видит рецепт».
+    getLogger().info(reloadDrinkRecipes());
 
     // Шейкер — инструмент для смешивания напитков и коктейлей.
     shaker = new Shaker(this);
@@ -419,12 +426,15 @@ public void onEnable() {
         try {
             DrinkRecipes next = DrinkRecipes.load(path);
             DrinkRecipes.install(next);
+            lastDrinkError = null;
             return "Напитки: " + next.size() + " (шейкер: " + next.shakerDrinks().size()
                     + ", бочка: " + next.barrelDrinks().size() + "), файл " + path + ".";
         } catch (Exception ex) {
+            lastDrinkError = ex.getMessage();
             getLogger().log(java.util.logging.Level.WARNING,
                     "Ошибка settings/recipe-poilo.yml; остаются прежние напитки (" + ex.getMessage() + ")", ex);
-            return "Напитки не перечитаны: ошибка в settings/recipe-poilo.yml (причина в журнале сервера).";
+            return "§cНапитки НЕ перечитаны: ошибка в settings/recipe-poilo.yml — " + ex.getMessage()
+                    + " (подробности в журнале, разбор: /f8 drinks).";
         }
     }
 
@@ -441,22 +451,35 @@ public void onEnable() {
         }
         try {
             BarrelDrinks.install(BarrelDrinks.load(path));
+            lastBarrelError = null;
             return "Выдержка: файл " + path + ".";
         } catch (Exception ex) {
+            lastBarrelError = ex.getMessage();
             getLogger().log(java.util.logging.Level.WARNING,
                     "Ошибка data/" + BarrelDrinks.FILE + "; остаются прежние сроки и качества ("
                             + ex.getMessage() + ")", ex);
-            return "Сроки выдержки не перечитаны: ошибка в data/" + BarrelDrinks.FILE
-                    + " (причина в журнале сервера).";
+            return "§cСроки выдержки НЕ перечитаны: ошибка в data/" + BarrelDrinks.FILE + " — "
+                    + ex.getMessage() + " (подробности в журнале, разбор: /f8 drinks).";
         }
+    }
+
+    /** Ошибка settings/recipe-poilo.yml при последнем чтении; null — файл прочитан. */
+    public String lastDrinkError() {
+        return lastDrinkError;
+    }
+
+    /** Ошибка data/napitki/napitki.yml при последнем чтении; null — файл прочитан. */
+    public String lastBarrelError() {
+        return lastBarrelError;
     }
 
     public String reloadPluginSettings() {
         ConfigSync.sync(this);   // /f8 reload тоже доводит файлы до полного вида
         reloadConfig();
+        String drinkSummary = null;
         if (shaker != null) {
-            // Рецепты напитков: settings/recipe-poilo.yml.
-            reloadDrinkRecipes();
+            // Рецепты напитков: settings/recipe-poilo.yml и data/napitki/napitki.yml.
+            drinkSummary = reloadDrinkRecipes();
         }
         if (constellationManager != null) {
             constellationManager.reloadSettings();
@@ -492,6 +515,9 @@ public void onEnable() {
             chatBubble.reloadSettings();
         }
         List<String> summaries = new ArrayList<>();
+        if (drinkSummary != null && !drinkSummary.isBlank()) {
+            summaries.add(drinkSummary);
+        }
         if (profileManager != null) {
             summaries.add(profileManager.reloadPrefixes());
             // Косметика живёт в отдельных YAML: /f8 reload тоже обязан

@@ -40,6 +40,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 /**
  * Бамбуковая бочка: в ней варят и выдерживают напитки (3x3x3 мультблок по NBT-структуре bamboo-bo4ka):
@@ -80,6 +81,9 @@ public class BambooBarrel implements Listener {
 
     private final Plugin plugin;
     private final Map<Location, BarrelState> barrels = new HashMap<>();
+
+    /** Когда игроку в последний раз показывали подсказку бочки (не чаще раза в 2 секунды). */
+    private final Map<UUID, Long> hintAt = new HashMap<>();
 
     public BambooBarrel(Plugin plugin) {
         this.plugin = plugin;
@@ -637,10 +641,21 @@ public class BambooBarrel implements Listener {
         // 4. Положить ингредиент: уголь, тростник, вода, ягоды, сахар, костная мука.
         //    Сколько чего бочка принимает, решают рецепты в settings/recipe-poilo.yml.
         DrinkRecipes.BarrelIngredient ingredient = DrinkRecipes.BarrelIngredient.of(held);
-        if (ingredient == null) return;
+        if (ingredient == null) {
+            // Бочка не знает этот предмет. Раньше она молчала, и это выглядело как
+            // «ингредиенты не ложатся»: скажем, что принимается, но не чаще раза в пару секунд.
+            // Блоки не трогаем — иначе подсказка мешала бы строить саму бочку.
+            if (!held.getType().isBlock()) {
+                hint(player, "Бочка такое не принимает. Годится: " + allowedIngredients());
+            }
+            return;
+        }
 
         int max = DrinkRecipes.current().maxBarrelCount(ingredient);
-        if (state.items.getOrDefault(ingredient, 0) >= max) return;
+        if (state.items.getOrDefault(ingredient, 0) >= max) {
+            hint(player, "Больше " + max + " × " + ingredient.label() + " бочка не примет.");
+            return;
+        }
 
         event.setCancelled(true);
         if (ingredient == DrinkRecipes.BarrelIngredient.HOT_WATER_BOTTLE
@@ -660,7 +675,37 @@ public class BambooBarrel implements Listener {
         }
         state.items.merge(ingredient, 1, Integer::sum);
         spawnAddParticles(world, block, centerLoc);
+        String before = state.drink;
         checkStartBrewing(centerLoc, state);
+        if (state.brewing && state.drink != null && !state.drink.equals(before)) {
+            player.sendActionBar(Component.text("Забродило: "
+                    + DrinkRecipes.current().nameOf(state.drink), NamedTextColor.GREEN));
+            return;
+        }
+        // Ничего не варится — покажем, чего не хватает и что лежит лишним.
+        if (!state.ready) {
+            String missing = DrinkRecipes.current().barrelHint(state.items);
+            if (missing != null) hint(player, missing);
+        }
+    }
+
+    /** Подсказка над хотбаром, не чаще раза в две секунды — чтобы не мигала при кликах. */
+    private void hint(Player player, String text) {
+        if (player == null || text == null || text.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        Long last = hintAt.get(player.getUniqueId());
+        if (last != null && now - last < 2000L) return;
+        hintAt.put(player.getUniqueId(), now);
+        player.sendActionBar(Component.text(text, NamedTextColor.GRAY));
+    }
+
+    /** Что бочка принимает — списком из кода, чтобы игрок видел границы настроек. */
+    private static String allowedIngredients() {
+        List<String> labels = new ArrayList<>();
+        for (DrinkRecipes.BarrelIngredient ingredient : DrinkRecipes.BarrelIngredient.values()) {
+            labels.add(ingredient.label());
+        }
+        return String.join(", ", labels);
     }
 
     /** Забрать из бочки один ингредиент — тот, что лежит первым по списку. */

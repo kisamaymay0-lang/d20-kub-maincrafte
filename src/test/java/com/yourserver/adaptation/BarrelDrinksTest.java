@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -195,6 +196,21 @@ final class BarrelDrinksTest {
             DrinkRecipes.install(previousRecipes);
             BarrelDrinks.install(previous);
         }
+    }
+
+    @Test
+    void вижноКакиеКлючиНаписаныСамим() throws Exception {
+        BarrelDrinks shipped = BarrelDrinks.load(Path.of("src/main/resources/data/napitki/napitki.yml"));
+
+        assertTrue(shipped.ids().contains("beer"), "пиво есть в файле");
+        assertTrue(shipped.ids().contains("wine"));
+        assertTrue(shipped.ownKeys("beer").contains("quality"), "у пива свои ступени");
+        assertTrue(shipped.ownKeys("beer").contains("years"), "у пива свои годы");
+        assertTrue(shipped.ownKeys("beer").contains("drunk"), "у пива своя крепость");
+        assertTrue(shipped.ownKeys("wine").contains("drunk"), "вина задают только крепость");
+        assertFalse(shipped.ownKeys("wine").contains("quality"),
+                "ступени и годы вина наследуют из default — так и задумано");
+        assertTrue(shipped.ownKeys("pirate_rum").contains("drunk"));
     }
 
     @Test

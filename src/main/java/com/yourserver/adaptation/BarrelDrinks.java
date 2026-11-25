@@ -11,9 +11,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Настройки бочковых напитков из {@code data/napitki/napitki.yml}.
@@ -160,9 +162,28 @@ final class BarrelDrinks {
     private final Profile base;
     private final Map<String, Profile> byDrink;
 
+    /** Какие ключи владелец написал у напитка сам — для /f8 drinks. */
+    private final Map<String, Set<String>> ownKeys;
+
     private BarrelDrinks(Profile base, Map<String, Profile> byDrink) {
+        this(base, byDrink, Map.of());
+    }
+
+    private BarrelDrinks(Profile base, Map<String, Profile> byDrink, Map<String, Set<String>> ownKeys) {
         this.base = base;
         this.byDrink = Map.copyOf(byDrink);
+        this.ownKeys = Map.copyOf(ownKeys);
+    }
+
+    /** Id напитков, у которых в файле есть своя запись. */
+    Set<String> ids() {
+        return byDrink.keySet();
+    }
+
+    /** Какие ключи напитка заданы в файле (quality, years, drunk, brew-ticks…). */
+    Set<String> ownKeys(String id) {
+        Set<String> keys = id == null ? null : ownKeys.get(id);
+        return keys == null ? Set.of() : keys;
     }
 
     /** Текущие настройки: их читает {@link BambooBarrel}. */
@@ -251,6 +272,7 @@ final class BarrelDrinks {
         yaml.loadFromString(Files.readString(path));
         Profile base = readProfile(yaml.getConfigurationSection("default"), defaults().base(), "default");
         Map<String, Profile> byDrink = new LinkedHashMap<>();
+        Map<String, Set<String>> ownKeys = new LinkedHashMap<>();
         ConfigurationSection drinks = yaml.getConfigurationSection("drinks");
         if (drinks != null) {
             for (String rawId : drinks.getKeys(false)) {
@@ -258,9 +280,14 @@ final class BarrelDrinks {
                 if (id.isEmpty()) continue;
                 ConfigurationSection section = drinks.getConfigurationSection(rawId);
                 byDrink.put(id, readProfile(section, base, id));
+                if (section != null) {
+                    Set<String> keys = new LinkedHashSet<>();
+                    for (String key : section.getKeys(false)) keys.add(key.toLowerCase(Locale.ROOT));
+                    ownKeys.put(id, Set.copyOf(keys));
+                }
             }
         }
-        return new BarrelDrinks(base, byDrink);
+        return new BarrelDrinks(base, byDrink, ownKeys);
     }
 
     /** Раздел напитка поверх общих настроек: чего в нём нет — берётся из базы. */

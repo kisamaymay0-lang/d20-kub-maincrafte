@@ -58,6 +58,9 @@ final class DrinkRecipes {
     /**
      * Что бочка принимает как ингредиент. В файле пишется строчными буквами
      * ({@code hot_water_bottle}, {@code low_sweetie_berry}), понимает и дефисы.
+     * Кроме восьми «своих» предметов принимаются обычные: {@code wheat}, {@code potato},
+     * {@code apple}, {@code sweet_berries}, {@code glow_berries}, {@code honey_bottle},
+     * {@code melon_slice}, {@code cocoa_beans}.
      *
      * <p>{@link #WATER_BOTTLE} — «просто вода»: под неё подходит и обычная бутылочка
      * воды, и бутылочка горячей воды. Обратное неверно: ром требует именно горячую.
@@ -70,7 +73,18 @@ final class DrinkRecipes {
         LOW_SWEETIE_BERRY("помятые сладкие ягоды"),
         HARD_SWEETIE_BERRY("продавленные сладкие ягоды"),
         SUGAR("сахар"),
-        BONE_MEAL("костная мука");
+        BONE_MEAL("костная мука"),
+        // Обычные предметы — чтобы в настройках хватало не только восьми старых.
+        // Пишутся так же: wheat, potato, apple, sweet_berries, glow_berries, honey_bottle,
+        // melon_slice, cocoa_beans.
+        WHEAT("пшеница"),
+        POTATO("картофель"),
+        APPLE("яблоко"),
+        SWEET_BERRIES("сладкие ягоды"),
+        GLOW_BERRIES("светящиеся ягоды"),
+        HONEY_BOTTLE("бутылочка мёда"),
+        MELON_SLICE("ломтик арбуза"),
+        COCOA_BEANS("какао-бобы");
 
         private final String label;
 
@@ -94,6 +108,14 @@ final class DrinkRecipes {
                 case HARD_SWEETIE_BERRY -> SweetBerryBlock.createHardSweetieBerry();
                 case SUGAR -> new ItemStack(Material.SUGAR);
                 case BONE_MEAL -> new ItemStack(Material.BONE_MEAL);
+                case WHEAT -> new ItemStack(Material.WHEAT);
+                case POTATO -> new ItemStack(Material.POTATO);
+                case APPLE -> new ItemStack(Material.APPLE);
+                case SWEET_BERRIES -> new ItemStack(Material.SWEET_BERRIES);
+                case GLOW_BERRIES -> new ItemStack(Material.GLOW_BERRIES);
+                case HONEY_BOTTLE -> new ItemStack(Material.HONEY_BOTTLE);
+                case MELON_SLICE -> new ItemStack(Material.MELON_SLICE);
+                case COCOA_BEANS -> new ItemStack(Material.COCOA_BEANS);
             };
         }
 
@@ -117,6 +139,14 @@ final class DrinkRecipes {
                 case SUGAR_CANE -> SUGAR_CANE;
                 case SUGAR -> SUGAR;
                 case BONE_MEAL -> BONE_MEAL;
+                case WHEAT -> WHEAT;
+                case POTATO -> POTATO;
+                case APPLE -> APPLE;
+                case SWEET_BERRIES -> SWEET_BERRIES;
+                case GLOW_BERRIES -> GLOW_BERRIES;
+                case HONEY_BOTTLE -> HONEY_BOTTLE;
+                case MELON_SLICE -> MELON_SLICE;
+                case COCOA_BEANS -> COCOA_BEANS;
                 case POTION -> WaterBottle.isWaterBottle(item) ? WATER_BOTTLE : null;
                 default -> null;
             };
@@ -331,6 +361,127 @@ final class DrinkRecipes {
             max = Math.max(max, recipe.needed(ingredient));
         }
         return Math.max(1, max);
+    }
+
+    // ===== ЧЕЛОВЕЧЕСКИЕ ОПИСАНИЯ (для /f8 drinks и подсказок бочки) =====
+
+    /** Что напиток просит в бочку: «3 × сахарный тростник + 2 × бутылочка воды». */
+    String recipeText(String id) {
+        BarrelRecipe recipe = id == null ? null : barrels.get(id);
+        if (recipe == null || recipe.empty()) return "";
+        List<String> parts = new ArrayList<>();
+        for (Map.Entry<BarrelIngredient, Integer> entry : recipe.ingredients().entrySet()) {
+            parts.add(entry.getValue() + " × " + entry.getKey().label());
+        }
+        return String.join(" + ", parts);
+    }
+
+    /** Ингредиенты шейкера строкой: «медовые соты, бутылочка горячей воды». */
+    String shakerText(String id) {
+        Drink drink = get(id);
+        if (drink == null || drink.ingredients().isEmpty()) return "";
+        List<String> names = new ArrayList<>();
+        for (Shaker.IngredientKind kind : drink.ingredients()) {
+            names.add(kindLabel(kind));
+        }
+        return String.join(", ", names);
+    }
+
+    /** Русское название ингредиента шейкера — для отчёта /f8 drinks. */
+    static String kindLabel(Shaker.IngredientKind kind) {
+        if (kind == null) return "что-то ещё";
+        return switch (kind) {
+            case HONEYCOMB -> "медовые соты";
+            case HONEY_BOTTLE -> "бутылочка мёда";
+            case WATER_BOTTLE -> "бутылочка воды";
+            case HOT_WATER_BOTTLE -> "бутылочка горячей воды";
+            case SUGAR -> "сахар";
+            case SWEET_BERRIES -> "сладкие ягоды";
+            case ICE -> "лёд";
+            case COCOA_BEANS -> "какао-бобы";
+            case MILK_BUCKET -> "ведро молока";
+            case GREEN_DYE -> "зелёный краситель";
+            case OTHER -> "что-то ещё";
+        };
+    }
+
+    /**
+     * Ближайший рецепт бочки к тому, что уже лежит: чего не хватает и что лишнее.
+     * Возвращает {@code null}, если набор уже совпал с каким-то рецептом.
+     *
+     * <p>Нужно для подсказок: игрок положил ингредиенты, ничего не варится — пусть
+     * увидит, что докупить или что зря лежит. Раньше бочка молчала, и это выглядело
+     * как «рецепты не работают».
+     */
+    String barrelHint(Map<BarrelIngredient, Integer> have) {
+        if (have == null || have.isEmpty()) return null;
+        String best = null;
+        int bestScore = Integer.MAX_VALUE;
+        for (Map.Entry<String, BarrelRecipe> entry : barrels.entrySet()) {
+            BarrelRecipe recipe = entry.getValue();
+            if (recipe.empty()) continue;
+            if (recipe.matches(have)) return null;
+            List<String> missing = new ArrayList<>();
+            List<String> extra = new ArrayList<>();
+            int score = diff(recipe, have, missing, extra);
+            if (score < bestScore) {
+                bestScore = score;
+                StringBuilder text = new StringBuilder();
+                text.append("до «").append(nameOf(entry.getKey())).append("»: ");
+                if (!missing.isEmpty()) text.append("не хватает ").append(String.join(", ", missing));
+                if (!extra.isEmpty()) {
+                    if (!missing.isEmpty()) text.append("; ");
+                    text.append("лишнее ").append(String.join(", ", extra));
+                }
+                best = text.toString();
+            }
+        }
+        return best;
+    }
+
+    /** Разница между рецептом и тем, что лежит: 0 — совпало. Заодно собирает списки. */
+    private static int diff(BarrelRecipe recipe, Map<BarrelIngredient, Integer> have,
+                            List<String> missing, List<String> extra) {
+        int score = 0;
+        Map<BarrelIngredient, Integer> left = new java.util.EnumMap<>(BarrelIngredient.class);
+        for (Map.Entry<BarrelIngredient, Integer> entry : have.entrySet()) {
+            if (entry.getValue() != null && entry.getValue() > 0) left.put(entry.getKey(), entry.getValue());
+        }
+        for (Map.Entry<BarrelIngredient, Integer> need : recipe.ingredients().entrySet()) {
+            int want = need.getValue();
+            int taken = take(left, need.getKey(), want);
+            // Обычная вода: там, где просят бутылочку воды, подойдёт и горячая.
+            if (need.getKey() == BarrelIngredient.WATER_BOTTLE && taken < want) {
+                taken += take(left, BarrelIngredient.HOT_WATER_BOTTLE, want - taken);
+            }
+            if (taken < want) {
+                missing.add((want - taken) + " × " + need.getKey().label());
+                score += want - taken;
+            }
+        }
+        for (Map.Entry<BarrelIngredient, Integer> entry : left.entrySet()) {
+            if (entry.getValue() > 0) {
+                extra.add(entry.getValue() + " × " + entry.getKey().label());
+                score += entry.getValue();
+            }
+        }
+        return score;
+    }
+
+    /** Забрать до {@code want} штук ингредиента из «остатков»; вернуть, сколько взяли. */
+    private static int take(Map<BarrelIngredient, Integer> left, BarrelIngredient ingredient, int want) {
+        int have = left.getOrDefault(ingredient, 0);
+        int taken = Math.min(have, Math.max(0, want));
+        int rest = have - taken;
+        if (rest > 0) left.put(ingredient, rest);
+        else left.remove(ingredient);
+        return taken;
+    }
+
+    /** Название напитка по id; если такого нет — сам id. */
+    String nameOf(String id) {
+        Drink drink = id == null ? null : byId.get(id);
+        return drink == null ? String.valueOf(id) : drink.name();
     }
 
     /** Запасной напиток «муть» — то, что получается из непонятного набора. */
