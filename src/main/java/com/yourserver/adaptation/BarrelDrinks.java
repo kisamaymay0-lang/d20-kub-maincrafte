@@ -145,6 +145,12 @@ final class BarrelDrinks {
     static final int DEFAULT_BOTTLES = 3;
     static final long DEFAULT_TICKS_PER_YEAR = BambooBarrel.DEFAULT_TICKS_PER_YEAR;
 
+    /** Сколько даёт глоток рома: 40 % крепости против 12 % у вина. */
+    static final Map<Integer, Integer> DEFAULT_RUM_DRUNK = Map.of(1, 4, 2, 5, 3, 6, 4, 7, 5, 8);
+
+    /** Вино: те же ступени, но единиц меньше. */
+    static final Map<Integer, Integer> DEFAULT_WINE_DRUNK = Map.of(1, 2, 2, 3, 3, 3, 4, 4, 5, 5);
+
     /** Что читать, пока файл не загружен. */
     private static volatile BarrelDrinks current = defaults();
 
@@ -201,12 +207,6 @@ final class BarrelDrinks {
         drinks.put("bitter_wine", base.withDrunk(DEFAULT_WINE_DRUNK));
         return new BarrelDrinks(base, drinks);
     }
-
-    /** Сколько даёт глоток рома: 40 % крепости против 12 % у вина. */
-    static final Map<Integer, Integer> DEFAULT_RUM_DRUNK = Map.of(1, 4, 2, 5, 3, 6, 4, 7, 5, 8);
-
-    /** Вино: те же ступени, но единиц меньше. */
-    static final Map<Integer, Integer> DEFAULT_WINE_DRUNK = Map.of(1, 2, 2, 3, 3, 3, 4, 4, 5, 5);
 
     /** Пять ступеней рома: те же имена, цвета и описания, что были в коде. */
     static List<Level> defaultLevels() {
