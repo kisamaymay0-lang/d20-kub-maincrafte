@@ -131,7 +131,13 @@ final class PrefixPackCatalog {
     static PrefixPackCatalog load(Path folder, PrefixCatalog base, Consumer<String> warn) {
         Map<String, Pack> byId = new LinkedHashMap<>();
         for (PackFile.Header header : PackFile.readAll(folder, ENTRIES_KEY)) {
-            Pack pack = build(header, base, warn);
+            Pack pack;
+            try {
+                pack = build(header, base, warn);
+            } catch (IllegalArgumentException ex) {
+                // В ошибке должно быть имя файла: иначе непонятно, какой пак править.
+                throw new IllegalArgumentException("Пак " + header.id() + ".yml: " + ex.getMessage(), ex);
+            }
             if (pack != null) byId.put(pack.id(), pack);
         }
         return new PrefixPackCatalog(byId);

@@ -61,7 +61,8 @@ final class CosmeticPackCatalogTest {
         Path packs = packFolder(folder);
         Files.writeString(packs.resolve("letniy.yml"), TEST_PACK);
 
-        CosmeticPackCatalog catalog = CosmeticPackCatalog.load(packs);
+        CosmeticCatalog base = cosmetics(folder);
+        CosmeticPackCatalog catalog = CosmeticPackCatalog.load(packs, base, null);
         assertEquals(1, catalog.size());
 
         CosmeticPackCatalog.Pack pack = catalog.get("letniy");

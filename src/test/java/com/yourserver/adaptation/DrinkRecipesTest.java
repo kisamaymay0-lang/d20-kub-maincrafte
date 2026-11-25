@@ -132,7 +132,7 @@ final class DrinkRecipesTest {
 
     @Test
     void ромТолькоВБочкеИНеМожетБытьРецептомШейкера() throws Exception {
-        DrinkRecipes recipes = load(Path.of("src/main/resources/settings/recipe-poilo.yml").toString());
+        DrinkRecipes recipes = DrinkRecipes.load(Path.of("src/main/resources/settings/recipe-poilo.yml"));
         DrinkRecipes.Drink rum = recipes.get(Shaker.RECIPE_PIRATE_RUM);
 
         assertEquals(DrinkRecipes.Method.BARREL, rum.method());
