@@ -86,6 +86,26 @@ enum DrunkStage {
         return ordinal() >= other.ordinal();
     }
 
+    /**
+     * Сколько приступов тошноты набегает за одну секунду на этой стадии.
+     *
+     * <p>Это именно средняя частота, а не расписание: на «Навеселе» шанс совсем
+     * маленький, а к «Отключке» доходит до «каждую секунду» (и чуть чаще).
+     * Дробная часть — это шанс на дополнительный приступ в ту же секунду.
+     */
+    double pukeChance() {
+        return switch (this) {
+            case SOBER -> 0.0;
+            case TIPSY -> 0.02;
+            case TALKATIVE -> 0.05;
+            case SWAYING -> 0.12;
+            case QUEASY -> 0.30;
+            case WASTED -> 0.60;
+            case EDGE -> 1.0;
+            case BLACKOUT -> 1.5;
+        };
+    }
+
     /** Маленькое имя для файлов, команд и тестов: {@code wasted}. */
     String id() {
         return name().toLowerCase(Locale.ROOT);

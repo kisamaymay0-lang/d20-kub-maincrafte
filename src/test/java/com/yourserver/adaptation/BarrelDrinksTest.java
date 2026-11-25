@@ -150,7 +150,7 @@ final class BarrelDrinksTest {
             assertEquals(7, wine.size(), "пять строк, опьянение и описание-заглушка");
             assertTrue(plain.serialize(wine.get(1)).contains("Ужасное! ☠"));
             assertEquals("Лет: 0", plain.serialize(wine.get(3)));
-            assertEquals("Опьяняет", plain.serialize(wine.get(5)), "вино пьянит, но цифр не показывает");
+            assertEquals("Алькогольное", plain.serialize(wine.get(5)), "вино пьянит, но цифр не показывает");
             assertEquals("—", plain.serialize(wine.get(6)));
 
             // У рома описание своё — прочерк его не задел.

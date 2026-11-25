@@ -33,6 +33,20 @@ final class DrunkStageTest {
     }
 
     @Test
+    void блеватьТянетВсёЧащеСКаждойСтадией() {
+        assertEquals(0.0, DrunkStage.SOBER.pukeChance());
+        double previous = DrunkStage.SOBER.pukeChance();
+        for (DrunkStage stage : DrunkStage.values()) {
+            if (stage == DrunkStage.SOBER) continue;
+            assertTrue(stage.pukeChance() > previous, "частота растёт: " + stage);
+            previous = stage.pukeChance();
+        }
+        assertTrue(DrunkStage.TIPSY.pukeChance() > 0, "уже на первой стадии может стошнить");
+        assertTrue(DrunkStage.EDGE.pukeChance() >= 1.0, "на «Краю» — каждую секунду");
+        assertTrue(DrunkStage.BLACKOUT.pukeChance() > 1.0, "в отключке — даже чаще секунды");
+    }
+
+    @Test
     void другаяШкалаПересчитываетПороги() {
         // 30 из 60 — это те же 25 из 50, то есть «Шатает».
         assertEquals(DrunkStage.SWAYING, DrunkStage.of(30, 60));

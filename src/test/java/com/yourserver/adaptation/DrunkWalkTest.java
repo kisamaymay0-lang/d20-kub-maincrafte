@@ -50,6 +50,17 @@ final class DrunkWalkTest {
     }
 
     @Test
+    void уводитВСлучайнуюСторонуСШатающейСтадии() {
+        assertFalse(DrunkWalk.wanders(DrunkStage.TIPSY));
+        assertFalse(DrunkWalk.wanders(DrunkStage.TALKATIVE), "«разговорило» — ещё покачивание");
+        assertTrue(DrunkWalk.wanders(DrunkStage.SWAYING));
+        assertEquals(0.0, DrunkWalk.wander(DrunkStage.TIPSY));
+        assertTrue(DrunkWalk.wander(DrunkStage.BLACKOUT) > DrunkWalk.wander(DrunkStage.SWAYING),
+                "чем пьянее, тем сильнее несёт");
+        assertTrue(DrunkWalk.wander(DrunkStage.WASTED) > 0);
+    }
+
+    @Test
     void поворотКурсаНеМеняетСкорость() {
         double[] turned = DrunkWalk.rotate(0.40, 0.00, Math.PI / 2);
         assertEquals(0.0, turned[0], 1e-9);

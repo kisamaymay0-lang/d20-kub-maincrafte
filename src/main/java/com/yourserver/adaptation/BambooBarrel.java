@@ -214,7 +214,7 @@ public class BambooBarrel implements Listener {
                 .append(Component.text(transfers, NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
         // Пьянит или нет — без цифр: шкала опьянения игроку не показывается.
         if (profile.drunkFor(tier) > 0) {
-            lore.add(Component.text("Опьяняет", NamedTextColor.LIGHT_PURPLE)
+            lore.add(Component.text("Алькогольное", NamedTextColor.LIGHT_PURPLE)
                     .decoration(TextDecoration.ITALIC, false));
         }
         String description = profile.description(years, tier);

@@ -29,8 +29,7 @@ record DrunkSettings(int scale,
                      List<Material> puddleMaterials,
                      Set<Material> naturalFloor,
                      boolean ignoreCreative,
-                     int pukeMinTicks,
-                     int pukeMaxTicks,
+                     double pukeRate,
                      int phantomMax) {
 
     /** Что стоит, если файла нет или в нём ничего не написано. */
@@ -52,8 +51,7 @@ record DrunkSettings(int scale,
                         Material.STONE, Material.DEEPSLATE, Material.SOUL_SAND, Material.SOUL_SOIL,
                         Material.TUFF, Material.SNOW_BLOCK, Material.PACKED_MUD),
                 true,
-                160,
-                160,
+                1.0,
                 16);
     }
 
@@ -74,8 +72,7 @@ record DrunkSettings(int scale,
         List<Material> materials = materials(section.getStringList("puddle-materials"), base.puddleMaterials());
         List<Material> floors = materials(section.getStringList("natural-floor"), List.copyOf(base.naturalFloor()));
 
-        int pukeMin = (int) clamp(section.getInt("puke-min-ticks", base.pukeMinTicks()), 200, 20 * 60 * 10);
-        int pukeMax = (int) clamp(section.getInt("puke-max-ticks", base.pukeMaxTicks()), pukeMin, 20 * 60 * 30);
+        double pukeRate = Math.max(0.0, Math.min(6.0, section.getDouble("puke-rate", base.pukeRate())));
 
         int phantomMax = (int) clamp(section.getInt("phantom-max", base.phantomMax()), 1, 40);
 
@@ -92,8 +89,7 @@ record DrunkSettings(int scale,
                 List.copyOf(materials),
                 EnumSet.copyOf(floors),
                 section.getBoolean("ignore-creative", base.ignoreCreative()),
-                pukeMin,
-                pukeMax,
+                pukeRate,
                 phantomMax);
     }
 

@@ -39,6 +39,27 @@ final class DrunkWalk {
         };
     }
 
+    /** С какой стадии начинается «уводит в случайную сторону». */
+    static boolean wanders(DrunkStage stage) {
+        return stage != null && stage.atLeast(DrunkStage.SWAYING);
+    }
+
+    /**
+     * Сила постоянного увода в случайную сторону: игрок идёт туда, куда сам не собирался,
+     * и держит это направление несколько секунд. Растёт со стадией.
+     */
+    static double wander(DrunkStage stage) {
+        if (stage == null) return 0.0;
+        return switch (stage) {
+            case SWAYING -> 0.012;
+            case QUEASY -> 0.020;
+            case WASTED -> 0.030;
+            case EDGE -> 0.040;
+            case BLACKOUT -> 0.050;
+            default -> 0.0;
+        };
+    }
+
     /** Стоящего на высоких стадиях тоже ведёт: там покачивание усиливаем. */
     static double standingFactor(DrunkStage stage) {
         return stage != null && stage.atLeast(DrunkStage.WASTED) ? 1.7 : 0.0;

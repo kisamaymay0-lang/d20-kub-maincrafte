@@ -11,7 +11,9 @@ import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.type.Bed;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
@@ -118,18 +120,50 @@ final class DrunkManager implements Listener {
     private final Map<UUID, Integer> hold = new ConcurrentHashMap<>();
     private final Map<UUID, Sway> sway = new ConcurrentHashMap<>();
     private final Map<UUID, Set<PotionEffectType>> boons = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> nextPuke = new ConcurrentHashMap<>();
+    private final Set<UUID> waking = ConcurrentHashMap.newKeySet();
     private final Map<UUID, DrunkStage> lastStage = new ConcurrentHashMap<>();
     private final Path storePath;
 
-    /** Плавное покачивание при ходьбе: фаза и скорость у каждого своя. */
+    /**
+     * Пьяная походка игрока: фаза покачивания плюс «куда меня сейчас несёт» —
+     * направление, которое держится несколько секунд и меняется само по себе.
+     */
     private static final class Sway {
         double phase;
         double speed;
+        double wanderAngle;
+        double wanderLeft;
+        double wanderPower;
 
         Sway(Random random) {
             this.phase = random.nextDouble() * Math.PI * 2;
             this.speed = 0.09 + random.nextDouble() * 0.08;
+            this.wanderAngle = random.nextDouble() * Math.PI * 2;
+        }
+
+        /** Выбрать новое «куда несёт»: 2–6 секунд в случайную сторону. */
+        void rewind(Random random, DrunkStage stage) {
+            this.wanderAngle = random.nextDouble() * Math.PI * 2;
+            this.wanderLeft = 20 + random.nextInt(40);
+            this.wanderPower = DrunkWalk.wander(stage) * (0.7 + random.nextDouble() * 0.6);
+        }
+    }
+
+    /**
+     * Временная кровать под лежачим: пока игрок в отключке, он спит по-настоящему
+     * (иначе клиент рисует его стоящим), а блоки потом возвращаются как были.
+     */
+    private static final class FallBed {
+        final Block foot;
+        final Block head;
+        final BlockData oldFoot;
+        final BlockData oldHead;
+
+        FallBed(Block foot, Block head, BlockData oldFoot, BlockData oldHead) {
+            this.foot = foot;
+            this.head = head;
+            this.oldFoot = oldFoot;
+            this.oldHead = oldHead;
         }
     }
 
@@ -138,6 +172,7 @@ final class DrunkManager implements Listener {
         final Location anchor;
         final boolean blackout;
         int ticks;
+        FallBed bed;
 
         Lie(Location anchor, int ticks, boolean blackout) {
             this.anchor = anchor.clone();
@@ -229,7 +264,10 @@ final class DrunkManager implements Listener {
         swayTask = null;
         saveTask = null;
         for (Player player : Bukkit.getOnlinePlayers()) {
-            if (lie.remove(player.getUniqueId()) != null) player.setPose(Pose.STANDING, true);
+            Lie state = lie.remove(player.getUniqueId());
+            if (state == null) continue;
+            wakeFromBed(player, state);
+            player.setPose(Pose.STANDING, true);
         }
         vomit.restoreAll();
         save();
@@ -298,11 +336,14 @@ final class DrunkManager implements Listener {
         points.remove(id);
         decayProgress.remove(id);
         hangover.remove(id);
-        nextPuke.remove(id);
         lastStage.remove(id);
         hold.remove(id);
         sway.remove(id);
-        if (lie.remove(id) != null) player.setPose(Pose.STANDING, true);
+        Lie state = lie.remove(id);
+        if (state != null) {
+            wakeFromBed(player, state);
+            player.setPose(Pose.STANDING, true);
+        }
         clearEffects(player);
     }
 
@@ -358,7 +399,7 @@ final class DrunkManager implements Listener {
             applyStage(player, stage);
             applyHangover(player, id);
             tickLie(player, id);
-            schedulePuke(player, stage);
+            maybePuke(player, stage);
         }
     }
 
@@ -378,7 +419,6 @@ final class DrunkManager implements Listener {
         }
         hold.remove(id);
         decayProgress.remove(id);
-        nextPuke.remove(id);
         int ticks = randomBetween(BLACKOUT_MIN_SECONDS, BLACKOUT_MAX_SECONDS) * 20;
         startLie(player, ticks, true);
     }
@@ -391,6 +431,7 @@ final class DrunkManager implements Listener {
         state.ticks -= 20;
         if (state.ticks <= 0) {
             lie.remove(id);
+            wakeFromBed(player, state);
             player.setPose(Pose.STANDING, true);
             if (state.blackout) finishBlackout(player);
             return;
@@ -398,6 +439,13 @@ final class DrunkManager implements Listener {
 
         // Клиент время от времени «встаёт» сам — возвращаем на землю.
         if (player.getPose() != Pose.SLEEPING) player.setPose(Pose.SLEEPING, true);
+        // И держим настоящий сон: иначе игрок видит себя стоящим.
+        if (state.bed == null) {
+            layInBed(player, state);
+        } else if (!player.isSleeping()) {
+            wakeFromBed(player, state);
+            layInBed(player, state);
+        }
         player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 40, 200, true, false, false));
         if (state.blackout) points.put(id, settings.scale());
     }
@@ -430,15 +478,98 @@ final class DrunkManager implements Listener {
         UUID id = player.getUniqueId();
         Lie current = lie.get(id);
         if (current != null) return;
-        lie.put(id, new Lie(player.getLocation(), ticks, blackout));
+        Lie state = new Lie(player.getLocation(), ticks, blackout);
+        lie.put(id, state);
         player.setVelocity(new Vector(0, 0, 0));
         player.setPose(Pose.SLEEPING, true);
+        layInBed(player, state);
         player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, ticks + 20, 200, true, false, false));
         if (blackout) {
             vomit.burst(player, settings, true);
             player.getWorld().playSound(player.getLocation(), Sound.BLOCK_MUD_BREAK,
                     SoundCategory.PLAYERS, 0.8F, 0.6F);
         }
+    }
+
+    /**
+     * Уложить по-настоящему. Если просто выставить позу сна, клиент всё равно рисует
+     * игрока стоящим (свою модель он считает сам), поэтому на время лежания плагин
+     * ставит под ним обычную кровать, укладывает спать, а потом возвращает блоки как
+     * были. В аду и в энде кровати взрываются, там остаётся только поза.
+     */
+    private boolean layInBed(Player player, Lie state) {
+        World world = player.getWorld();
+        if (world.getEnvironment() != World.Environment.NORMAL) return false;
+
+        BlockFace facing = bedFacing(state.anchor.getYaw());
+        Block foot = state.anchor.getBlock();
+        Block head = foot.getRelative(facing);
+        if (!bedSpace(foot) || !bedSpace(head)) return false;
+
+        BlockData oldFoot = foot.getBlockData().clone();
+        BlockData oldHead = head.getBlockData().clone();
+        try {
+            Bed footData = (Bed) Material.RED_BED.createBlockData();
+            footData.setFacing(facing);
+            footData.setPart(Bed.Part.FOOT);
+            foot.setBlockData(footData, false);
+
+            Bed headData = (Bed) Material.RED_BED.createBlockData();
+            headData.setFacing(facing);
+            headData.setPart(Bed.Part.HEAD);
+            head.setBlockData(headData, false);
+
+            if (!player.sleep(foot.getLocation(), true)) {
+                restoreBed(foot, head, oldFoot, oldHead);
+                return false;
+            }
+            state.bed = new FallBed(foot, head, oldFoot, oldHead);
+            return true;
+        } catch (RuntimeException ex) {
+            restoreBed(foot, head, oldFoot, oldHead);
+            return false;
+        }
+    }
+
+    /** Проснуться и убрать временную кровать. */
+    private void wakeFromBed(Player player, Lie state) {
+        FallBed bed = state.bed;
+        if (bed == null) return;
+        state.bed = null;
+        if (player.isSleeping()) {
+            UUID id = player.getUniqueId();
+            waking.add(id);
+            try {
+                player.wakeup(false);
+            } catch (RuntimeException ignored) {
+                // Уже проснулся — не страшно.
+            } finally {
+                waking.remove(id);
+            }
+        }
+        restoreBed(bed.foot, bed.head, bed.oldFoot, bed.oldHead);
+    }
+
+    private static void restoreBed(Block foot, Block head, BlockData oldFoot, BlockData oldHead) {
+        if (foot.getBlockData() instanceof Bed) foot.setBlockData(oldFoot, false);
+        if (head.getBlockData() instanceof Bed) head.setBlockData(oldHead, false);
+    }
+
+    /** Куда можно поставить временную кровать: только в пустое место или траву. */
+    private static boolean bedSpace(Block block) {
+        Material type = block.getType();
+        return type.isAir() || type == Material.SHORT_GRASS || type == Material.TALL_GRASS
+                || type == Material.FERN || type == Material.LARGE_FERN || type == Material.SNOW
+                || type == Material.DEAD_BUSH;
+    }
+
+    /** Направление кровати по взгляду: 0° — юг, 90° — запад, 180° — север, 270° — восток. */
+    private static BlockFace bedFacing(float yaw) {
+        float normalized = ((yaw % 360) + 360) % 360;
+        if (normalized < 45 || normalized >= 315) return BlockFace.SOUTH;
+        if (normalized < 135) return BlockFace.WEST;
+        if (normalized < 225) return BlockFace.NORTH;
+        return BlockFace.EAST;
     }
 
     /**
@@ -631,6 +762,16 @@ final class DrunkManager implements Listener {
             double wave = Math.sin(walk.phase);
             Vector side = new Vector(-direction.getZ(), 0, direction.getX()).multiply(wave * amp);
             Vector next = velocity.clone().add(side);
+
+            // «Понесло»: несколько секунд игрока тянет в одну случайную сторону,
+            // причём направление само понемногу кривится — идёт неровно.
+            if (DrunkWalk.wanders(stage)) {
+                if (walk.wanderLeft <= 0) walk.rewind(random, stage);
+                walk.wanderLeft--;
+                walk.wanderAngle += (random.nextDouble() - 0.5) * 0.12;
+                next = next.add(new Vector(Math.cos(walk.wanderAngle), 0,
+                        Math.sin(walk.wanderAngle)).multiply(walk.wanderPower));
+            }
             if (moving) {
                 double[] curved = DrunkWalk.rotate(next.getX(), next.getZ(), wave * DrunkWalk.curve(stage));
                 next = new Vector(curved[0], next.getY(), curved[1]);
@@ -694,32 +835,23 @@ final class DrunkManager implements Listener {
         player.getWorld().playSound(at, Sound.ENTITY_ITEM_PICKUP, SoundCategory.PLAYERS, 0.4F, 0.6F);
     }
 
-    /** Приступ тошноты по расписанию: с «Укачало» и выше — ровно раз в 8 секунд. */
-    private void schedulePuke(Player player, DrunkStage stage) {
-        UUID id = player.getUniqueId();
-        if (!stage.atLeast(DrunkStage.QUEASY)) {
-            nextPuke.remove(id);
-            return;
-        }
-        long now = System.currentTimeMillis();
-        Long next = nextPuke.get(id);
-        if (next == null) {
-            nextPuke.put(id, now + pukeInterval(stage));
-            return;
-        }
-        if (now < next) return;
-        if (player.isInsideVehicle() || player.isSleeping() || player.isDead()) {
-            nextPuke.put(id, now + 2_000L);
-            return;
-        }
-        vomit.burst(player, settings, stage.atLeast(DrunkStage.WASTED));
-        nextPuke.put(id, now + pukeInterval(stage));
-    }
+    /**
+     * Приступ тошноты. Это не расписание, а шанс: на «Навеселе» стошнить может редко,
+     * с каждой стадией чаще, а в отключке — каждую секунду и даже чаще.
+     * {@code puke-rate} в настройках умножает все шансы разом.
+     */
+    private void maybePuke(Player player, DrunkStage stage) {
+        double chance = stage.pukeChance() * settings.pukeRate();
+        if (chance <= 0) return;
+        // Свой сон в отключке блевать не мешает: лежачего тоже тошнит.
+        if (player.isInsideVehicle() || player.isDead()) return;
+        if (player.isSleeping() && !lie.containsKey(player.getUniqueId())) return;
 
-    /** Пауза между приступами: 160 тиков = 8 секунд (можно поменять в настройках). */
-    private long pukeInterval(DrunkStage stage) {
-        int base = randomBetween(settings.pukeMinTicks(), settings.pukeMaxTicks());
-        return Math.max(1_000L, base * 50L);
+        int bursts = (int) Math.floor(chance);
+        if (random.nextDouble() < chance - bursts) bursts++;
+        for (int i = 0; i < bursts; i++) {
+            vomit.burst(player, settings, stage.atLeast(DrunkStage.WASTED));
+        }
     }
 
     private int randomBetween(int min, int max) {
@@ -812,13 +944,16 @@ final class DrunkManager implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId();
         decayProgress.remove(id);
-        nextPuke.remove(id);
         lastStage.remove(id);
         hangover.remove(id);
         boons.remove(id);
         hold.remove(id);
         sway.remove(id);
-        if (lie.remove(id) != null) event.getPlayer().setPose(Pose.STANDING, true);
+        Lie state = lie.remove(id);
+        if (state != null) {
+            wakeFromBed(event.getPlayer(), state);
+            event.getPlayer().setPose(Pose.STANDING, true);
+        }
         save();
     }
 
@@ -834,6 +969,8 @@ final class DrunkManager implements Listener {
         UUID id = player.getUniqueId();
         // Отключку не сбить даже сном: минута заперта наглухо.
         if (hold.containsKey(id)) return;
+        // И наша временная кровать — тоже не повод трезветь.
+        if (lie.containsKey(id) || waking.contains(id)) return;
         int value = points.getOrDefault(id, 0);
         if (value <= 0) return;
         clear(player);

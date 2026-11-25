@@ -45,8 +45,7 @@ final class DrunkSettingsTest {
         assertTrue(settings.puddles());
         assertEquals(60, settings.puddleSeconds());
         assertEquals(16, settings.phantomMax());
-        assertEquals(160, settings.pukeMinTicks(), "приступ ровно раз в 8 секунд");
-        assertEquals(160, settings.pukeMaxTicks());
+        assertEquals(1.0, settings.pukeRate(), "обычная частота приступов");
     }
 
     @Test
