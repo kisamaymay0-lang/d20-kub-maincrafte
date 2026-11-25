@@ -199,6 +199,27 @@ final class BarrelDrinksTest {
     }
 
     @Test
+    void профильНаходитсяБезРазницыВРегистре() throws Exception {
+        BarrelDrinks barrel = load("""
+                default:
+                  quality:
+                    - tier: 1
+                      name: 'Плохо'
+                      color: '#FF0000'
+                  years:
+                    - up-to-years: '*'
+                      tier: 1
+                drinks:
+                  Pivo:
+                    drunk: {1: 3}
+                """);
+
+        assertTrue(barrel.has("pivo"), "pivo и Pivo — один напиток");
+        assertEquals(3, barrel.of("pivo").drunkFor(1));
+        assertTrue(barrel.ownKeys("pivo").contains("drunk"));
+    }
+
+    @Test
     void уКаждогоБочковогоНапиткаЕстьБлокВNapitki() throws Exception {
         DrinkRecipes recipes = DrinkRecipes.load(Path.of("src/main/resources/settings/recipe-poilo.yml"));
         BarrelDrinks barrel = BarrelDrinks.load(Path.of("src/main/resources/data/napitki/napitki.yml"));

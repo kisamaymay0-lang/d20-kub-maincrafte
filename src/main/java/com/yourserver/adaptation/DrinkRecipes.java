@@ -411,6 +411,14 @@ final class DrinkRecipes {
     /** Имя раздела в файле. */
     private static final String ROOT = "recipes";
 
+    /**
+     * Id в сравнимом виде: без регистра, дефисы и пробелы — как подчёркивания.
+     * Нужен, чтобы {@code Pivo} и {@code pivo} считались одним напитком.
+     */
+    static String normalizeId(String id) {
+        return ProfileText.clean(id).toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+    }
+
     /** Что показывать, если файл ещё не прочитан или в нём нет напитка. */
     private static volatile DrinkRecipes current = defaults();
 
@@ -421,6 +429,9 @@ final class DrinkRecipes {
     /** Что не прочиталось: «напиток X пропущен: причина». Показывается в /f8 drinks. */
     private final List<String> problems;
 
+    /** id без регистра и дефисов — чтобы Pivo и pivo были одним напитком. */
+    private final Map<String, String> byNormalized;
+
     private DrinkRecipes(Map<String, Drink> byId, Map<String, BarrelRecipe> barrels) {
         this(byId, barrels, List.of());
     }
@@ -430,6 +441,9 @@ final class DrinkRecipes {
         this.ordered = List.copyOf(byId.values());
         this.barrels = Map.copyOf(barrels);
         this.problems = List.copyOf(problems);
+        Map<String, String> normalized = new LinkedHashMap<>();
+        for (String id : byId.keySet()) normalized.putIfAbsent(normalizeId(id), id);
+        this.byNormalized = Map.copyOf(normalized);
     }
 
     /** Проблемы последнего чтения файла: почему какие-то напитки не попали в список. */
@@ -449,11 +463,15 @@ final class DrinkRecipes {
      */
     DrinkRecipes requireBarrelProfiles(java.util.Set<String> profileIds) {
         if (profileIds == null) return this;
+        java.util.Set<String> normalizedProfiles = new java.util.HashSet<>();
+        for (String id : profileIds) normalizedProfiles.add(normalizeId(id));
         Map<String, Drink> kept = new LinkedHashMap<>();
         Map<String, BarrelRecipe> keptBarrels = new LinkedHashMap<>();
         List<String> next = new ArrayList<>(problems);
         for (Drink drink : ordered) {
-            if (drink.method() == Method.BARREL && !profileIds.contains(drink.id())) {
+            if (drink.method() == Method.BARREL
+                    && !profileIds.contains(drink.id())
+                    && !normalizedProfiles.contains(normalizeId(drink.id()))) {
                 next.add("напиток «" + drink.id() + "» не создан: у бочкового напитка нет своего блока в "
                         + BarrelDrinks.FILE + ". Сроки, качества и крепость берутся оттуда — "
                         + "допишите «" + drink.id() + ":» в раздел drinks (хотя бы пустой).");
@@ -484,7 +502,16 @@ final class DrinkRecipes {
     }
 
     Drink get(String id) {
-        return id == null ? null : byId.get(id);
+        if (id == null) return null;
+        Drink found = byId.get(id);
+        if (found != null) return found;
+        String real = byNormalized.get(normalizeId(id));
+        return real == null ? null : byId.get(real);
+    }
+
+    /** Все id напитков из файла — для отчёта /f8 drinks. */
+    java.util.Set<String> ids() {
+        return byId.keySet();
     }
 
     int size() {
@@ -676,19 +703,26 @@ final class DrinkRecipes {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.loadFromString(Files.readString(path));
         ConfigurationSection section = yaml.getConfigurationSection(ROOT);
-        if (section == null) throw new IllegalArgumentException("В recipe-poilo.yml нет раздела " + ROOT);
+        List<String> problems = new ArrayList<>();
+        if (section == null) {
+            List<String> outside = topLevelDrinks(yaml);
+            throw new IllegalArgumentException("В recipe-poilo.yml нет раздела " + ROOT
+                    + (outside.isEmpty() ? ""
+                    : ". Похоже, напитки стоят без отступа: " + String.join(", ", outside)
+                    + " — все они должны быть внутри " + ROOT + ":, каждый на два пробела"));
+        }
 
         // Все id, что вообще есть в файле: на них могут ссылаться коктейли вида
         // «дайкири + белое вино», даже если напиток-ингредиент записан ниже.
         List<String> knownIds = new ArrayList<>();
         for (String rawId : section.getKeys(false)) {
-            String id = ProfileText.clean(rawId);
+            String id = normalizeId(rawId);
             if (!id.isEmpty()) knownIds.add(id);
         }
+        problems.addAll(layoutProblems(yaml, section));
 
         Map<String, Drink> byId = new LinkedHashMap<>();
         Map<String, BarrelRecipe> barrels = new LinkedHashMap<>();
-        List<String> problems = new ArrayList<>();
         for (String rawId : section.getKeys(false)) {
             String id = ProfileText.clean(rawId);
             if (id.isEmpty()) continue;
@@ -712,6 +746,58 @@ final class DrinkRecipes {
             throw new IllegalArgumentException("Ни один напиток не прочитался: " + String.join("; ", problems));
         }
         return new DrinkRecipes(byId, barrels, problems);
+    }
+
+    /**
+     * Блоки, которые лежат в файле верхним уровнем и похожи на напиток. Так выглядит
+     * самая частая ошибка: строки напитка написаны без отступа и оказались вне
+     * {@code recipes:} — файл читается, но напитка с таким id нет.
+     */
+    private static List<String> topLevelDrinks(YamlConfiguration yaml) {
+        List<String> found = new ArrayList<>();
+        for (String key : yaml.getKeys(false)) {
+            if (key.equals(ROOT)) continue;
+            if (looksLikeDrink(yaml.getConfigurationSection(key))) found.add(key);
+        }
+        return found;
+    }
+
+    /** Похож ли раздел на описание напитка (а не на служебный ключ). */
+    private static boolean looksLikeDrink(ConfigurationSection section) {
+        if (section == null) return false;
+        for (String key : List.of("name", "method", "ingredients", "color", "model", "additives")) {
+            if (section.contains(key)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Подсказки про структуру файла: лишние ключи верхнего уровня и напитки,
+     * случайно вложенные в другой напиток (потерянный отступ).
+     */
+    private static List<String> layoutProblems(YamlConfiguration yaml, ConfigurationSection root) {
+        List<String> problems = new ArrayList<>();
+        for (String key : yaml.getKeys(false)) {
+            if (key.equals(ROOT)) continue;
+            if (looksLikeDrink(yaml.getConfigurationSection(key))) {
+                problems.add("блок «" + key + "» стоит вне раздела " + ROOT
+                        + ": проверьте отступ — напитка с таким id в игре не будет");
+            } else {
+                problems.add("лишний ключ верхнего уровня «" + key + "»: ожидается только " + ROOT);
+            }
+        }
+        for (String rawId : root.getKeys(false)) {
+            ConfigurationSection drink = root.getConfigurationSection(rawId);
+            if (drink == null) continue;
+            for (String child : drink.getKeys(false)) {
+                ConfigurationSection nested = drink.getConfigurationSection(child);
+                if (nested != null && looksLikeDrink(nested)) {
+                    problems.add("напиток «" + child + "» вложен в «" + rawId
+                            + "»: потерян отступ — поставьте его на один уровень с «" + rawId + "»");
+                }
+            }
+        }
+        return problems;
     }
 
     /** Один напиток из файла. Ошибка здесь пропускает только его, остальные читаются. */
@@ -742,8 +828,7 @@ final class DrinkRecipes {
                     continue;
                 }
                 // Не ингредиент шейкера — может быть готовый напиток (коктейль из напитков).
-                String base = ProfileText.clean(raw).toLowerCase(Locale.ROOT)
-                        .replace('-', '_').replace(' ', '_');
+                String base = normalizeId(raw);
                 if (knownIds.contains(base)) {
                     if (!baseDrinks.contains(base)) baseDrinks.add(base);
                     continue;

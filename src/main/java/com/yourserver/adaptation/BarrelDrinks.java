@@ -182,8 +182,14 @@ final class BarrelDrinks {
 
     /** Какие ключи напитка заданы в файле (quality, years, drunk, brew-ticks…). */
     Set<String> ownKeys(String id) {
-        Set<String> keys = id == null ? null : ownKeys.get(id);
-        return keys == null ? Set.of() : keys;
+        if (id == null) return Set.of();
+        Set<String> keys = ownKeys.get(id);
+        if (keys != null) return keys;
+        String normalized = DrinkRecipes.normalizeId(id);
+        for (Map.Entry<String, Set<String>> entry : ownKeys.entrySet()) {
+            if (DrinkRecipes.normalizeId(entry.getKey()).equals(normalized)) return entry.getValue();
+        }
+        return Set.of();
     }
 
     /** Текущие настройки: их читает {@link BambooBarrel}. */
@@ -198,8 +204,25 @@ final class BarrelDrinks {
 
     /** Настройки напитка: свои, а чего нет — из {@code default}. */
     Profile of(String drinkId) {
-        Profile own = drinkId == null ? null : byDrink.get(drinkId);
+        Profile own = own(drinkId);
         return own != null ? own : base;
+    }
+
+    /** Есть ли у напитка своя запись в файле (регистр и дефисы не важны). */
+    boolean has(String drinkId) {
+        return own(drinkId) != null;
+    }
+
+    /** Своя запись напитка; null — берём {@code default}. */
+    private Profile own(String drinkId) {
+        if (drinkId == null) return null;
+        Profile own = byDrink.get(drinkId);
+        if (own != null) return own;
+        String normalized = DrinkRecipes.normalizeId(drinkId);
+        for (Map.Entry<String, Profile> entry : byDrink.entrySet()) {
+            if (DrinkRecipes.normalizeId(entry.getKey()).equals(normalized)) return entry.getValue();
+        }
+        return null;
     }
 
     /** Общие настройки — то, что записано в разделе {@code default}. */

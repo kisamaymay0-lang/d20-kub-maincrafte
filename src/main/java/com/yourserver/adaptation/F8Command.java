@@ -711,6 +711,8 @@ public class F8Command implements CommandExecutor, Listener {
             if (allowed.length() > 0) allowed.append(", ");
             allowed.append(ingredient.label());
         }
+        lines.add("§7Id в recipe-poilo.yml: §f" + String.join(", ", recipes.ids()));
+        lines.add("§7Id в napitki.yml: §f" + String.join(", ", barrel.ids()));
         lines.add("§7Бочка берёт только это: §f" + allowed);
         lines.add("§7Бочковому напитку нужен свой блок в napitki.yml — без него он не создаётся.");
 
@@ -772,8 +774,10 @@ public class F8Command implements CommandExecutor, Listener {
         List<String> notes = new ArrayList<>();
         for (String id : barrel.ids()) {
             if (recipes.get(id) == null) {
+                String similar = similarIds(recipes, id);
                 notes.add("§cпрофиль «" + id + "» в napitki.yml ни к чему не относится: "
-                        + "в recipe-poilo.yml нет напитка с таким id");
+                        + "в recipe-poilo.yml нет напитка с таким id (сверьте со списком id выше) — "
+                        + "значит и напитка в игре нет" + (similar.isEmpty() ? "" : ". Похожие id: " + similar));
             }
         }
         if (recipes.barrelDrinks().isEmpty()) {
@@ -786,6 +790,17 @@ public class F8Command implements CommandExecutor, Listener {
         lines.add("§8Годы пишутся как «до какого года»: 1, 2, 5, '*' (и дальше). "
                 + "Ступени — tier из раздела quality.");
         return lines;
+    }
+
+    /** Похожие id — когда в одном файле опечатка в имени напитка. */
+    private static String similarIds(DrinkRecipes recipes, String id) {
+        List<String> similar = new ArrayList<>();
+        String needle = DrinkRecipes.normalizeId(id);
+        for (String drinkId : recipes.ids()) {
+            String other = DrinkRecipes.normalizeId(drinkId);
+            if (other.equals(needle) || other.contains(needle) || needle.contains(other)) similar.add(drinkId);
+        }
+        return String.join(", ", similar);
     }
 
     /** «1→1, 2→2, 5→5, 7→3, 8+→2». */

@@ -401,6 +401,61 @@ final class DrinkRecipesTest {
     }
 
     @Test
+    void напитокБезОтступаВиденВОшибке() {
+        IllegalArgumentException outside = assertThrows(IllegalArgumentException.class, () -> load("""
+                pivo:
+                  name: 'Пиво'
+                  color: '#EBBB40'
+                  method: barrel
+                  ingredients:
+                    wheat: 3
+                """));
+        assertTrue(outside.getMessage().contains("pivo"), outside.getMessage());
+        assertTrue(outside.getMessage().contains("отступ"), outside.getMessage());
+    }
+
+    @Test
+    void потерянныйОтступВнутриНапиткаВиденВОтчёте() throws Exception {
+        DrinkRecipes recipes = load("""
+                recipes:
+                  beer:
+                    name: 'Пиво'
+                    color: '#C68B2E'
+                    method: barrel
+                    ingredients:
+                      water_bottle: 1
+                    pivo:
+                      name: 'Пиво моё'
+                      color: '#EBBB40'
+                      method: barrel
+                      ingredients:
+                        wheat: 1
+                """);
+
+        assertNotNull(recipes.get("beer"), "верхний напиток читается");
+        assertNull(recipes.get("pivo"), "вложенный напиток напитком не считается");
+        assertTrue(recipes.problems().stream().anyMatch(text -> text.contains("вложен")
+                && text.contains("pivo")), recipes.problems().toString());
+    }
+
+    @Test
+    void idБезРазницыВРегистре() throws Exception {
+        DrinkRecipes recipes = load("""
+                recipes:
+                  Pivo:
+                    name: 'Пиво'
+                    color: '#EBBB40'
+                    method: barrel
+                    ingredients:
+                      wheat: 1
+                """);
+
+        assertNotNull(recipes.get("pivo"), "id сравниваются без регистра");
+        DrinkRecipes checked = recipes.requireBarrelProfiles(Set.of("pivo"));
+        assertNotNull(checked.get("pivo"), "профиль pivo подходит напитку Pivo");
+    }
+
+    @Test
     void бочковомуНапиткуНуженБлокВNapitki() throws Exception {
         DrinkRecipes recipes = load("""
                 recipes:
