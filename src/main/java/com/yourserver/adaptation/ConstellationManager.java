@@ -45,6 +45,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -71,7 +72,21 @@ import java.util.UUID;
  */
 public class ConstellationManager implements Listener, CommandExecutor {
 
-    private static final String DEFAULT_STAR_MODEL = "f8resurs:star";
+    /** Мягкая звезда из пака: точка с ореолом, а не золотая наклейка. */
+    private static final String DEFAULT_STAR_MODEL = "f8resurs:item/star_soft";
+    /**
+     * Модель, которую писали в constellations.yml прошлые сборки. Ключ без
+     * {@code item/} — так его записывал createExampleFile.
+     */
+    private static final Set<String> LEGACY_STAR_MODELS = Set.of(
+            "f8resurs:star", "f8resurs:item/star");
+    /**
+     * Старый радиус сферы. Звезда в 2 блока на 80 блоках — это 1.4°:
+     * столько занимает ноготь на вытянутой руке, отсюда и «они рядом».
+     */
+    private static final double LEGACY_RENDER_DISTANCE = 80.0;
+    /** Новый радиус: 2 блока на 200 — это 0.57°, как настоящая яркая звезда. */
+    private static final double DEFAULT_RENDER_DISTANCE = 200.0;
     private static final long STAR_ANIMATION_TICKS = 1L;
 
     private final JavaPlugin plugin;
@@ -94,6 +109,8 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private double farthestGeometry;
     private Quaternionf orbitRotation = new Quaternionf();
     private boolean renderErrorReported;
+    /** Про старый вид звёзд предупреждаем один раз за запуск, не на каждый reload. */
+    private boolean legacyLookNoted;
     private final Map<String, StarTemplate> starTemplates = new LinkedHashMap<>();
     private final Map<String, Vector3f> starOffsets = new LinkedHashMap<>();
     private final Map<String, BeamTemplate> lineTemplates = new HashMap<>();
@@ -115,18 +132,42 @@ public class ConstellationManager implements Listener, CommandExecutor {
         final Vector3f offset;
         final Quaternionf faceObserver;
         final ItemStack item;
+        /** Свой размер звезды: небо не должно выглядеть штампом. */
+        final float sizeFactor;
+        /** Своя яркость: 13..15. */
+        final int brightness;
+        final float sparklePhase;
+        final double sparklePeriod;
+        final float sparkleAmplitude;
         Quaternionf rotation;
         Vector3f displayedOffset;
-        StarTemplate(Vector3f direction, float radius, ItemStack item) {
+
+        StarTemplate(String key, Vector3f direction, float radius, ItemStack item) {
             Transformation base = SkyGeometry.starTransform(direction, radius, 1f);
             offset = base.getTranslation();
             displayedOffset = new Vector3f(offset);
             faceObserver = base.getLeftRotation();
             rotation = new Quaternionf(faceObserver);
             this.item = item;
+            this.sizeFactor = SkyTwinkle.sizeFactor(key);
+            this.brightness = SkyTwinkle.brightness(key);
+            this.sparklePhase = SkyTwinkle.phase(key);
+            this.sparklePeriod = SkyTwinkle.periodSeconds(key);
+            this.sparkleAmplitude = SkyTwinkle.amplitude(key);
         }
+
+        /** Множитель мерцания в момент времени; центр звезды не двигается. */
+        float sparkle(double seconds) {
+            return SkyTwinkle.pulse(sparklePhase, sparklePeriod, sparkleAmplitude, seconds);
+        }
+
         Transformation transform(float scale, float depth) {
-            return new Transformation(new Vector3f(displayedOffset).mul(depth), rotation, new Vector3f(scale * depth), new Quaternionf());
+            return transform(scale, depth, 1f);
+        }
+
+        Transformation transform(float scale, float depth, float sparkle) {
+            return new Transformation(new Vector3f(displayedOffset).mul(depth), rotation,
+                    new Vector3f(scale * sizeFactor * sparkle * depth), new Quaternionf());
         }
     }
 
@@ -234,20 +275,53 @@ public class ConstellationManager implements Listener, CommandExecutor {
     }
 
     private void readRenderSettings() {
-        radius = Math.clamp(positiveSetting("render-distance", 80.0), 4.0, 256.0);
-        starSize = (float) Math.min(32.0, positiveSetting("star-scale", 2.0));
-        lineWidth = (float) Math.min(16.0, positiveSetting("line-thickness", 0.4));
+        double distance = Math.clamp(positiveSetting("render-distance", DEFAULT_RENDER_DISTANCE), 4.0, 512.0);
+        float scale = (float) Math.min(32.0, positiveSetting("star-scale", 2.0));
+        float width = (float) Math.min(16.0, positiveSetting("line-thickness", 0.4));
+
+        double normalized = starsViewDistance(distance, scale, width);
+
+        if (normalized != distance) {
+            distance = normalized;
+
+            if (!legacyLookNoted) {
+                legacyLookNoted = true;
+                plugin.getLogger().info("Созвездия: старый вид звёзд (render-distance 80) заменён на "
+                        + DEFAULT_RENDER_DISTANCE + " — звёзды стали мельче и читаются как далёкие. "
+                        + "Вернуть как было: constellations.render-distance: 80 в config.yml.");
+            }
+        }
+
+        radius = distance;
+        starSize = scale;
+        lineWidth = width;
         tolerance = Math.min(45.0, positiveSetting("click-tolerance-degrees", 2.0));
         double speed = plugin.getConfig().getDouble("constellations.star-rotation-degrees-per-second", 4.0);
         rotationSpeed = Double.isFinite(speed) ? Math.clamp(speed, -90.0, 90.0) : 4.0;
         fadeTicks = Math.clamp(plugin.getConfig().getInt("constellations.fade-duration-ticks", 40), 1, 200);
-        followInterpolationTicks = 1; // Старое инертное догоняние намеренно удалено.
+        // Клиентская инерция телепорта убрана: небо приклеено к глазам ровно,
+        // а не догоняет их на тик позже. Именно это «плыло» при ходьбе и полёте.
+        followInterpolationTicks = 0;
         double orbit = plugin.getConfig().getDouble("constellations.sky-rotation-degrees-per-second", 0.15);
         orbitSpeed = Double.isFinite(orbit) ? Math.clamp(orbit, -2.0, 2.0) : 0.15;
         depthMultiplier = Math.clamp(positiveSetting("sky-depth-multiplier", 3.0), 1.0, 8.0);
         depthFill = Math.clamp(positiveSetting("depth-fill", 0.95), 0.5, 1.0);
         int interval = Math.clamp(plugin.getConfig().getInt("constellations.rotation-update-ticks", 4), 2, 20);
         rotationIntervalTicks = (interval + 1) / 2 * 2;
+    }
+
+    /**
+     * Радиус сферы в смысле «какого размера звёзды»: угловой размер считается
+     * как {@code star-scale / distance}. Тройка 80 / 2.0 / 0.4 — это ровно то,
+     * что писали прошлые сборки, то есть значения не трогали, и их можно
+     * поднять до нового вида. Любое своё значение остаётся как есть.
+     */
+    static double starsViewDistance(double distance, double starScale, double lineThickness) {
+        boolean legacy = distance == LEGACY_RENDER_DISTANCE
+                && Math.abs(starScale - 2.0) < 1e-4
+                && Math.abs(lineThickness - 0.4) < 1e-4;
+
+        return legacy ? DEFAULT_RENDER_DISTANCE : distance;
     }
 
     private double renderDistance() { return radius; }
@@ -517,7 +591,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 Vector3f direction = entry.getValue().direction();
                 if (!direction.isFinite()) continue;
                 String key = c.id + ":" + entry.getKey();
-                StarTemplate template = new StarTemplate(direction, (float) renderDistance(), model);
+                StarTemplate template = new StarTemplate(key, direction, (float) renderDistance(), model);
                 starTemplates.put(key, template);
                 starOffsets.put(key, template.offset);
             }
@@ -581,9 +655,13 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private void animateStars() {
         if (views.isEmpty()) return; // Днём нет обхода всех игроков каждые два тика.
         int tick = Bukkit.getCurrentTick();
+        double seconds = tick / 20.0;
         long elapsed = Integer.toUnsignedLong(tick - lastRotationTick);
-        boolean rotated = elapsed >= rotationIntervalTicks && (rotationSpeed != 0.0 || orbitSpeed != 0.0);
-        if (elapsed >= rotationIntervalTicks) {
+        // Периодичность нужна не только повороту: мерцание тоже обновляется
+        // этим же шагом, иначе оно умирает вместе с rotation-speed: 0.
+        boolean periodic = elapsed >= rotationIntervalTicks;
+        boolean rotated = periodic && (rotationSpeed != 0.0 || orbitSpeed != 0.0);
+        if (periodic) {
             starSpinRadians = Math.IEEEremainder(starSpinRadians + Math.toRadians(rotationSpeed) * elapsed / 20.0,
                     Math.PI * 2.0);
             orbitRadians = SkyOrbit.advance(orbitRadians, orbitSpeed, elapsed);
@@ -634,12 +712,12 @@ public class ConstellationManager implements Listener, CommandExecutor {
             }
             updateBeamProjection(player, view, tick, Math.max(0.0001f, appearance));
             boolean fading = Float.compare(appearance, view.lastAppearance) != 0;
-            if (rotated || fading) applyAppearance(view, appearance, fading);
+            if (periodic || fading) applyAppearance(view, appearance, fading, seconds);
             view.lastAppearance = appearance;
         }
     }
 
-    private void applyAppearance(PlayerView view, float appearance, boolean fading) {
+    private void applyAppearance(PlayerView view, float appearance, boolean fading, double seconds) {
         float visibility = Math.max(0.0001f, appearance);
         int duration = fading ? (int) STAR_ANIMATION_TICKS : rotationIntervalTicks;
         int brightness = Math.clamp(Math.round(15f * appearance), 0, 15);
@@ -649,8 +727,13 @@ public class ConstellationManager implements Listener, CommandExecutor {
             if (template == null || !display.isValid()) continue;
             if (display.getInterpolationDuration() != duration) display.setInterpolationDuration(duration);
             display.setInterpolationDelay(0);
-            display.setTransformation(template.transform(starScale() * visibility, view.depthScale));
-            if (brightness != view.lastBrightness) display.setBrightness(LIGHTS[brightness]);
+            display.setTransformation(template.transform(starScale() * visibility, view.depthScale,
+                    template.sparkle(seconds)));
+            // Яркость меняется только на проявлении/уходе: у каждой звезды она
+            // своя, поэтому сравнивать не с чем — лишние пакеты не нужны.
+            if (fading) {
+                display.setBrightness(LIGHTS[Math.clamp(Math.round(appearance * template.brightness), 0, 15)]);
+            }
         }
         if (fading || orbitSpeed != 0) {
             for (var entry : view.lines.entrySet()) {
@@ -711,17 +794,38 @@ public class ConstellationManager implements Listener, CommandExecutor {
         ItemStack item = new ItemStack(Material.PAPER);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            NamespacedKey key = NamespacedKey.fromString(c.starModel);
-            meta.setItemModel(key == null ? new NamespacedKey("f8resurs", "star") : key);
+            NamespacedKey key = NamespacedKey.fromString(starModelFor(c));
+            meta.setItemModel(key == null ? new NamespacedKey("f8resurs", "item/star_soft") : key);
             item.setItemMeta(meta);
         }
         return item;
     }
 
+    /**
+     * Какая модель рисует звезду. В constellations.yml у каждого созвездия
+     * своё {@code star-model}; если там осталась наша прошлая по умолчанию
+     * {@code f8resurs:star}, берём значение из config.yml —
+     * {@code constellations.star-model}. Так вид меняется без правки данных
+     * игроков, и вернуть старую звезду можно одной строкой в config.yml.
+     */
+    private String starModelFor(Constellation c) {
+        String configured = plugin.getConfig().getString("constellations.star-model", DEFAULT_STAR_MODEL);
+
+        if (configured == null || configured.isBlank()) {
+            return c.starModel == null ? DEFAULT_STAR_MODEL : c.starModel;
+        }
+
+        if (c.starModel == null || LEGACY_STAR_MODELS.contains(c.starModel.toLowerCase(Locale.ROOT))) {
+            return configured;
+        }
+
+        return c.starModel;
+    }
+
     private void configureDisplay(ItemDisplay display) {
         display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
         display.setBillboard(Display.Billboard.FIXED);
-        display.setTeleportDuration(followInterpolationTicks);
+        display.setTeleportDuration(followInterpolationTicks);  // 0: небо жёстко приклеено к глазам
         display.setInterpolationDuration(0);
         display.setShadowRadius(0f);
         display.setShadowStrength(0f);
@@ -741,8 +845,9 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 ItemDisplay display = player.getWorld().spawn(view.anchor, ItemDisplay.class, e -> {
                     configureDisplay(e);
                     e.setItemStack(template.item);
-                    e.setTransformation(template.transform(starScale() * Math.max(0.0001f, appearance), view.depthScale));
-                    e.setBrightness(LIGHTS[Math.clamp(Math.round(appearance * 15f), 0, 15)]);
+                    e.setTransformation(template.transform(starScale() * Math.max(0.0001f, appearance),
+                            view.depthScale, template.sparkle(Bukkit.getCurrentTick() / 20.0)));
+                    e.setBrightness(LIGHTS[Math.clamp(Math.round(appearance * template.brightness), 0, 15)]);
                 });
                 player.showEntity(plugin, display);
                 view.stars.put(entry.getKey(), display);

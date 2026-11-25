@@ -83,7 +83,6 @@ class SkyMotionTest {
 
     @Test
     void fartherSphereIsLimitedByClientAndServerViewDistance() {
-        assertEquals(1f, SkyOrbit.depthScale(100, 4, 10, 3, 0.7));
         float scale = SkyOrbit.depthScale(100, 16, 10, 3, 0.7);
         assertEquals(1.12f, scale, 0.0001);
         assertTrue(100 * scale <= 10 * 16 * 0.7 + 0.001);
@@ -94,6 +93,26 @@ class SkyMotionTest {
         // fill больше 1.0 обрезается до 1.0, дальше сфера ограничена множителем:
         // 16 чанков * 16 блоков / 80 = 3.2.
         assertEquals(3.2f, SkyOrbit.depthScale(80, 16, 16, 8, 2.0), 0.0001f);
+    }
+
+    @Test
+    void bigRadiusShrinksTheSphereInsteadOfThrowingItBeyondTheClient() {
+        // 10 чанков * 16 блоков * 0.95 = 152 блока: дальше клиент просто не рисует.
+        float scale = SkyOrbit.depthScale(200, 10, 10, 3, 0.95);
+        assertEquals(0.76f, scale, 0.0001f);
+        assertTrue(200 * scale <= 10 * 16 * 0.95 + 0.001, "звезда не должна уехать за видимость");
+        // И наоборот: радиус меньше видимости — сфера отодвигается, как раньше.
+        assertTrue(SkyOrbit.depthScale(80, 10, 10, 3, 0.95) > 1f);
+    }
+
+    @Test
+    void legacyStarLookIsReplacedButOwnSettingsAreKept() {
+        // 80 / 2.0 / 0.4 — значения прошлых сборок, их поднимаем до нового вида.
+        assertEquals(200.0, ConstellationManager.starsViewDistance(80, 2.0, 0.4));
+        // Своё значение не трогаем: человек сознательно поставил другой масштаб.
+        assertEquals(80.0, ConstellationManager.starsViewDistance(80, 2.0, 0.6));
+        assertEquals(120.0, ConstellationManager.starsViewDistance(120, 2.0, 0.4));
+        assertEquals(80.0, ConstellationManager.starsViewDistance(80, 1.0, 0.4));
     }
     @Test
     void positiveOrbitSpeedNowMovesRightAndKeepsTargetingAligned() {

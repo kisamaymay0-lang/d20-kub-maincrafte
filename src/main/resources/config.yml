@@ -71,8 +71,9 @@ copper-note-block:
 
 # Созвездия: видны с 13000 до 23000 тиков, только в обычном мире.
 constellations:
-  render-distance: 80                      # визуальное расстояние до звёзд, блоки (4..256)
+  render-distance: 200                     # масштаб звёзд: 2.0 / 200 ≈ 0.57°, как настоящая звезда
   star-scale: 2.0
+  star-model: f8resurs:item/star_soft      # f8resurs:item/star — старая золотая звезда
   star-rotation-degrees-per-second: 4.0    # 4 = оборот за 90 с; 0 — без вращения
   fade-duration-ticks: 40                  # появление и уход (1..200)
   follow-interpolation-ticks: 1            # устарело, оставлено для совместимости
