@@ -37,24 +37,24 @@ record DrunkSettings(int scale,
     static DrunkSettings defaults() {
         return new DrunkSettings(
                 DrunkStage.MAX_POINTS,
-                200,
+                600,
                 true,
                 true,
                 true,
                 true,
                 true,
                 60,
-                120,
-                List.of(Material.MUD, Material.SLIME_BLOCK),
+                160,
+                List.of(Material.MUD, Material.SLIME_BLOCK, Material.DIRT),
                 EnumSet.of(Material.DIRT, Material.GRASS_BLOCK, Material.COARSE_DIRT, Material.ROOTED_DIRT,
                         Material.PODZOL, Material.MYCELIUM, Material.MUD, Material.MOSS_BLOCK,
                         Material.SAND, Material.RED_SAND, Material.GRAVEL, Material.CLAY,
                         Material.STONE, Material.DEEPSLATE, Material.SOUL_SAND, Material.SOUL_SOIL,
                         Material.TUFF, Material.SNOW_BLOCK, Material.PACKED_MUD),
                 true,
-                1200,
-                1800,
-                8);
+                100,
+                200,
+                16);
     }
 
     /**

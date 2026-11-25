@@ -1,6 +1,8 @@
 package com.yourserver.adaptation;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Random;
@@ -10,18 +12,24 @@ import java.util.Random;
  *
  * <h2>Что делаем</h2>
  *
+ * <p>Чем сильнее игрок напился, тем больше «портится» текст — и тем веселее:
+ *
  * <ul>
- *   <li><b>Навеселе</b> — сообщение как есть;</li>
- *   <li><b>Разговорило</b> — переставляем буквы в одном слове, в конце иногда «ик!»;</li>
- *   <li><b>Шатает</b> — в двух словах, гласные тянутся, «ик!» чаще;</li>
- *   <li><b>Укачало</b> — половина слов, «ик…» ещё чаще, иногда многоточие вместо слов;</li>
- *   <li><b>В стельку</b> — почти каждое слово, «ик…» почти всегда;</li>
- *   <li><b>Отключка</b> — вместо сообщения «…»: сказать уже нечего.</li>
+ *   <li>переставляем и мешаем буквы внутри слов («првиет», «каробль»);</li>
+ *   <li>выкидываем буквы («привт») и вставляем чёрточки прямо в слова («пр-ивет»);</li>
+ *   <li>тыкаем точки с пробелами между словами («идём . домой»);</li>
+ *   <li>повторяем слова («идём идём домой»);</li>
+ *   <li>тянем гласные («идёёём»), добавляем «ик!» и «ик…»;</li>
+ *   <li>на «Краю» и «Отключке» — полный абсурд: слова перемешаны, регистр скачет,
+ *       в конце висят лишние многоточия.</li>
  * </ul>
  *
- * <p>Правим только то, что видят другие: команды и служебные сообщения сюда не попадают,
- * потому что {@code AsyncChatEvent} их не получает. Оригинальный текст нигде не теряется —
- * он уходит в журнал сервера как обычно.
+ * <p>Молчания нет ни на одной стадии: даже в отключке игрок продолжает мычать что-то
+ * невнятное. Единственный случай, когда сообщение не меняется, — «Трезв» и «Навеселе».
+ *
+ * <p>Правим только чат: команды и служебные сообщения сюда не попадают, потому что
+ * {@code AsyncChatEvent} их не получает. Оригинальный текст нигде не теряется — он
+ * уходит в журнал сервера как обычно.
  *
  * <p>Всё здесь — чистая математика со {@link Random}: тесты передают свой {@code Random}
  * и проверяют результат без сервера.
@@ -32,8 +40,51 @@ final class DrunkSpeech {
     private static final String HICCUP_LOUD = "ик!";
     private static final String HICCUP_SOFT = "ик…";
 
-    /** Гласные, которые тянем на поздних стадиях. */
+    /** Гласные, которые тянем. */
     private static final String VOWELS = "аеёиоуыэюя";
+
+    /** Многоточия и «э-э», которыми заканчивается абсурд. */
+    private static final String[] CHAOS_PREFIX = {"Э-э… ", "Э… ", "Ы-ы… ", "А?.. "};
+    private static final String[] CHAOS_TAIL = {" …  …", " . . .", " … … …", " ыыы…"};
+
+    /**
+     * Насколько сильно портим текст на стадии.
+     *
+     * @param broken  доля слов, которые вообще трогаем
+     * @param dash    шанс вставить чёрточку внутрь слова
+     * @param dot     шанс поставить точку с пробелами между словами
+     * @param drop    шанс потерять букву
+     * @param shuffle шанс перемешать буквы в середине слова
+     * @param stretch шанс растянуть гласные во всём сообщении
+     * @param repeat  шанс повторить слово
+     * @param hiccup  шанс добавить «ик»
+     * @param word    само «ик»
+     * @param chaos   общий уровень абсурда (регистр, порядок слов, лишние многоточия)
+     */
+    private record Style(double broken,
+                         double dash,
+                         double dot,
+                         double drop,
+                         double shuffle,
+                         double stretch,
+                         double repeat,
+                         double hiccup,
+                         String word,
+                         double chaos) {
+    }
+
+    private static final Style TALKATIVE =
+            new Style(0.30, 0.10, 0.06, 0.10, 0.30, 0.10, 0.05, 0.30, HICCUP_LOUD, 0.0);
+    private static final Style SWAYING =
+            new Style(0.55, 0.30, 0.18, 0.25, 0.55, 0.25, 0.10, 0.45, HICCUP_LOUD, 0.05);
+    private static final Style QUEASY =
+            new Style(0.75, 0.45, 0.30, 0.40, 0.75, 0.40, 0.18, 0.55, HICCUP_SOFT, 0.15);
+    private static final Style WASTED =
+            new Style(0.90, 0.60, 0.45, 0.50, 0.85, 0.55, 0.30, 0.70, HICCUP_SOFT, 0.35);
+    private static final Style EDGE =
+            new Style(1.00, 0.75, 0.60, 0.60, 0.95, 0.70, 0.45, 0.85, HICCUP_SOFT, 0.60);
+    private static final Style BLACKOUT =
+            new Style(1.00, 0.85, 0.75, 0.70, 1.00, 0.85, 0.60, 1.00, HICCUP_SOFT, 0.90);
 
     private DrunkSpeech() {
     }
@@ -49,18 +100,19 @@ final class DrunkSpeech {
         if (message == null || message.isEmpty() || stage == null) return message;
         Random dice = random != null ? random : new Random();
 
-        return switch (stage) {
-            case SOBER, TIPSY -> message;
-            case BLACKOUT -> "…";
-            case TALKATIVE -> mangle(message, 1, dice, 0.20, HICCUP_LOUD);
-            case SWAYING -> stretch(mangle(message, 2, dice, 0.40, HICCUP_LOUD), dice);
-            case QUEASY -> maybeSilence(stretch(mangle(message, half(message), dice, 0.60, HICCUP_SOFT), dice),
-                    dice, 0.15);
-            case WASTED -> maybeSilence(stretch(mangle(message, message.split("\\s+").length, dice, 0.70,
-                    HICCUP_SOFT), dice), dice, 0.30);
-            case EDGE -> maybeSilence(stretch(mangle(message, message.split("\\s+").length, dice, 0.85,
-                    HICCUP_SOFT), dice), dice, 0.40);
+        Style style = switch (stage) {
+            case SOBER, TIPSY -> null;
+            case TALKATIVE -> TALKATIVE;
+            case SWAYING -> SWAYING;
+            case QUEASY -> QUEASY;
+            case WASTED -> WASTED;
+            case EDGE -> EDGE;
+            case BLACKOUT -> BLACKOUT;
         };
+        if (style == null) return message;
+
+        String text = paint(message, dice, style);
+        return text == null || text.isBlank() ? message : text;
     }
 
     /** То же, но с собственным зерном: удобно для демонстрации и тестов. */
@@ -68,62 +120,116 @@ final class DrunkSpeech {
         return slur(message, stage, new Random(seed));
     }
 
-    /** Меняем до {@code words} слов: переставляем буквы и портим регистр. */
-    private static String mangle(String message, int words, Random random, double hiccupChance,
-                                 String hiccup) {
-        String[] parts = message.split("\\s+");
-        List<Integer> order = new ArrayList<>();
-        for (int i = 0; i < parts.length; i++) {
-            if (!parts[i].isBlank() && parts[i].length() > 2) order.add(i);
-        }
-        if (!order.isEmpty()) {
-            int count = Math.max(1, Math.min(words, order.size()));
-            for (int i = 0; i < count; i++) {
-                int pick = order.remove(random.nextInt(order.size()));
-                parts[pick] = scramble(parts[pick], random);
+    /** Главный конвейер: слово за словом портим текст по «стилю» стадии. */
+    private static String paint(String message, Random dice, Style style) {
+        String[] words = message.trim().split("\\s+");
+        List<String> out = new ArrayList<>(words.length * 2 + 2);
+        double hiccupPerWord = style.hiccup() / Math.max(1, words.length);
+
+        for (String word : words) {
+            if (word.isEmpty()) continue;
+            String broken = dice.nextDouble() < style.broken() && word.length() > 2
+                    ? breakWord(word, dice, style)
+                    : word;
+            out.add(broken);
+            if (word.length() > 2 && dice.nextDouble() < style.repeat()) {
+                // С перепугу сказал дважды.
+                out.add(breakWord(word, dice, style));
+            }
+            if (dice.nextDouble() < style.dot()) {
+                out.add(".");
+            }
+            if (dice.nextDouble() < hiccupPerWord) {
+                out.add(style.word());
             }
         }
-        String text = String.join(" ", parts);
-        if (random.nextDouble() < hiccupChance) {
-            text = text + " " + hiccup;
+
+        String text = String.join(" ", out);
+        if (dice.nextDouble() < style.stretch()) {
+            text = stretch(text, dice, 0.35);
         }
+        return style.chaos() > 0 ? chaos(text, dice, style.chaos()) : text;
+    }
+
+    /** Одно слово: перемешать, потерять букву, вставить чёрточку, растянуть. */
+    private static String breakWord(String word, Random dice, Style style) {
+        String text = word;
+        if (dice.nextDouble() < style.shuffle()) text = shuffleInner(text, dice);
+        if (text.length() > 3 && dice.nextDouble() < style.drop()) text = dropLetter(text, dice);
+        if (text.length() > 2 && dice.nextDouble() < style.dash()) text = dashInside(text, dice);
+        if (dice.nextDouble() < style.stretch() * 0.5) text = stretch(text, dice, 0.5);
         return text;
     }
 
-    /** Переставляем две соседние буквы в середине слова — «привте», «нормальо». */
-    private static String scramble(String word, Random random) {
+    /** Первая и последняя буквы на месте, середина перемешана — «каробль». */
+    private static String shuffleInner(String word, Random dice) {
         if (word.length() < 4) return word;
-        int at = 1 + random.nextInt(word.length() - 3);
-        char[] chars = word.toCharArray();
-        char swap = chars[at];
-        chars[at] = chars[at + 1];
-        chars[at + 1] = swap;
-        return new String(chars);
+        List<Character> middle = new ArrayList<>(word.length() - 2);
+        for (int i = 1; i < word.length() - 1; i++) middle.add(word.charAt(i));
+        Collections.shuffle(middle, dice);
+        StringBuilder out = new StringBuilder(word.length());
+        out.append(word.charAt(0));
+        for (char c : middle) out.append(c);
+        out.append(word.charAt(word.length() - 1));
+        return out.toString();
+    }
+
+    /** Пропала буква: «привт». Первую не трогаем, иначе слово не узнать. */
+    private static String dropLetter(String word, Random dice) {
+        int at = 1 + dice.nextInt(word.length() - 2);
+        return word.substring(0, at) + word.substring(at + 1);
+    }
+
+    /** Чёрточка прямо в слове: «пр-ивет», «ко-рабль». */
+    private static String dashInside(String word, Random dice) {
+        int at = 1 + dice.nextInt(word.length() - 1);
+        String separator = dice.nextDouble() < 0.25 ? " — " : "-";
+        return word.substring(0, at) + separator + word.substring(at);
     }
 
     /** Тянем гласные: «нееет», «дааа». */
-    private static String stretch(String text, Random random) {
+    private static String stretch(String text, Random dice, double chance) {
         StringBuilder out = new StringBuilder(text.length() + 8);
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             out.append(c);
             boolean vowel = VOWELS.indexOf(Character.toLowerCase(c)) >= 0;
-            if (vowel && random.nextDouble() < 0.18) {
-                out.append(c).append(c);
+            if (vowel && dice.nextDouble() < chance) {
+                out.append(c);
+                if (dice.nextDouble() < 0.3) out.append(c);
             }
         }
         return out.toString();
     }
 
-    /** Иногда вместо слов остаётся только многоточие. */
-    private static String maybeSilence(String text, Random random, double chance) {
-        return random.nextDouble() < chance ? "…" : text;
+    /** Абсурд поздних стадий: порядок слов, регистр, лишние многоточия. */
+    private static String chaos(String text, Random dice, double power) {
+        String result = text;
+        if (dice.nextDouble() < power * 0.7) {
+            List<String> words = new ArrayList<>(Arrays.asList(result.split("\\s+")));
+            Collections.shuffle(words, dice);
+            result = String.join(" ", words);
+        }
+        if (dice.nextDouble() < power * 0.5) {
+            result = mixedCase(result, dice);
+        }
+        if (dice.nextDouble() < power) {
+            result = result + CHAOS_TAIL[dice.nextInt(CHAOS_TAIL.length)];
+        }
+        if (dice.nextDouble() < power * 0.35) {
+            result = CHAOS_PREFIX[dice.nextInt(CHAOS_PREFIX.length)] + result;
+        }
+        return result;
     }
 
-    /** Сколько слов править на «Укачало»: примерно половина. */
-    private static int half(String message) {
-        int words = message.split("\\s+").length;
-        return Math.max(1, words / 2);
+    /** Скачет регистр — как будто человек уже не следит за руками. */
+    private static String mixedCase(String text, Random dice) {
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            out.append(dice.nextDouble() < 0.25 ? Character.toUpperCase(c) : c);
+        }
+        return out.toString();
     }
 
     /** Стадия по строке — для команды {@code /f8 drunk}: {@code wasted} или «В стельку». */

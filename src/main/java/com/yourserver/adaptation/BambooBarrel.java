@@ -212,13 +212,10 @@ public class BambooBarrel implements Listener {
                 .append(Component.text(years, qColor).decoration(TextDecoration.ITALIC, false)));
         lore.add(Component.text("Переливаний: ", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)
                 .append(Component.text(transfers, NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
-        // Сколько единиц опьянения даёт один глоток — та же цифра, что в data/napitki/napitki.yml.
-        int drunk = profile.drunkFor(tier);
-        if (drunk > 0) {
-            lore.add(Component.text("Опьянение: ", NamedTextColor.DARK_GRAY)
-                    .decoration(TextDecoration.ITALIC, false)
-                    .append(Component.text("+" + drunk + " за глоток", NamedTextColor.LIGHT_PURPLE)
-                            .decoration(TextDecoration.ITALIC, false)));
+        // Пьянит или нет — без цифр: шкала опьянения игроку не показывается.
+        if (profile.drunkFor(tier) > 0) {
+            lore.add(Component.text("Опьяняет", NamedTextColor.LIGHT_PURPLE)
+                    .decoration(TextDecoration.ITALIC, false));
         }
         String description = profile.description(years, tier);
         if (description != null && !description.isEmpty()) {

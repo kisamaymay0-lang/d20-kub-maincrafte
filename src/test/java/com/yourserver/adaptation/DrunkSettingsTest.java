@@ -37,16 +37,16 @@ final class DrunkSettingsTest {
         DrunkSettings settings = DrunkSettings.parse(null);
 
         assertEquals(50, settings.scale(), "шкала 50, как в таблице");
-        assertEquals(200, settings.decayTicks(), "1 единица за 10 секунд");
+        assertEquals(600, settings.decayTicks(), "1 единица за 30 секунд");
         assertTrue(settings.hangover());
         assertTrue(settings.slurredChat());
         assertTrue(settings.wobble());
         assertTrue(settings.phantomBlocks());
         assertTrue(settings.puddles());
         assertEquals(60, settings.puddleSeconds());
-        assertEquals(8, settings.phantomMax());
-        assertEquals(1200, settings.pukeMinTicks(), "приступ раз в 60–90 секунд");
-        assertEquals(1800, settings.pukeMaxTicks());
+        assertEquals(16, settings.phantomMax());
+        assertEquals(100, settings.pukeMinTicks(), "приступ раз в 5–10 секунд");
+        assertEquals(200, settings.pukeMaxTicks());
     }
 
     @Test
@@ -57,9 +57,9 @@ final class DrunkSettingsTest {
         DrunkSettings settings = DrunkSettings.parse(yaml.getConfigurationSection("drunk"));
 
         assertEquals(50, settings.scale());
-        assertEquals(200, settings.decayTicks());
+        assertEquals(600, settings.decayTicks());
         assertEquals(60, settings.puddleSeconds());
-        assertEquals(8, settings.phantomMax());
+        assertEquals(16, settings.phantomMax());
         assertTrue(settings.puddles(), "лужи включены — так решил владелец");
         assertTrue(settings.puddleMaterials().contains(Material.MUD), settings.puddleMaterials().toString());
         assertTrue(settings.puddleMaterials().contains(Material.SLIME_BLOCK));
@@ -83,7 +83,7 @@ final class DrunkSettingsTest {
     void пустойРазделОставляетУмолчания() {
         DrunkSettings settings = DrunkSettings.parse(section("drunk: {}"));
         assertEquals(50, settings.scale());
-        assertEquals(200, settings.decayTicks());
+        assertEquals(600, settings.decayTicks());
         assertTrue(settings.puddles());
     }
 
@@ -118,6 +118,7 @@ final class DrunkSettingsTest {
         assertEquals(20, broken.decayTicks(), "быстрее тика не трезвеют");
         assertEquals(5, broken.puddleSeconds());
         assertTrue(broken.puddleMaterials().contains(Material.MUD), "незнакомый блок заменён умолчанием");
+        assertTrue(broken.puddleMaterials().contains(Material.SLIME_BLOCK), "слизь тоже по умолчанию");
     }
 
     @Test
