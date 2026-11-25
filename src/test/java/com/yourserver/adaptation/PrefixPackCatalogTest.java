@@ -82,6 +82,10 @@ final class PrefixPackCatalogTest {
         assertEquals(2, pack.size());
         assertEquals("pref1", pack.prefixes().get(0).id(), "префикс пака — тот же префикс из prefixes.yml");
         assertEquals("Морозный", pack.prefixes().get(0).name());
+        // Номер и анимация тоже приходят из settings/prefixes.yml: в меню пака
+        // номер должен совпадать с тем, по которому префикс выдают командой.
+        assertEquals(1, pack.prefixes().get(0).number());
+        assertEquals(2, pack.prefixes().get(1).number());
         assertEquals("pref1", pack.prefixes().get(0).file());
         assertEquals(TextColor.fromHexString("#8FE3F5"), pack.prefixes().get(0).color());
         assertEquals("pref2", pack.prefixes().get(1).id());
@@ -105,6 +109,32 @@ final class PrefixPackCatalogTest {
         assertEquals("pref1", pack.prefixes().get(0).id(), "id остаётся от prefixes.yml");
         assertEquals("Своё имя", pack.prefixes().get(0).name());
         assertEquals(TextColor.fromHexString("#FF0000"), pack.prefixes().get(0).color());
+    }
+
+    @Test
+    void анимацияПрефиксаДоходитДоПака(@TempDir Path folder) throws Exception {
+        Files.writeString(folder.resolve("prefixes.yml"), """
+                prefixes:
+                  pref9:
+                    name: 'Аврора'
+                    color: '#7FF0D2'
+                    file: pref9
+                    animation:
+                      frames: [pref9, pref10]
+                      interval-hundredths: 6
+                """);
+        Files.writeString(folder.resolve("pref-pack1.yml"), """
+                name: 'Тестовый пак'
+                prefixes:
+                  - pref9
+                """);
+
+        PrefixCatalog base = PrefixCatalog.load(folder.resolve("prefixes.yml"));
+        PrefixPackCatalog.Pack pack = PrefixPackCatalog.load(folder, base, null).get("pref-pack1");
+        assertNotNull(pack);
+        assertEquals(9, pack.prefixes().get(0).number(), "номер из картинки, а не 0");
+        assertTrue(pack.prefixes().get(0).animated());
+        assertEquals(6, pack.prefixes().get(0).intervalHundredths());
     }
 
     @Test

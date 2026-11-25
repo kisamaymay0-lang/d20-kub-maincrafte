@@ -287,16 +287,6 @@ class ConfigSyncTest {
     }
 
     @Test
-    void everySettingsFileStartsWithItsTopic() {
-        // /f8 config показывает тему файла — её первая строка-комментарий.
-        for (String file : PluginSettings.FILES) {
-            String first = ShippedSettings.read("settings/" + file).lines().findFirst().orElse("");
-            assertTrue(first.startsWith("# ") && first.length() > 15,
-                    "settings/" + file + " должен начинаться с короткой темы, а не с «" + first + "»");
-        }
-    }
-
-    @Test
     void shippedFolderHasNoMonolithLeftBehind() {
         // Старый общий config.yml в комплекте не остаётся: настройки живут только в settings/.
         assertFalse(ConfigSync.FILES.contains("config.yml"));

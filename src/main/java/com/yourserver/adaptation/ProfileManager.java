@@ -168,6 +168,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private final Map<UUID, String> pendingCosmeticGrants = new HashMap<>();
     /** Надетый префикс для быстрого чтения из асинхронных событий (чат) без обращения к хранилищу. */
     private final Map<UUID, String> equippedPrefixes = new ConcurrentHashMap<>();
+    /** Какой кадр анимации уже показан игроку: ник и tab обновляем только при смене кадра. */
+    private final Map<UUID, Integer> animatedFrames = new ConcurrentHashMap<>();
+    private final BukkitTask prefixAnimation;
     /** Надетая косметика: так же быстро читается тиком отображения на голове. */
     private final Map<UUID, String> equippedCosmetics = new ConcurrentHashMap<>();
     private ToLongFunction<UUID> constellationMilestone = ignored -> 0L;
@@ -196,7 +199,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         packs = loadPacks(base);
         prefixes = base.withPacks(packs);
         plugin.getLogger().info("Префиксы профиля: " + prefixes.size() + " шт., файл " + prefixConfig
-                + ", паков " + packs.size());
+                + ", паков " + packs.size()
+                + (prefixes.animatedCount() > 0 ? ", с анимацией " + prefixes.animatedCount() : ""));
         cosmeticConfig = Layout.settings(plugin, "cosmetics.yml");
         cosmeticFolder = Layout.content(plugin, "cosmetics");
         if (!Files.exists(cosmeticConfig)) {
@@ -205,6 +209,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         try { Files.createDirectories(cosmeticFolder); }
         catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не удалось создать папку дополнительной косметики", ex); }
+        // Пример с подсказками: однажды положенный, он дальше живёт сам.
+        if (!Files.exists(cosmeticFolder.resolve("example.yml"))) {
+            plugin.saveResource("content/cosmetics/example.yml", false);
+        }
         CosmeticCatalog loadedCosmetics = CosmeticCatalog.defaults();
         try { loadedCosmetics = CosmeticCatalog.load(cosmeticConfig, cosmeticFolder); }
         catch (Exception ex) {
@@ -230,6 +238,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         // (профили показываются в карточке/чате, над головой в игре ничего не висит).
         boolean overheadTags = plugin.getConfig().getBoolean("profiles.overhead-tags", false);
         tags = overheadTags ? new ProfileTags(plugin, player -> prefixes.get(equippedPrefixes.get(player.getUniqueId()))) : null;
+        // Анимация префиксов: ник в tab и displayName перерисовываются только когда
+        // реально сменился кадр, поэтому задача дешёвая даже при десятках игроков.
+        prefixAnimation = Bukkit.getScheduler().runTaskTimer(plugin, this::animatePrefixes, 1L, 1L);
         headCosmetics = new Cosmetics(plugin, player -> cosmetics.get(equippedCosmetics.get(player.getUniqueId())));
         // Косметика — настоящий предмет в слоте шлема, поэтому ей нужны события
         // инвентаря: не дать вытащить, выкинуть, перетащить или потерять.
@@ -371,12 +382,43 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
      *  displayName красим только ник — чтобы события, берущие displayName сами, не задваивали иконку. */
     private void applyPrefixName(Player player, ProfileData data) {
         PrefixCatalog.Prefix prefix = prefixes.get(data.equippedPrefix());
-        if (prefix == null) equippedPrefixes.remove(player.getUniqueId());
-        else equippedPrefixes.put(player.getUniqueId(), prefix.id());
+        if (prefix == null) {
+            equippedPrefixes.remove(player.getUniqueId());
+            animatedFrames.remove(player.getUniqueId());
+        } else {
+            equippedPrefixes.put(player.getUniqueId(), prefix.id());
+            animatedFrames.remove(player.getUniqueId());
+        }
         Component line = ProfileIcons.prefixedName(prefix, player.getName());
         player.displayName(line);
         player.playerListName(line);
         if (tags != null) tags.apply(player, prefix);
+    }
+
+    /**
+     * Смена кадров у анимированных префиксов: {@code animation.frames} и
+     * {@code animation.interval-hundredths} из settings/prefixes.yml.
+     *
+     * <p>Картинка префикса — это глиф шрифта, сам по себе он не двигается, поэтому
+     * «анимацию» делает сервер: ник в tab и displayName перерисовываются новым
+     * кадром, а тег над головой (если включён) — в {@link ProfileTags}. При смене
+     * кадра уходит одно обновление, между кадрами трафика нет.
+     */
+    private void animatePrefixes() {
+        if (prefixes.animatedCount() == 0 || equippedPrefixes.isEmpty()) return;
+        long millis = System.currentTimeMillis();
+        for (Map.Entry<UUID, String> entry : equippedPrefixes.entrySet()) {
+            PrefixCatalog.Prefix prefix = prefixes.get(entry.getValue());
+            if (prefix == null || !prefix.animated()) continue;
+            int frame = ProfileIcons.frameIndex(prefix, millis);
+            Integer shown = animatedFrames.put(entry.getKey(), frame);
+            if (shown != null && shown == frame) continue;
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null || !player.isOnline()) continue;
+            Component line = ProfileIcons.prefixedName(prefix, player.getName(), millis);
+            player.displayName(line);
+            player.playerListName(line);
+        }
     }
 
     private void equipPrefix(Player player, ProfileData data, String id) {
@@ -1101,7 +1143,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         List<PrefixCatalog.Prefix> inside = pack.prefixes();
         long now = System.currentTimeMillis();
         int slot = PACK_TOP_ROW;
-        for (PrefixCatalog.Prefix prefix : inside) {
+        for (PrefixCatalog.Prefix raw : inside) {
+            // Показываем запись из общего каталога: у неё тот же номер, что при выдаче
+            // командой, и её анимация. Префикс, которого в каталоге уже нет, показываем как есть.
+            PrefixCatalog.Prefix prefix = prefixes.get(raw.id()) == null ? raw : prefixes.get(raw.id());
             if (slot > PACK_TOP_ROW + 8) slot = PACK_BOTTOM_ROW;
             if (slot > PACK_BOTTOM_ROW + 8) break; // Больше восемнадцати в меню не помест.
             menu.prefixesBySlot.put(slot, prefix.id());
@@ -1739,7 +1784,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             } catch (RuntimeException ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применён префикс после reload: " + player.getName(), ex); }
         }
         for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
-        return "Префиксы перезагружены: " + prefixes.size() + " (№1–" + prefixes.size() + "), паков " + packs.size()
+        return "Префиксы перезагружены: " + prefixes.size() + " (№" + prefixes.numbersText() + ")"
+                + (prefixes.animatedCount() > 0 ? ", с анимацией " + prefixes.animatedCount() : "")
+                + ", паков " + packs.size()
                 + ". Файлы: " + prefixConfig + " и " + packFolder;
     }
 
@@ -2022,7 +2069,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             }
         }
         for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
-        return "Косметика перезагружена: " + next.size() + " (№1–" + next.size() + "), новых: " + added
+        return "Косметика перезагружена: " + next.size() + " (№" + next.numbersText() + "), новых: " + added
                 + ". Файлы: " + cosmeticConfig + " и " + cosmeticFolder + "/*.yml";
     }
 
@@ -2265,7 +2312,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             sender.sendMessage("§6/profile cosmetic list <игрок> — какая косметика есть у игрока");
             sender.sendMessage("§6/profile cosmetic reload — перечитать settings/cosmetics.yml");
             sender.sendMessage("§7Префикс и косметика: /profile → «Настроить косметику». Файлы: §e" + prefixConfig + "§7, §e" + cosmeticConfig);
-            sender.sendMessage("§7Номер префикса/косметики — это порядок записей в файле (№1 — первая запись).");
+            sender.sendMessage("§7Номер префикса/косметики — это цифры в имени картинки/модели: pref1 — №1, kosmetika3 — №3.");
+            sender.sendMessage("§7Анимация префикса: animation.frames и animation.interval-hundredths (сотые секунды) в "
+                    + "settings/prefixes.yml.");
             sender.sendMessage("§7Имя ищется только в локальном кэше сервера; если игрок не найден, укажите UUID.");
         }
     }
@@ -2349,6 +2398,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             }
         }
         caseRuns.clear(); pendingPrefixGrants.clear(); pendingCosmeticGrants.clear();
+        prefixAnimation.cancel();
         menus.clear(); queued.clear(); cardClicks.clear(); rightClicks.clear(); storage.shutdown();
         if (tags != null) tags.disable();
         headCosmetics.disable();

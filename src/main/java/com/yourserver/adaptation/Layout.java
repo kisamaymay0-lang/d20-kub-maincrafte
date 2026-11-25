@@ -3,7 +3,6 @@ package com.yourserver.adaptation;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -106,9 +105,9 @@ final class Layout {
     private static final String[] LEGACY_CONTENT = {"prefixpacks", "cosmetics"};
 
     /**
-     * Что где лежит — для {@code /f8 config}. Каждая строка готова к отправке
-     * в чат: сначала папка, потом файл и его тема (первый комментарий файла),
-     * чтобы не открывать YAML ради «а где тут питомцы».
+     * Что где лежит — для {@code /f8 config}: только путь и есть ли он.
+     * Описаний нет намеренно: список читается глазами за секунду, а что за файл —
+     * видно по его первой строке внутри.
      */
     static List<String> describe(JavaPlugin plugin) {
         List<String> lines = new ArrayList<>();
@@ -120,63 +119,31 @@ final class Layout {
         int ready = 0;
 
         for (String name : PluginSettings.FILES) {
-            Path file = settings(plugin, name);
-            boolean exists = Files.isRegularFile(file);
+            boolean exists = Files.isRegularFile(settings(plugin, name));
 
             if (exists) {
                 ready++;
             }
 
-            lines.add((exists ? "§a✔ §f" : "§c✖ §f") + "settings/" + name + " §8— " + topic(file));
+            lines.add((exists ? "§a✔ " : "§c✖ ") + "§fsettings/" + name);
         }
 
         lines.add("§7Контент:");
         for (String name : LEGACY_CONTENT) {
-            lines.add(exists(content(plugin, name)) ? "§a✔ §fcontent/" + name
-                    : "§8· §7content/" + name + " §8— появится сам");
+            boolean exists = Files.exists(content(plugin, name));
+            lines.add((exists ? "§a✔ " : "§8· ") + "§fcontent/" + name);
         }
 
         lines.add("§7Данные (руками не правим):");
         for (String name : LEGACY_DATA) {
-            Path path = data(plugin, name);
-            lines.add(exists(path) ? "§a✔ §fdata/" + name : "§8· §7data/" + name + " §8— пока пусто");
+            boolean exists = Files.exists(data(plugin, name));
+            lines.add((exists ? "§a✔ " : "§8· ") + "§fdata/" + name);
         }
 
         lines.add("§7Файлов настроек на месте: §f" + ready + "/" + PluginSettings.FILES.size()
                 + "§7. Чего нет — вернёт §f/f8 reload§7 из комплекта.");
 
         return lines;
-    }
-
-    private static boolean exists(Path path) {
-        return Files.exists(path);
-    }
-
-    /** Тема файла — его первая строка-комментарий. */
-    private static String topic(Path file) {
-        try {
-            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
-                String trimmed = line.trim();
-
-                if (trimmed.isEmpty()) {
-                    continue;
-                }
-
-                if (!trimmed.startsWith("#")) {
-                    break;
-                }
-
-                String text = trimmed.substring(1).trim();
-
-                if (!text.isEmpty()) {
-                    return text.length() > 72 ? text.substring(0, 72) + "…" : text;
-                }
-            }
-        } catch (IOException ignored) {
-            // Файла нет или он занят — строка ниже скажет об этом сама.
-        }
-
-        return "§cфайла нет — вернёт /f8 reload";
     }
 
     /**

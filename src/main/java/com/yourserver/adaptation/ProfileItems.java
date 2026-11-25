@@ -217,6 +217,11 @@ final class ProfileItems {
             lore.add(text("Нажмите, чтобы надеть префикс", NamedTextColor.DARK_GRAY));
         }
         lore.add(text("№" + prefix.number() + " · файл " + prefix.file(), NamedTextColor.DARK_GRAY));
+        if (prefix.animated()) {
+            // Видно, что префикс живой и как быстро он меняется: кадры и сотые секунды.
+            lore.add(text("Анимация: картинок " + prefix.frames().size() + " · "
+                    + PrefixCatalog.intervalText(prefix.intervalHundredths()) + " на кадр", NamedTextColor.DARK_GRAY));
+        }
         Component display = Component.empty().append(ProfileIcons.prefixIcon(prefix)).append(bold(prefix.name(), prefix.color()));
         ItemStack item = named(Material.NAME_TAG, display, lore);
         ItemMeta meta = item.getItemMeta();

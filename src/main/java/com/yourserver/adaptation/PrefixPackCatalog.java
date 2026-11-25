@@ -174,6 +174,12 @@ final class PrefixPackCatalog {
             String finalId;
             String finalName;
             String finalColor;
+            if (known != null && entryId.isEmpty() && entryName.isEmpty() && entryColor.isEmpty()) {
+                // Ничего не переопределено — это ровно тот префикс из settings/prefixes.yml:
+                // берём его вместе с номером и анимацией, чтобы в меню пака номер совпадал.
+                prefixes.add(known);
+                continue;
+            }
             if (known != null) {
                 // Файл есть в settings/prefixes.yml: префикс пака — тот же префикс.
                 finalId = entryId.isEmpty() ? known.id() : entryId;
@@ -190,7 +196,10 @@ final class PrefixPackCatalog {
             }
             TextColor color = TextColor.fromHexString(finalColor);
             if (color == null) throw new IllegalArgumentException("Неверный цвет префикса " + finalId);
-            prefixes.add(new PrefixCatalog.Prefix(sanitize(finalId), finalName, color, entryFile, 0));
+            prefixes.add(known == null
+                    ? new PrefixCatalog.Prefix(sanitize(finalId), finalName, color, entryFile, 0)
+                    : new PrefixCatalog.Prefix(sanitize(finalId), finalName, color, entryFile, known.number(),
+                            known.frames(), known.intervalHundredths()));
         }
         if (prefixes.isEmpty()) return null;
         return new Pack(sanitize(id), name, timeHours, List.copyOf(prefixes));

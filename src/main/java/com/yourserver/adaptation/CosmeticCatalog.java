@@ -9,16 +9,18 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
  * Неизменяемый список косметики из settings/cosmetics.yml и дополнительных
- * {@code cosmetics/*.yml}. Устройство ровно как у {@link PrefixCatalog}:
- * порядок записей в конфиге задаёт «номер» косметики
- * (1, 2, 3, …), по нему косметику выдают и забирают командой.
+ * {@code content/cosmetics/*.yml}. Устройство ровно как у {@link PrefixCatalog}:
+ * «номер» косметики берётся из имени модели (kosmetika1 → №1), по нему косметику
+ * выдают и забирают командой. Модель без цифр получает первый свободный номер.
  *
  * Отличие от префикса только в том, КАК косметика показывается: префикс — это
  * картинка перед ником, а косметика — предмет, который визуально надет на
@@ -82,12 +84,21 @@ final class CosmeticCatalog {
 
     private static CosmeticCatalog loadFiles(List<Path> paths) throws Exception {
         Map<String, Cosmetic> byId = new LinkedHashMap<>();
-        int number = 1;
+        Set<Integer> used = new LinkedHashSet<>();
+        int fallback = 1;
+        boolean primary = true;
         for (Path path : paths) {
             YamlConfiguration yaml = new YamlConfiguration();
             yaml.loadFromString(Files.readString(path));
             ConfigurationSection section = yaml.getConfigurationSection("cosmetics");
-            if (section == null) throw new IllegalArgumentException("В " + path + " нет раздела cosmetics");
+            if (section == null) {
+                // Основной файл без раздела cosmetics — ошибка. Дополнительный —
+                // просто чужой/пустой файл в папке: пропускаем, остальные читаются.
+                if (primary) throw new IllegalArgumentException("В " + path + " нет раздела cosmetics");
+                primary = false;
+                continue;
+            }
+            primary = false;
             for (String id : section.getKeys(false)) {
                 String cleanId = ProfileText.clean(id);
                 if (cleanId.isEmpty()) continue;
@@ -98,11 +109,14 @@ final class CosmeticCatalog {
                 }
                 TextColor color = TextColor.fromHexString(section.getString(id + ".color", "#E6B94B"));
                 if (color == null) throw new IllegalArgumentException("Неверный цвет косметики " + cleanId + " в " + path);
+                // Номер — из имени модели (kosmetika1 → №1), как у префиксов: перестановка
+                // записей в файле не сдвигает номера выдачи. Нет цифр — первый свободный.
+                int number = PrefixCatalog.allocateNumber(file, used, fallback);
+                fallback = Math.max(fallback, number + 1);
                 Cosmetic cosmetic = new Cosmetic(cleanId, name, color, file, number);
                 if (byId.putIfAbsent(cleanId, cosmetic) != null) {
                     throw new IllegalArgumentException("Повторяется id косметики " + cleanId + " в " + path);
                 }
-                number++;
             }
         }
         if (byId.isEmpty()) throw new IllegalArgumentException("Список косметики пуст");
@@ -113,10 +127,28 @@ final class CosmeticCatalog {
     Cosmetic get(String id) { return id == null ? null : byId.get(id); }
     int size() { return ordered.size(); }
 
-    /** Косметика по номеру из конфига (1, 2, 3, …) или null. */
+    /** Косметика по номеру из имени модели (kosmetika1 → №1) или null. */
     Cosmetic byNumber(int number) {
-        if (number < 1 || number > ordered.size()) return null;
-        return ordered.get(number - 1);
+        for (Cosmetic cosmetic : ordered) {
+            if (cosmetic.number() == number) return cosmetic;
+        }
+        return null;
+    }
+
+    /** Диапазон номеров для сообщений: «1–3» или «1»; пустой каталог — «0». */
+    String numbersText() {
+        return numbersText(ordered);
+    }
+
+    static String numbersText(List<Cosmetic> cosmetics) {
+        if (cosmetics == null || cosmetics.isEmpty()) return "0";
+        int min = Integer.MAX_VALUE;
+        int max = 0;
+        for (Cosmetic cosmetic : cosmetics) {
+            min = Math.min(min, cosmetic.number());
+            max = Math.max(max, cosmetic.number());
+        }
+        return min == max ? Integer.toString(min) : min + "–" + max;
     }
 
     /** Какая-либо косметика по записи «номер», «kosmetikaN» или точному id/имени. */
