@@ -35,7 +35,7 @@ final class ProfileIcons {
         });
     }
 
-    /** Картинка префикса: файл prefN из prefixes.yml отвечает глифу N (pref1 → E106 … pref10 → E10F). */
+    /** Картинка префикса: файл prefN из settings/prefixes.yml отвечает глифу N (pref1 → E106 … pref10 → E10F). */
     static Component prefixIcon(PrefixCatalog.Prefix prefix) {
         if (prefix == null) return Component.empty();
         String file = prefix.file();

@@ -50,7 +50,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <h2>Где хранится список</h2>
  *
- * В {@code plugins/f8-plugin/corals.yml}: список координат
+ * В {@code plugins/f8-plugin/data/corals.yml}: список координат
  * {@code мир|x|y|z}. Запись уходит на диск тем же батчевым писателем
  * ({@link BatchedYamlFile}), что и кувшины, — тик сохранения один на плагин.
  * Сломанный блок из списка убирается: «навсегда» до следующего ломания, а не
@@ -70,7 +70,7 @@ final class CoralCare implements Listener {
 
     CoralCare(JavaPlugin plugin, AsyncTextWriter writer) {
         this.plugin = plugin;
-        this.file = new File(plugin.getDataFolder(), "corals.yml");
+        this.file = Layout.data(plugin, "corals.yml").toFile();
         this.yaml = YamlConfiguration.loadConfiguration(file);
         load();
         this.storage = new BatchedYamlFile(plugin, writer, file.toPath(), () -> yaml.saveToString());

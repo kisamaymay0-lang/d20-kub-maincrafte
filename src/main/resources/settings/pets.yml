@@ -1,0 +1,24 @@
+# Питомцы, надписи над головами и дуэли диких котов.
+# Модели — из вашего пака f8resurs, плагин пак не меняет.
+
+pets:
+  test-models:                   # первый питомец, смена раз в секунду
+    - "f8resurs:test-pets"
+    - "f8resurs:test-pets2"
+  crown-model: "f8resurs:pet-2"
+  crown-gap: 0.35                # зазор короны над макушкой, блоки
+  # Надписи над головами: размер (1.0 — обычный) и высота над макушкой в блоках.
+  speech:
+    player-scale: 1.0
+    player-height: 0.35
+    player-height-with-crown: 0.85
+    pet-1-scale: 0.5
+    pet-1-height: 0.55
+    pet-2-scale: 0.5
+    pet-2-height: 0.6
+
+# Дуэли диких котов: chance-per-tick — шанс старта за тик (0.001 = 0.1 %, 0 — выключено).
+# На половине здоровья 90 % дуэлей кончаются миром (CatBattleManager.SPARE_CHANCE).
+cat-battles:
+  enabled: true
+  chance-per-tick: 0.001

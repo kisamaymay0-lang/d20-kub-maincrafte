@@ -1,0 +1,6 @@
+# Профили и карточка по Shift + взгляду.
+# Префиксы — prefixes.yml, косметика — cosmetics.yml, медали — medals.yml, голос — voice.yml.
+profiles:
+  quick-card-distance: 8.0       # 2..16 блоков
+  overhead-tags: false           # префикс над головой вместо ванильного ника
+  date-time-zone: system         # или UTC, Europe/Moscow

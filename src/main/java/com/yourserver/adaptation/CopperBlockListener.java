@@ -146,7 +146,7 @@ public class CopperBlockListener implements Listener {
                 new NamespacedKey(plugin, "copper_waxed");
 
         this.configFile =
-                new File(plugin.getDataFolder(), "blocks.yml");
+                Layout.data(plugin, "blocks.yml").toFile();
 
         if (!plugin.getDataFolder().exists()) {
             plugin.getDataFolder().mkdirs();

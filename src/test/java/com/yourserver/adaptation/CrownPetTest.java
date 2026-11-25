@@ -4,11 +4,6 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -18,28 +13,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Второй питомец: модель из config.yml, разбор ключей модели и плавное
+ * Второй питомец: модель из settings/pets.yml, разбор ключей модели и плавное
  * появление/затухание реплик. Сама сущность проверяется только на сервере.
  */
 class CrownPetTest {
 
-    private static String shipped(String name) throws IOException {
-        try (InputStream stream = CrownPetTest.class.getClassLoader().getResourceAsStream(name)) {
-            assertNotNull(stream, name + " должен лежать в комплекте");
-            try (Reader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
-                StringBuilder out = new StringBuilder();
-                char[] buffer = new char[4096];
-                int read;
-                while ((read = reader.read(buffer)) > 0) out.append(buffer, 0, read);
-                return out.toString();
-            }
-        }
-    }
-
     @Test
     void shippedConfigKeepsBothPetModelsAndTheCrownModel() throws Exception {
-        YamlConfiguration config = new YamlConfiguration();
-        config.loadFromString(shipped("config.yml"));
+        YamlConfiguration config = ShippedSettings.merged();
 
         List<String> models = config.getStringList("pets.test-models");
         assertEquals(List.of("f8resurs:test-pets", "f8resurs:test-pets2"), models,

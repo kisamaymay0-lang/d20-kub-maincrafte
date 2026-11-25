@@ -26,7 +26,7 @@ import java.util.UUID;
  */
 final class ChatBubble implements Listener {
     private static final int LIFETIME_TICKS = 60;
-    /** Значения по умолчанию; сервер меняет их в config.yml (pets.speech.*). */
+    /** Значения по умолчанию; сервер меняет их в settings/pets.yml (pets.speech.*). */
     private static final float DEFAULT_SCALE = 1.0f;
     /** Обычная высота: сразу над макушкой. */
     private static final double DEFAULT_HEIGHT = 0.35D;

@@ -96,7 +96,7 @@ public class SweetBerryBlock implements Listener {
 
     public SweetBerryBlock(AdaptationPlugin plugin, AsyncTextWriter dataWriter) {
         this.plugin = plugin;
-        this.configFile = new File(plugin.getDataFolder(), "sweet_berries.yml");
+        this.configFile = Layout.data(plugin, "sweet_berries.yml").toFile();
         if (!configFile.exists()) {
             try {
                 if (!plugin.getDataFolder().exists()) {

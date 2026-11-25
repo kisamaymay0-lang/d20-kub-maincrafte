@@ -1,0 +1,16 @@
+# Созвездия: видны с 13000 до 23000 тиков, только в обычном мире.
+# После правок: /f8 reload.
+
+constellations:
+  render-distance: 200                     # масштаб звёзд: 2.0 / 200 ≈ 0.57°, как настоящая звезда
+  star-scale: 2.0
+  star-rotation-degrees-per-second: 0.0    # звезда вокруг своей оси: 4 = оборот за 90 с; 0 — стоит
+  fade-duration-ticks: 40                  # появление и уход (1..200)
+  follow-interpolation-ticks: 2            # тиков на плавный переход сферы (0..10): 0 — рывками
+  sky-rotation-degrees-per-second: 0.0     # 0 — небо стоит; 0.15 ≈ оборот за 40 мин, минус — влево
+  sky-depth-multiplier: 3.0
+  rotation-update-ticks: 4                 # период отправки поворота (2..20, чётное)
+  line-thickness: 0.4
+  depth-fill: 0.95                         # 1.0 — поверх блоков, 0.5 — чаще прячется за стенами
+  click-tolerance-degrees: 2.0             # допуск попадания подзорной трубой
+  update-interval-ticks: 10                # проверка дня/ночи и новых звёзд (1..200)

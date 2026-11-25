@@ -40,9 +40,18 @@ import java.util.Map;
  * ключей и оформление остаются как были — Bukkit при обычном сохранении их теряет.
  */
 final class ConfigSync {
-    /** Файлы плагина: держим их полными так же, как основной config.yml. */
-    static final List<String> FILES = List.of("config.yml", "prefixes.yml", "cosmetics.yml",
-            "medals/config.yml", "voice/config.yml");
+    /** Файлы плагина: весь {@code settings/} держим полным, как раньше держали config.yml. */
+    static final List<String> FILES = settingsFiles();
+
+    private static List<String> settingsFiles() {
+        List<String> names = new ArrayList<>();
+
+        for (String file : PluginSettings.FILES) {
+            names.add(Layout.SETTINGS + "/" + file);
+        }
+
+        return List.copyOf(names);
+    }
 
     /** Отметка перед дописанным куском, чтобы владелец видел, что появилось при обновлении. */
     static final String MARKER = "# f8-plugin: дописано при запуске — этих ключей не было в вашем файле";
@@ -57,7 +66,7 @@ final class ConfigSync {
     private static void sync(JavaPlugin plugin, String name) {
         String defaults = resource(plugin, name);
         if (defaults == null) return;                       // такого файла в комплекте нет — сверять нечего
-        Path file = plugin.getDataFolder().toPath().resolve(name);
+        Path file = settingsPath(plugin, name);
         if (!Files.exists(file)) {
             plugin.saveResource(name, false);
             plugin.getLogger().info("Создан " + name + " — полный файл настроек из комплекта.");
@@ -83,6 +92,15 @@ final class ConfigSync {
         write(file, topUp(actual, defaults, missing));
         plugin.getLogger().info(name + ": дописано ключей — " + missing.size()
                 + " (" + String.join(", ", missing) + "). Прежний файл сохранён как " + name + ".backup");
+    }
+
+    /** {@code config.yml} и старые файлы лежали в корне, теперь всё в {@code settings/}. */
+    private static Path settingsPath(JavaPlugin plugin, String name) {
+        String plain = name.startsWith(Layout.SETTINGS + "/")
+                ? name.substring(Layout.SETTINGS.length() + 1)
+                : name;
+
+        return Layout.settings(plugin, plain);
     }
 
     // ===== ЧТО ДОПИСАТЬ =====

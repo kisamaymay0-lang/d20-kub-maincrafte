@@ -115,6 +115,43 @@ class SkyMotionTest {
         assertEquals(80.0, ConstellationManager.starsViewDistance(80, 1.0, 0.4));
     }
     @Test
+    void starsKeepTheOriginalStarTexture() {
+        // Звезда снова та самая star.png + star.json из пака.
+        assertEquals(new org.bukkit.NamespacedKey("f8resurs", "star"),
+                ConstellationManager.starModelKey(null));
+        assertEquals(new org.bukkit.NamespacedKey("f8resurs", "star"),
+                ConstellationManager.starModelKey("  "));
+        // Прежнее написание того же файла не ломает созвездия старых сборок.
+        assertEquals(new org.bukkit.NamespacedKey("f8resurs", "star"),
+                ConstellationManager.starModelKey("f8resurs:item/star"));
+        // Мягкая звезда из прошлой сборки больше не существует: и её ключ ведёт к star.
+        assertEquals(new org.bukkit.NamespacedKey("f8resurs", "star"),
+                ConstellationManager.starModelKey("f8resurs:item/star_soft"));
+        assertEquals(new org.bukkit.NamespacedKey("f8resurs", "star"),
+                ConstellationManager.starModelKey("f8resurs:star_soft"));
+        // Своя модель у созвездия остаётся возможной.
+        assertEquals(new org.bukkit.NamespacedKey("mypack", "big_star"),
+                ConstellationManager.starModelKey("mypack:big_star"));
+    }
+
+    @Test
+    void followInterpolationStaysInsideTheSmoothRange() {
+        // 0 — рывками по тикам, 1..3 — плавно, больше 10 небо уже опаздывает.
+        assertEquals(0, ConstellationManager.followInterpolationTicks(-4));
+        assertEquals(2, ConstellationManager.followInterpolationTicks(2));
+        assertEquals(10, ConstellationManager.followInterpolationTicks(40));
+    }
+
+    @Test
+    void viewRangeCoversTheWholeSphereButStaysReasonable() {
+        // Дальность считается от сущности, а звезда может стоять в 200 блоках от неё.
+        assertTrue(ConstellationManager.viewRangeFor(200) > 200);
+        assertTrue(ConstellationManager.viewRangeFor(600) <= 512);
+        assertEquals(160f, ConstellationManager.viewRangeFor(0), 0.0001f);
+        assertEquals(160f, ConstellationManager.viewRangeFor(Double.NaN), 0.0001f);
+    }
+
+    @Test
     void positiveOrbitSpeedNowMovesRightAndKeepsTargetingAligned() {
         double phase = SkyOrbit.advance(0, 0.15, 20);
         Vector3f start = new Vector3f(0, 0, 80);

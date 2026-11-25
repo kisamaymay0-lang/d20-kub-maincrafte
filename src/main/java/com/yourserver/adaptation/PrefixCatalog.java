@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Неизменяемый список префиксов из prefixes.yml. Порядок записей в конфиге задаёт
+ * Неизменяемый список префиксов из settings/prefixes.yml. Порядок записей в конфиге задаёт
  * «номер» префикса (1, 2, 3, …): по нему выдаются и забираются префиксы командой.
  * Иконка перед ником — файл префикса из ресурспака (file: pref1 → глиф pref1.png и т.д.).
  */
@@ -37,19 +37,19 @@ final class PrefixCatalog {
     }
 
     /**
-     * Префиксы из {@code prefixes.yml} плюс префиксы паков
-     * ({@code plugins/f8-plugin/prefixpacks/*.yml}).
+     * Префиксы из {@code settings/prefixes.yml} плюс префиксы паков
+     * ({@code plugins/f8-plugin/content/prefixpacks/*.yml}).
      *
      * Паки добавляются вторыми, поэтому их номера идут после обычных: выдача
-     * «по номеру» из {@code prefixes.yml} не съезжает. Если id из пака уже есть
-     * в {@code prefixes.yml}, запись пака пропускается — файл настроек главнее.
+     * «по номеру» из {@code settings/prefixes.yml} не съезжает. Если id из пака уже есть
+     * в {@code settings/prefixes.yml}, запись пака пропускается — файл настроек главнее.
      */
     static PrefixCatalog load(Path path, PrefixPackCatalog packs) throws Exception {
         return load(path).withPacks(packs);
     }
 
     /**
-     * Прочитать {@code prefixes.yml}: только свои префиксы, без паков. По этому
+     * Прочитать {@code settings/prefixes.yml}: только свои префиксы, без паков. По этому
      * каталогу паки находят имена и цвета: пак перечисляет файлы префиксов, а
      * всё остальное берётся отсюда.
      */
@@ -57,7 +57,7 @@ final class PrefixCatalog {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.loadFromString(Files.readString(path));
         ConfigurationSection section = yaml.getConfigurationSection("prefixes");
-        if (section == null) throw new IllegalArgumentException("В prefixes.yml нет раздела prefixes");
+        if (section == null) throw new IllegalArgumentException("В settings/prefixes.yml нет раздела prefixes");
         Map<String, Prefix> byId = new LinkedHashMap<>();
         int number = 1;
         for (String id : section.getKeys(false)) {
@@ -76,7 +76,7 @@ final class PrefixCatalog {
 
     /**
      * Тот же каталог, но с префиксами паков. Префикс пака, чей id уже есть
-     * (обычно так и бывает: пак ссылается на префикс из {@code prefixes.yml} по
+     * (обычно так и бывает: пак ссылается на префикс из {@code settings/prefixes.yml} по
      * его файлу), не добавляется второй раз — имя, цвет и номер остаются от
      * файла настроек.
      */

@@ -68,7 +68,7 @@ import java.util.UUID;
  * UUID перечислены в persistent data хитбокса), барьер/свет на месте и сам
  * хитбокс.
  *
- * <p>Идентификаторы посуды берутся из config.yml, ключ
+ * <p>Идентификаторы посуды берутся из settings/drinks.yml, ключ
  * {@code shaker.glass-models}: список «папка:предмет» ровно в том виде, в каком
  * посуда описана в паке RP Engine ({@code plugins/RPEngine/content/<папка>/items/...}).
  *
@@ -93,12 +93,12 @@ final class ShotGlass implements Listener {
     /**
      * Старые id из наших же прошлых сборок. ConfigSync дописывает только
      * недостающие ключи и не переписывает значения владельца, поэтому у тех,
-     * кто ставил позапрошлую версию, в config.yml так и остаётся statue.
+     * кто ставил позапрошлую версию, в settings/drinks.yml так и остаётся statue.
      * Такой id заменяем на актуальный список.
      */
     static final Set<String> LEGACY_MODELS = Set.of("testpack:statue");
 
-    /** Если ключа в config.yml нет: посуда из пака testpack. */
+    /** Если ключа в settings/drinks.yml нет: посуда из пака testpack. */
     static final List<String> DEFAULT_MODELS = List.of(
             "testpack:stakan", "testpack:bokal", "testpack:ryumka");
 
@@ -189,7 +189,7 @@ final class ShotGlass implements Listener {
         return cleaned;
     }
 
-    /** id посуды из config.yml — для проверок без экземпляра плагина. */
+    /** id посуды из settings/drinks.yml — для проверок без экземпляра плагина. */
     static Set<String> configuredModels() {
         return sharedModels;
     }
@@ -639,7 +639,7 @@ final class ShotGlass implements Listener {
     /**
      * Что видит плагин — для /f8 rp. Строки готовы к отправке игроку.
      */
-    /** Остался ли в config.yml старый id (подсказка в /f8 rp). */
+    /** Остался ли в settings/drinks.yml старый id (подсказка в /f8 rp). */
     private boolean legacyInConfig() {
         for (String id : cleanIds(plugin.getConfig().getStringList("shaker.glass-models"))) {
             if (LEGACY_MODELS.contains(id)) {
@@ -653,10 +653,10 @@ final class ShotGlass implements Listener {
         List<String> lines = new ArrayList<>();
 
         lines.add("§6Посуда RP Engine");
-        lines.add("§7id из config.yml: §f" + models);
+        lines.add("§7id из settings/drinks.yml: §f" + models);
 
         if (legacyInConfig()) {
-            lines.add("§cв config.yml остался старый id " + LEGACY_MODELS
+            lines.add("§cв settings/drinks.yml остался старый id " + LEGACY_MODELS
                     + " — он игнорируется, работает список выше");
         }
         lines.add("§7API моделей: §f" + (hooked ? "найден" : "НЕТ — " + hookProblem));

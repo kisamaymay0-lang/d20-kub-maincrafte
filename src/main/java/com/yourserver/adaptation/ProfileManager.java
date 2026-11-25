@@ -144,11 +144,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private final Path medalConfig;
     private final Path prefixConfig;
     private final Path cosmeticConfig;
-    /** Дополнительные каталоги: plugins/f8-plugin/cosmetics/*.yml. */
+    /** Дополнительные каталоги: plugins/f8-plugin/content/cosmetics/*.yml. */
     private final Path cosmeticFolder;
     private volatile PrefixCatalog prefixes;
     private volatile CosmeticCatalog cosmetics;
-    /** Папка с паками префиксов: plugins/f8-plugin/prefixpacks/. */
+    /** Папка с паками префиксов: plugins/f8-plugin/content/prefixpacks/. */
     private final Path packFolder;
     private volatile PrefixPackCatalog packs;
     private MedalSettings medalSettings;
@@ -179,17 +179,17 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     public ProfileManager(JavaPlugin plugin, AsyncTextWriter writer) {
         this.plugin = plugin;
-        medalConfig = plugin.getDataFolder().toPath().resolve("medals/config.yml");
-        if (!Files.exists(medalConfig)) plugin.saveResource("medals/config.yml", false);
+        medalConfig = Layout.settings(plugin, "medals.yml");
+        if (!Files.exists(medalConfig)) plugin.saveResource("settings/medals.yml", false);
         medalSettings = MedalSettings.defaults();
         try { medalSettings = MedalSettings.load(medalConfig); }
         catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка настройки медалей; временно используются стандартные значения", ex); }
-        prefixConfig = plugin.getDataFolder().toPath().resolve("prefixes.yml");
+        prefixConfig = Layout.settings(plugin, "prefixes.yml");
         if (!Files.exists(prefixConfig)) {
-            plugin.saveResource("prefixes.yml", false);
+            plugin.saveResource("settings/prefixes.yml", false);
             plugin.getLogger().info("Создан файл префиксов: " + prefixConfig + " (правьте его и применяйте через /profile prefix reload)");
         }
-        packFolder = plugin.getDataFolder().toPath().resolve("prefixpacks");
+        packFolder = Layout.content(plugin, "prefixpacks");
         PrefixCatalog base = PrefixCatalog.defaults();
         try { base = PrefixCatalog.load(prefixConfig); }
         catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка prefixes.yml; используются стандартные префиксы", ex); }
@@ -197,10 +197,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         prefixes = base.withPacks(packs);
         plugin.getLogger().info("Префиксы профиля: " + prefixes.size() + " шт., файл " + prefixConfig
                 + ", паков " + packs.size());
-        cosmeticConfig = plugin.getDataFolder().toPath().resolve("cosmetics.yml");
-        cosmeticFolder = plugin.getDataFolder().toPath().resolve("cosmetics");
+        cosmeticConfig = Layout.settings(plugin, "cosmetics.yml");
+        cosmeticFolder = Layout.content(plugin, "cosmetics");
         if (!Files.exists(cosmeticConfig)) {
-            plugin.saveResource("cosmetics.yml", false);
+            plugin.saveResource("settings/cosmetics.yml", false);
             plugin.getLogger().info("Создан файл косметики: " + cosmeticConfig + " (правьте его и применяйте через /f8 reload)");
         }
         try { Files.createDirectories(cosmeticFolder); }
@@ -209,13 +209,13 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         try { loadedCosmetics = CosmeticCatalog.load(cosmeticConfig, cosmeticFolder); }
         catch (Exception ex) {
             plugin.getLogger().log(java.util.logging.Level.WARNING,
-                    "Ошибка cosmetics.yml или дополнительного файла; используется стандартная косметика", ex);
+                    "Ошибка settings/cosmetics.yml или дополнительного файла; используется стандартная косметика", ex);
         }
         cosmetics = loadedCosmetics;
         plugin.getLogger().info("Косметика профиля: " + cosmetics.size() + " шт., файлы " + cosmeticConfig
                 + " и " + cosmeticFolder + "/*.yml");
-        storage = new ProfileStorage(plugin.getDataFolder().toPath().resolve("profiles"),
-                plugin.getDataFolder().toPath().resolve("medals/players"), writer, plugin.getLogger(), medal -> medalSettings.migrate(medal));
+        storage = new ProfileStorage(Layout.data(plugin, "profiles"),
+                Layout.data(plugin, "medals/players"), writer, plugin.getLogger(), medal -> medalSettings.migrate(medal));
         ZoneId zone = ZoneId.systemDefault();
         String configuredZone = plugin.getConfig().getString("profiles.date-time-zone", "system");
         if (configuredZone != null && !configuredZone.equalsIgnoreCase("system")) {
@@ -245,7 +245,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     /**
-     * Паки префиксов: plugins/f8-plugin/prefixpacks/*.yml. Папка создаётся при
+     * Паки префиксов: plugins/f8-plugin/content/prefixpacks/*.yml. Папка создаётся при
      * первом запуске, и в неё кладётся тестовый пак pref-pack1 — по нему видно,
      * как писать свои.
      *
@@ -256,7 +256,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         try {
             if (!Files.isDirectory(packFolder)) {
                 Files.createDirectories(packFolder);
-                plugin.saveResource("prefixpacks/pref-pack1.yml", false);
+                plugin.saveResource("content/prefixpacks/pref-pack1.yml", false);
                 plugin.getLogger().info("Создан тестовый пак префиксов: " + packFolder.resolve("pref-pack1.yml"));
             }
             PrefixPackCatalog loaded = PrefixPackCatalog.load(packFolder, base,
@@ -327,7 +327,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     /**
-     * Съеден бутерброд: отмечаем вид навсегда и выдаём медали, заполненные в medals/config.yml.
+     * Съеден бутерброд: отмечаем вид навсегда и выдаём медали, заполненные в settings/medals.yml.
      * Запрет дубля — только пока медаль ЕСТЬ у игрока: изъятую (take/очистку) можно
      * получить заново следующим подходящим съеденным бутербродом.
      */
@@ -1646,7 +1646,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         if (args.length == 2 && args[0].equalsIgnoreCase("voice") && args[1].equalsIgnoreCase("reload")) {
             if (!admin(sender)) { sender.sendMessage("§cНет прав."); return true; }
             try { voice.reloadMessages(); sender.sendMessage("§aСообщения голосовых профилей перезагружены."); }
-            catch (Exception ex) { sender.sendMessage("§cНе удалось прочитать voice/config.yml."); }
+            catch (Exception ex) { sender.sendMessage("§cНе удалось прочитать settings/voice.yml."); }
             return true;
         }
         if (args.length > 0 && args[0].equalsIgnoreCase("clone")) {
@@ -1703,7 +1703,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     /**
      * Перечитать префиксы и паки с диска: и {@code prefixes.yml}, и
-     * {@code plugins/f8-plugin/prefixpacks/*.yml}. Этим же методом пользуется
+     * {@code plugins/f8-plugin/content/prefixpacks/*.yml}. Этим же методом пользуется
      * {@code /f8 reload}, чтобы префиксы обновлялись вместе с остальными
      * настройками плагина.
      *
@@ -2263,7 +2263,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             sender.sendMessage("§6/profile case pack list <ник> — сколько кейсов паков у игрока");
             sender.sendMessage("§6/profile cosmetic give|take <игрок> <номер|all> — выдать/забрать косметику по номеру или всю сразу");
             sender.sendMessage("§6/profile cosmetic list <игрок> — какая косметика есть у игрока");
-            sender.sendMessage("§6/profile cosmetic reload — перечитать cosmetics.yml");
+            sender.sendMessage("§6/profile cosmetic reload — перечитать settings/cosmetics.yml");
             sender.sendMessage("§7Префикс и косметика: /profile → «Настроить косметику». Файлы: §e" + prefixConfig + "§7, §e" + cosmeticConfig);
             sender.sendMessage("§7Номер префикса/косметики — это порядок записей в файле (№1 — первая запись).");
             sender.sendMessage("§7Имя ищется только в локальном кэше сервера; если игрок не найден, укажите UUID.");

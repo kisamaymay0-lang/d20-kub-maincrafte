@@ -16,10 +16,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Неизменяемые настройки оформления и сообщений из medals/config.yml. */
+/** Неизменяемые настройки оформления и сообщений из settings/medals.yml. */
 final class MedalSettings {
     record Style(String label, String rarity, TextColor end) { }
-    /** Автоматическая медаль из medals/config.yml: пустые название/заслуги отключают выдачу. */
+    /** Автоматическая медаль из settings/medals.yml: пустые название/заслуги отключают выдачу. */
     record SandwichSpec(ProfileMedal.Metal metal, String title, List<String> reasons, boolean filled) {
         static SandwichSpec disabled(ProfileMedal.Metal metal) { return new SandwichSpec(metal, "", List.of(), false); }
     }

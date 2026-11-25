@@ -45,7 +45,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -72,14 +71,15 @@ import java.util.UUID;
  */
 public class ConstellationManager implements Listener, CommandExecutor {
 
-    /** Мягкая звезда из пака: точка с ореолом, а не золотая наклейка. */
-    private static final String DEFAULT_STAR_MODEL = "f8resurs:item/star_soft";
+    /** Звезда из пака — та самая star.png/star.json. */
+    private static final String DEFAULT_STAR_MODEL = "f8resurs:star";
     /**
-     * Модель, которую писали в constellations.yml прошлые сборки. Ключ без
-     * {@code item/} — так его записывал createExampleFile.
+     * Написания, которыми эта же звезда звалась в прошлых сборках: путь с
+     * {@code item/} и мягкая {@code star_soft} из позапрошлого обновления.
+     * Все они ведут к одной модели, поэтому созвездия читаются без правки
+     * файлов, а невидимых звёзд не остаётся.
      */
-    private static final Set<String> LEGACY_STAR_MODELS = Set.of(
-            "f8resurs:star", "f8resurs:item/star");
+    private static final Set<String> STAR_ALIASES = Set.of("star", "item/star", "star_soft", "item/star_soft");
     /**
      * Старый радиус сферы. Звезда в 2 блока на 80 блоках — это 1.4°:
      * столько занимает ноготь на вытянутой руке, отсюда и «они рядом».
@@ -229,14 +229,14 @@ public class ConstellationManager implements Listener, CommandExecutor {
         this.profiles = profiles;
 
         this.constellationsDir =
-                new File(plugin.getDataFolder(), "constellations");
+                Layout.data(plugin, "constellations").toFile();
 
         if (!constellationsDir.exists()) {
             constellationsDir.mkdirs();
         }
 
         this.playerDataFile =
-                new File(plugin.getDataFolder(), "playerdata.yml");
+                Layout.data(plugin, "playerdata.yml").toFile();
 
         this.playerData =
                 YamlConfiguration.loadConfiguration(playerDataFile);
@@ -288,7 +288,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 legacyLookNoted = true;
                 plugin.getLogger().info("Созвездия: старый вид звёзд (render-distance 80) заменён на "
                         + DEFAULT_RENDER_DISTANCE + " — звёзды стали мельче и читаются как далёкие. "
-                        + "Вернуть как было: constellations.render-distance: 80 в config.yml.");
+                        + "Вернуть как было: constellations.render-distance: 80 в settings/sky.yml.");
             }
         }
 
@@ -296,14 +296,19 @@ public class ConstellationManager implements Listener, CommandExecutor {
         starSize = scale;
         lineWidth = width;
         tolerance = Math.min(45.0, positiveSetting("click-tolerance-degrees", 2.0));
-        double speed = plugin.getConfig().getDouble("constellations.star-rotation-degrees-per-second", 4.0);
-        rotationSpeed = Double.isFinite(speed) ? Math.clamp(speed, -90.0, 90.0) : 4.0;
+        // По умолчанию звёзды не крутятся вокруг своей оси и небо не вращается:
+        // единственное движение — мерцание. Оба ключа ниже включают вращение обратно.
+        double speed = plugin.getConfig().getDouble("constellations.star-rotation-degrees-per-second", 0.0);
+        rotationSpeed = Double.isFinite(speed) ? Math.clamp(speed, -90.0, 90.0) : 0.0;
         fadeTicks = Math.clamp(plugin.getConfig().getInt("constellations.fade-duration-ticks", 40), 1, 200);
-        // Клиентская инерция телепорта убрана: небо приклеено к глазам ровно,
-        // а не догоняет их на тик позже. Именно это «плыло» при ходьбе и полёте.
-        followInterpolationTicks = 0;
-        double orbit = plugin.getConfig().getDouble("constellations.sky-rotation-degrees-per-second", 0.15);
-        orbitSpeed = Double.isFinite(orbit) ? Math.clamp(orbit, -2.0, 2.0) : 0.15;
+        // Позиция сферы уходит клиенту каждый тик, но жёсткой подмены нет:
+        // клиент дорисовывает переход за follow-interpolation-ticks тиков.
+        // 0 — прежнее «приклеено в упор» (видны шаги 20 раз в секунду),
+        // 1..3 — небо идёт за глазами без рывков. Больше 3 уже опаздывает.
+        followInterpolationTicks = followInterpolationTicks(
+                plugin.getConfig().getInt("constellations.follow-interpolation-ticks", 2));
+        double orbit = plugin.getConfig().getDouble("constellations.sky-rotation-degrees-per-second", 0.0);
+        orbitSpeed = Double.isFinite(orbit) ? Math.clamp(orbit, -2.0, 2.0) : 0.0;
         depthMultiplier = Math.clamp(positiveSetting("sky-depth-multiplier", 3.0), 1.0, 8.0);
         depthFill = Math.clamp(positiveSetting("depth-fill", 0.95), 0.5, 1.0);
         int interval = Math.clamp(plugin.getConfig().getInt("constellations.rotation-update-ticks", 4), 2, 20);
@@ -790,48 +795,62 @@ public class ConstellationManager implements Listener, CommandExecutor {
                 && SkyGeometry.isNight(player.getWorld().getTime());
     }
 
+    /**
+     * Звезда — тот же предмет пака, что и раньше: {@code f8resurs:star}
+     * (star.png + star.json). Своя модель у созвездия остаётся возможной:
+     * {@code star-model} в его файле, старый ключ {@code f8resurs:item/star}
+     * указывает на ту же модель и не ломает созвездия прошлых сборок.
+     */
     private ItemStack starItem(Constellation c) {
         ItemStack item = new ItemStack(Material.PAPER);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            NamespacedKey key = NamespacedKey.fromString(starModelFor(c));
-            meta.setItemModel(key == null ? new NamespacedKey("f8resurs", "item/star_soft") : key);
+            meta.setItemModel(starModelKey(c.starModel));
             item.setItemMeta(meta);
         }
         return item;
     }
 
-    /**
-     * Какая модель рисует звезду. В constellations.yml у каждого созвездия
-     * своё {@code star-model}; если там осталась наша прошлая по умолчанию
-     * {@code f8resurs:star}, берём значение из config.yml —
-     * {@code constellations.star-model}. Так вид меняется без правки данных
-     * игроков, и вернуть старую звезду можно одной строкой в config.yml.
-     */
-    private String starModelFor(Constellation c) {
-        String configured = plugin.getConfig().getString("constellations.star-model", DEFAULT_STAR_MODEL);
+    static NamespacedKey starModelKey(String configured0) {
+        String configured = configured0 == null || configured0.isBlank() ? DEFAULT_STAR_MODEL : configured0;
+        NamespacedKey key = NamespacedKey.fromString(configured);
 
-        if (configured == null || configured.isBlank()) {
-            return c.starModel == null ? DEFAULT_STAR_MODEL : c.starModel;
+        if (key == null) {
+            return new NamespacedKey("f8resurs", "star");
         }
 
-        if (c.starModel == null || LEGACY_STAR_MODELS.contains(c.starModel.toLowerCase(Locale.ROOT))) {
-            return configured;
+        // f8resurs:item/star и f8resurs:star_soft — всё та же звезда из пака.
+        if ("f8resurs".equals(key.getNamespace()) && STAR_ALIASES.contains(key.getKey())) {
+            return new NamespacedKey("f8resurs", "star");
         }
-
-        return c.starModel;
+        return key;
     }
 
-    private void configureDisplay(ItemDisplay display) {
+    private void configureDisplay(ItemDisplay display, float depth) {
         display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.NONE);
         display.setBillboard(Display.Billboard.FIXED);
-        display.setTeleportDuration(followInterpolationTicks);  // 0: небо жёстко приклеено к глазам
+        // Клиент плавно переводит сферу на новую позицию, а не ставит её рывком.
+        display.setTeleportDuration(followInterpolationTicks);
         display.setInterpolationDuration(0);
         display.setShadowRadius(0f);
         display.setShadowStrength(0f);
-        display.setViewRange(160f);
+        // Дальность отрисовки считается от сущности, а не от картинки звезды:
+        // слишком маленькая рамка обрезала бы крайние звёзды сферы.
+        display.setViewRange(viewRangeFor(radius * depth));
         display.setPersistent(false);
         display.setVisibleByDefault(false);
+    }
+
+    /** Рамка отрисовки: сфера целиком, но не больше 512 блоков. */
+    static float viewRangeFor(double sphereRadius) {
+        double needed = (Double.isFinite(sphereRadius) && sphereRadius > 0 ? sphereRadius : 0) + 32.0;
+
+        return (float) Math.clamp(Math.max(160.0, needed), 160.0, 512.0);
+    }
+
+    /** Сколько тиков клиент дорисовывает переход сферы: 0..10, по умолчанию 2. */
+    static int followInterpolationTicks(int configured) {
+        return Math.clamp(configured, 0, 10);
     }
 
     private void ensureStars(Player player) {
@@ -843,7 +862,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
             StarTemplate template = entry.getValue();
             try {
                 ItemDisplay display = player.getWorld().spawn(view.anchor, ItemDisplay.class, e -> {
-                    configureDisplay(e);
+                    configureDisplay(e, view.depthScale);
                     e.setItemStack(template.item);
                     e.setTransformation(template.transform(starScale() * Math.max(0.0001f, appearance),
                             view.depthScale, template.sparkle(Bukkit.getCurrentTick() / 20.0)));
@@ -890,7 +909,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
     private ItemDisplay spawnLine(Player player, PlayerView view, BeamTemplate template, boolean preview) {
         try {
             ItemDisplay display = player.getWorld().spawn(view.anchor, ItemDisplay.class, e -> {
-                configureDisplay(e);
+                configureDisplay(e, view.depthScale);
                 e.setItemStack(preview ? previewBeamItem : solidBeamItem);
                 e.setBrightness(LIGHTS[15]);
                 e.setTransformation(template.transform(Math.max(0.0001f, (float) view.fade.value()), orbitRotation, view.depthScale));
@@ -1377,7 +1396,7 @@ public class ConstellationManager implements Listener, CommandExecutor {
         s.sendMessage(ChatColor.WHITE + "/stars give <игрок> — выдать подзорную трубу");
     }
 
-    /** Перечитать настройки неба из config.yml (используется /f8 reload и /stars reload). */
+    /** Перечитать настройки неба из settings/sky.yml (используется /f8 reload и /stars reload). */
     public void reloadSettings() {
         reloadAll();
     }

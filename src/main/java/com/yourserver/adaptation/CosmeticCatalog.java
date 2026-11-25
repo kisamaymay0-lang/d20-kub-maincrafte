@@ -15,7 +15,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 /**
- * Неизменяемый список косметики из cosmetics.yml и дополнительных
+ * Неизменяемый список косметики из settings/cosmetics.yml и дополнительных
  * {@code cosmetics/*.yml}. Устройство ровно как у {@link PrefixCatalog}:
  * порядок записей в конфиге задаёт «номер» косметики
  * (1, 2, 3, …), по нему косметику выдают и забирают командой.

@@ -15,7 +15,7 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
- * Паки префиксов: по файлу на пак в {@code plugins/f8-plugin/prefixpacks/}.
+ * Паки префиксов: по файлу на пак в {@code plugins/f8-plugin/content/prefixpacks/}.
  *
  * <h2>Что такое пак</h2>
  *
@@ -26,13 +26,13 @@ import java.util.stream.Stream;
  * <h2>Файл пака</h2>
  *
  * Пак перечисляет только файлы префиксов, а имена и цвета берёт из
- * {@code prefixes.yml} — по полю {@code file}:
+ * {@code settings/prefixes.yml} — по полю {@code file}:
  *
  * <pre>
  * name: 'Тестовый пак'        # название на сундучке
  * time-hours: 24              # срок кейса в часах с момента выдачи; -1 — бессрочный
- * prefixes:                   # файлы префиксов из prefixes.yml
- *   - pref1                   # имя и цвет возьмутся из prefixes.yml
+ * prefixes:                   # файлы префиксов из settings/prefixes.yml
+ *   - pref1                   # имя и цвет возьмутся из settings/prefixes.yml
  *   - file: pref9             # тот же вид, но полем
  *   - file: pref3             # имя и цвет можно переопределить на месте
  *     name: 'Своё имя'
@@ -41,10 +41,10 @@ import java.util.stream.Stream;
  *
  * <h2>Откуда берутся id</h2>
  *
- * Если файл найден в {@code prefixes.yml}, префикс пака — это тот же префикс:
+ * Если файл найден в {@code settings/prefixes.yml}, префикс пака — это тот же префикс:
  * тот же id, имя, цвет и номер. Так один и тот же префикс не появляется дважды
  * (своим и из пака), а выданный префикс не теряется. Если файла в
- * {@code prefixes.yml} нет, пак заводит свой префикс: id собирается из имени
+ * {@code settings/prefixes.yml} нет, пак заводит свой префикс: id собирается из имени
  * пака и файла ({@code pref-pack1_pref1}) или берётся из поля {@code id}, если
  * оно написано руками, а имя — из поля {@code name} или из самого файла; в
  * журнал при этом уходит предупреждение.
@@ -117,7 +117,7 @@ final class PrefixPackCatalog {
 
     /**
      * Прочитать все {@code *.yml} из папки. Имена и цвета префиксов паков
-     * берутся из {@code base} ({@code prefixes.yml}) по файлу иконки; всё, чего
+     * берутся из {@code base} ({@code settings/prefixes.yml}) по файлу иконки; всё, чего
      * в нём нет, сообщается в {@code warn} (обычно — журнал плагина).
      */
     static PrefixPackCatalog load(Path folder, PrefixCatalog base, Consumer<String> warn) {
@@ -175,14 +175,14 @@ final class PrefixPackCatalog {
             String finalName;
             String finalColor;
             if (known != null) {
-                // Файл есть в prefixes.yml: префикс пака — тот же префикс.
+                // Файл есть в settings/prefixes.yml: префикс пака — тот же префикс.
                 finalId = entryId.isEmpty() ? known.id() : entryId;
                 finalName = entryName.isEmpty() ? known.name() : entryName;
                 finalColor = entryColor.isEmpty() ? known.color().asHexString() : entryColor;
             } else {
                 if (warn != null) {
                     warn.accept("Пак " + id + ": файл префикса «" + entryFile
-                            + "» не найден в prefixes.yml — имя взято из файла, добавьте префикс в prefixes.yml");
+                            + "» не найден в settings/prefixes.yml — имя взято из файла, добавьте префикс в settings/prefixes.yml");
                 }
                 finalId = entryId.isEmpty() ? sanitize(id + "_" + entryFile) : entryId;
                 finalName = entryName.isEmpty() ? entryFile : entryName;

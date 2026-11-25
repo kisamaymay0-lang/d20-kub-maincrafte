@@ -78,7 +78,7 @@ import java.util.UUID;
  * на любую грань, хоть в воздухе), а блок-носитель — **стекло**: пустой
  * кувшин это простое стекло, налитый — фиолетовое крашеное стекло, по нему
  * ресурспак выбирает модель. Содержимое при этом хранится только в
- * {@code plugins/f8-plugin/jugs.yml}: блок — метка места, а не хранилище, и
+ * {@code plugins/f8-plugin/data/jugs.yml}: блок — метка места, а не хранилище, и
  * состояние блока от содержимого не зависит вовсе. Сбить материал отладкой или
  * поршнем нельзя — канонический блок возвращается каждый тик.
  *
@@ -248,7 +248,7 @@ public class AncientJug implements Listener {
         countKey = new NamespacedKey(plugin, "jug_count");
         customKey = new NamespacedKey(plugin, "jug_custom");
         infuseKey = new NamespacedKey(plugin, "potion_infused");
-        jugsFile = new File(plugin.getDataFolder(), "jugs.yml");
+        jugsFile = Layout.data(plugin, "jugs.yml").toFile();
         jugsData = YamlConfiguration.loadConfiguration(jugsFile);
         storage = new BatchedYamlFile(plugin, writer, jugsFile.toPath(), () -> jugsData.saveToString());
         loadInfusions();

@@ -16,7 +16,7 @@ class BiomePatternsTest {
             "minecraft:desert", "minecraft:badlands",
             "minecraft:eroded_badlands", "minecraft:wooded_badlands"
     };
-    /** Строки из config.yml → fishing.special-items. */
+    /** Строки из settings/fishing.yml → fishing.special-items. */
     private static final String[] DESERT_PATTERNS = {"*:*desert*", "*:*badlands*"};
     private static final String[] COLD_PATTERNS = {
             "*:snowy*", "*:*frozen*", "*:ice_spikes", "*:grove", "*:jagged_peaks"

@@ -60,7 +60,7 @@ final class CrownPet implements Listener {
     private static final String DEFAULT_MODEL = "f8resurs:pet-2";
     private static final float HITBOX_WIDTH = 0.4f;
     private static final float HITBOX_HEIGHT = 0.4f;
-    /** Низ модели всегда чуть выше макушки игрока (можно поправить в config.yml). */
+    /** Низ модели всегда чуть выше макушки игрока (можно поправить в settings/pets.yml). */
     private static final double DEFAULT_CROWN_GAP = 0.35D;
     /** Плавное отставание: доля пути к цели за тик. */
     private static final double HOVER_FOLLOW = 0.32D;
@@ -109,7 +109,7 @@ final class CrownPet implements Listener {
     private static final int CHAT_FOLLOW_UP_LIFETIME_TICKS = 60;
     private static final int MIN_INTERPOLATION_TICKS = 3;
     private static final int MAX_INTERPOLATION_TICKS = 8;
-    /** Высота и размер реплик берутся из config.yml (pets.speech.pet-2-*). */
+    /** Высота и размер реплик берутся из settings/pets.yml (pets.speech.pet-2-*). */
     private static final double DEFAULT_SPEECH_HEIGHT = 0.45D;
     private static final float DEFAULT_SPEECH_SCALE = 0.5f;
     /** След: цвет #ef3059, одна плавно падающая частица в секунду. */
@@ -162,7 +162,7 @@ final class CrownPet implements Listener {
         reloadSettings();
     }
 
-    /** /f8 reload: модель можно поменять в config.yml без перезапуска. */
+    /** /f8 reload: модель можно поменять в settings/pets.yml без перезапуска. */
     void reloadSettings() {
         NamespacedKey parsed = parseModel(plugin.getConfig().getString("pets.crown-model", DEFAULT_MODEL));
         modelKey = parsed != null ? parsed : parseModel(DEFAULT_MODEL);

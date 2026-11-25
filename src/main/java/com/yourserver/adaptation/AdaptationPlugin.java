@@ -9,6 +9,7 @@ import org.bukkit.Color;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -42,6 +43,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private final Map<UUID, Double> activeMaxTimes = new HashMap<>();
 
     private final Map<UUID, Long> cooldownEndTimes = new HashMap<>();
+
+    /** Все файлы settings/ как один конфиг — см. {@link PluginSettings}. */
+    private final PluginSettings settings = new PluginSettings(this);
 
     private AsyncTextWriter dataWriter;
     private DiceRollListener diceRollListener;
@@ -82,10 +86,14 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
 
 @Override
 public void onEnable() {
-    saveDefaultConfig();
+    // Раскладка папки: настройки в settings/, контент в content/, данные в data/.
+    // Переезд идёт до ConfigSync, иначе комплект занял бы места старых файлов.
+    // Прежний общий config.yml уходит в config.yml.old — значения можно посмотреть.
+    Layout.migrateLegacy(this);
     // Файлы настроек держим полными: чего в них нет — дописываем из комплекта (значения владельца
     // не трогаем), сломанный файл уходит в копию и заменяется новым.
     ConfigSync.sync(this);
+    settings.reload();
     dataWriter = new AsyncTextWriter(getLogger());
 
     getServer().getPluginManager().registerEvents(
@@ -334,7 +342,7 @@ public void onEnable() {
     }
 
     /**
-     * Перечитать config.yml и настройки подсистем (/f8 reload).
+     * Перечитать settings/*.yml и настройки подсистем (/f8 reload).
      * Настройки миниигры и кувшина читаются на ходу, поэтому им reload не нужен;
      * созвездия и зацеп изморози держат копию настроек в памяти — их просим перечитаться.
      * Префиксы, косметика и паки живут в своих файлах, поэтому их тоже перечитываем:
@@ -344,6 +352,33 @@ public void onEnable() {
     /** Посуда RP Engine: нужна /f8 rp и шейкеру. */
     ShotGlass shotGlass() {
         return shotGlass;
+    }
+
+    /**
+     * Настройки плагина — одно дерево из файлов {@code settings/*.yml}.
+     *
+     * <p>Код по-прежнему спрашивает {@code getConfig().getInt("pets.speech.player-scale")}:
+     * пути те же, что были в прежнем общем config.yml, но искать их по одному файлу на двести строк
+     * больше не нужно. Файлы склеиваются в {@link PluginSettings}.
+     */
+    @Override
+    public FileConfiguration getConfig() {
+        return settings.current();
+    }
+
+    /** Перечитать {@code settings/} целиком. Так делает /f8 reload и /stars reload. */
+    @Override
+    public void reloadConfig() {
+        settings.reload();
+    }
+
+    /**
+     * Перезапись настроек из памяти не нужна: файлы ведёт {@link ConfigSync}, а обычное
+     * сохранение Bukkit потеряло бы все комментарии.
+     */
+    @Override
+    public void saveConfig() {
+        // намеренно пусто
     }
 
     public String reloadPluginSettings() {

@@ -79,15 +79,25 @@ public class F8Command implements CommandExecutor, Listener {
             String label,
             String[] args
     ) {
-        // /f8 reload — перечитать config.yml (доступно и из консоли).
+        // /f8 reload — перечитать settings/*.yml (доступно и из консоли).
         if (args.length > 0 && args[0].equalsIgnoreCase("reload")) {
             if (!sender.hasPermission("f8.admin")) {
                 sender.sendMessage("§cНедостаточно прав.");
                 return true;
             }
             String summary = plugin.reloadPluginSettings();
-            sender.sendMessage("§aНастройки f8-plugin перечитаны из config.yml.");
+            sender.sendMessage("§aНастройки f8-plugin перечитаны из settings/*.yml.");
             if (summary != null && !summary.isBlank()) sender.sendMessage(summary);
+            return true;
+        }
+
+        // /f8 config — где что лежит: settings/, content/, data/.
+        if (args.length > 0 && args[0].equalsIgnoreCase("config")) {
+            if (!sender.hasPermission("f8.admin")) {
+                sender.sendMessage("§cНедостаточно прав.");
+                return true;
+            }
+            for (String line : Layout.describe(plugin)) sender.sendMessage(line);
             return true;
         }
 
@@ -205,7 +215,8 @@ public class F8Command implements CommandExecutor, Listener {
         }
 
         if (!(sender instanceof Player player)) {
-            sender.sendMessage("§7Использование: /f8 reload — перечитать config.yml, косметику и новые YAML-файлы");
+            sender.sendMessage("§7Использование: /f8 reload — перечитать settings/*.yml, косметику и новые YAML-файлы");
+            sender.sendMessage("§7             /f8 config — где что лежит и что не на месте");
             return true;
         }
 

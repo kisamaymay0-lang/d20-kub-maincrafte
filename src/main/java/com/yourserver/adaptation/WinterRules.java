@@ -24,7 +24,7 @@ final class WinterRules {
     static final double MIN_FALL_CLEARANCE = 1.5;      // mechanics.min_fall_distance (только для ПКМ)
     static final double MAX_DRIFT = 1.5;               // mechanics.max_drift
     static final int HANG_TICKS = 200;                 // pickaxes.diamond_pickaxe.hang_time = 10 с;
-                                                       // в config.yml по умолчанию 0 — держит без ограничения
+                                                       // в settings/gouge.yml по умолчанию 0 — держит без ограничения
     static final int SOFT_FALL_GRACE_TICKS = 5;        // окно после скольжения по мягкому блоку
     static final int GRIP_HOLD_GRACE_TICKS = 8;        // зацеп держится, пока зажата ПКМ: тишина дольше — отпускаем
                                                        // (клиент повторяет отклик каждые 4 тика, 8 = запас на лаг)
@@ -48,7 +48,7 @@ final class WinterRules {
        Присед включает режим дрифта: скорость падает ровно на slide-drift-deceleration за тик
        до «ползущей» скорости, а на ней изморозь держит — оттуда можно прыгнуть вверх
        (см. slideDrift и atSlideFloor). */
-    /** Версия чисел зацепа в config.yml: по ней видно, что файл обновлён под дрифт
+    /** Версия чисел зацепа в settings/gouge.yml: по ней видно, что файл обновлён под дрифт
      *  и режим дрифта шифтом (в старом файле лежат прежние числа — они не применяются). */
     static final double SLIDE_ENTRY_SPEED = 1.5;             // предел скорости входа: её даёт высота падения
     static final double SLIDE_MIN_ENTRY_SPEED = 0.7;         // и её минимум: дрифт начинается даже с двух блоков

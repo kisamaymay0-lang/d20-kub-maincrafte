@@ -79,7 +79,7 @@ final class WinterMovement implements Listener {
     /** Зацеп: SLIDE — скольжение по стене, HOLD — присед держит игрока на месте. */
     private enum Grip { NONE, SLIDE, HOLD }
 
-    /** Настройки механики из config.yml; по умолчанию — значения gouge.toml. */
+    /** Настройки механики из settings/gouge.yml; по умолчанию — значения gouge.toml. */
     private record Tuning(double reach, double clearance, double drift, int hangTicks, int slideCooldownTicks,
                           int holdGraceTicks,
                           double jumpForward, double jumpUp,
@@ -161,12 +161,12 @@ final class WinterMovement implements Listener {
 
     private static Tuning tuning(JavaPlugin plugin) {
         var config = plugin.getConfig();
-        // Старый config.yml хранит прежние, резкие числа скольжения: если файл не помечен
+        // Прежний общий config.yml хранил резкие числа скольжения: если файл не помечен
         // актуальной версией, берём новые значения из кода, иначе владелец не увидит дрифта.
         boolean current = config.getInt("gouge.config-version", 0) >= WinterRules.GOUGE_CONFIG_VERSION;
         if (!current) {
             plugin.getLogger().info("Числа зацепа изморози взяты из новой версии (плавный дрифт): "
-                    + "в config.yml нет gouge.config-version " + WinterRules.GOUGE_CONFIG_VERSION
+                    + "в settings/gouge.yml нет gouge.config-version " + WinterRules.GOUGE_CONFIG_VERSION
                     + ". Чтобы правки в файле применялись, добавьте эту строку в секцию gouge.");
         }
         return new Tuning(
@@ -199,7 +199,7 @@ final class WinterMovement implements Listener {
                 materials(plugin, "gouge.always-soft"));
     }
 
-    /** Число скольжения из config.yml: у старого файла значения прежние и резкие,
+    /** Число скольжения из settings/gouge.yml: у старого файла значения прежние и резкие,
      *  поэтому такие ключи игнорируются в пользу новых из WinterRules. */
     private static double fresh(boolean current, org.bukkit.configuration.file.FileConfiguration config,
             String path, double fallback) {
@@ -357,7 +357,7 @@ final class WinterMovement implements Listener {
     }
 
     /** Твёрдый блок — тот, что требует верный инструмент для дропа, как в Gouge.
-     *  Списки в config.yml переопределяют это правило для любых блоков. */
+     *  Списки в settings/gouge.yml переопределяют это правило для любых блоков. */
     private boolean hard(Block block) {
         Material type = block.getType();
         if (tuning.alwaysHard().contains(type)) return true;

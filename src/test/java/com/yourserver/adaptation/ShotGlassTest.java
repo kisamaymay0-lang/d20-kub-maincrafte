@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** id рюмок из config.yml приводятся к «namespace:path» так же, как их пишет RP Engine. */
+/** id рюмок из settings/drinks.yml приводятся к «namespace:path» так же, как их пишет RP Engine. */
 final class ShotGlassTest {
 
     @Test
@@ -55,7 +55,7 @@ final class ShotGlassTest {
     @Test
     void старыйIdНеОсталсяВСпискеПоУмолчанию() {
         // ConfigSync не переписывает значения владельца, поэтому старый
-        // testpack:statue у кого-то так и лежит в config.yml — он должен
+        // testpack:statue у кого-то так и лежит в settings/drinks.yml — он должен
         // отбрасываться, а не подмешиваться к посуде.
         for (String id : ShotGlass.DEFAULT_MODELS) {
             assertFalse(ShotGlass.LEGACY_MODELS.contains(id), id + " не должен быть старым id");

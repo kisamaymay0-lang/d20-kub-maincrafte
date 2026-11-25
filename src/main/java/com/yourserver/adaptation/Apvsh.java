@@ -125,7 +125,7 @@ public final class Apvsh implements Listener {
     public Apvsh(JavaPlugin plugin, AsyncTextWriter dataWriter) {
         this.plugin = plugin;
         this.apvshBlockKey = new NamespacedKey(plugin, "apvsh_block");
-        this.configFile = new File(plugin.getDataFolder(), "apvsh.yml");
+        this.configFile = Layout.data(plugin, "apvsh.yml").toFile();
 
         if (!configFile.exists()) {
             try {

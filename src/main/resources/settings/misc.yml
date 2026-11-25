@@ -1,0 +1,5 @@
+# Сигарета: зависимость в тиках. Для теста: first-stage 200, interval 80.
+cigarette:
+  addiction:
+    first-stage-ticks: 24000
+    interval-ticks: 4800

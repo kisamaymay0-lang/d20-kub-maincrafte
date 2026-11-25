@@ -39,7 +39,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Миниигра особого предмета биома.
  *
- * При улове с небольшим шансом (config.yml → fishing.special-item-chance-percent)
+ * При улове с небольшим шансом (settings/fishing.yml → fishing.special-item-chance-percent)
  * вместо обычной рыбы сразу начинается охота на особый предмет биома: обычный
  * улов убирается, предмет выпрыгивает из воды и летает вокруг игрока.
  *

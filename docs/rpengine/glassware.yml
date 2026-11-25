@@ -5,7 +5,7 @@
 #     на её месте появляется бутылочка с напитком;
 #   • с посудой в руке напиток забирают из открытого шейкера так же, как пустой
 #     стеклянной бутылочкой (посуда при этом расходуется).
-# Оба поведения включаются одним списком id в config.yml плагина:
+# Оба поведения включаются одним списком id в settings/drinks.yml плагина:
 #   shaker:
 #     glass-models: [ testpack:stakan, testpack:bokal, testpack:ryumka ]
 #
@@ -26,7 +26,7 @@
 #     (можно и полным ресурс-локейшеном, как здесь).
 #
 # id предмета = «папка пака : ключ» = testpack:stakan, testpack:bokal, testpack:ryumka.
-# Эти же id стоят в config.yml плагина, ключ shaker.glass-models.
+# Эти же id стоят в settings/drinks.yml плагина, ключ shaker.glass-models.
 
 stakan:
   material: PAPER

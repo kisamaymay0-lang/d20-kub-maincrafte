@@ -29,7 +29,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public class PetManager implements Listener {
 
-    /** Модели по умолчанию; сервер может переопределить их в config.yml (pets.test-models). */
+    /** Модели по умолчанию; сервер может переопределить их в settings/pets.yml (pets.test-models). */
     private static final String[] DEFAULT_PET_MODELS = {"f8resurs:test-pets", "f8resurs:test-pets2"};
     /** Раз в секунду тестовый питомец меняет модель из списка. */
     private static final int MODEL_SWITCH_TICKS = 20;
@@ -53,7 +53,7 @@ public class PetManager implements Listener {
     private static final int HELP_GAZE_DELAY_TICKS = 60;
     /** Сколько живёт надпись вместе с появлением и затуханием. */
     private static final int HELP_VISIBLE_TICKS = 80;
-    /** Высота и размер реплик берутся из config.yml (pets.speech.*). */
+    /** Высота и размер реплик берутся из settings/pets.yml (pets.speech.*). */
     private static final double DEFAULT_SPEECH_HEIGHT = 0.45D;
     private static final float DEFAULT_SPEECH_SCALE = 0.5f;
     private static final String HELP_TEXT = "Могу ли я чем нибудь тебе помочь?";

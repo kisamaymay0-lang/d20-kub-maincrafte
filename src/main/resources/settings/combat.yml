@@ -1,0 +1,31 @@
+# Бой и защита: сколько «адаптация» держится, сколько ударов нужно и как работает откат.
+# После правок: /f8 reload.
+
+settings:
+  normal-protection-per-piece: 0.075
+  super-protection-per-piece: 0.125
+  penalty-per-piece: 0.10
+  super-penalty-per-piece: 0.125
+  hit-bonus-normal: 0.2          # секунды за удар
+  hit-bonus-super: 0.4
+  duration-normal: 10
+  duration-super: 4
+  cooldown-normal: 2
+  cooldown-super: 4
+  damage-interval-normal-ms: 450        # минимум между засчитанными ударами, мс (50 мс = 1 тик)
+  damage-interval-environment-ms: 2000  # огонь/лава/удушье — реже, иначе адаптация заполняется мгновенно
+  required-hits:
+    lvl1: 10
+    lvl2: 8
+    lvl3: 6
+  required-super-hits: 8
+
+# Чар «Откат I».
+rollback:
+  history-seconds: 5             # на сколько секунд назад откатывает
+  save-interval-ticks: 10        # период записи позиций (20 тиков = 1 с)
+  effects:
+    blindness-duration: 40       # в тиках
+    slowness-duration: 60
+    slowness-level: 1
+    confusion-duration: 60

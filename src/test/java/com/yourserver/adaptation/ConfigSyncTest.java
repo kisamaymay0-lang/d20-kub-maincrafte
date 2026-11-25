@@ -1,5 +1,6 @@
 package com.yourserver.adaptation;
 
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
@@ -8,7 +9,9 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,8 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Полный файл настроек при запуске: чего в файле владельца нет — дописывается из комплекта,
  * значения владельца и его комментарии остаются на месте, повторный проход ничего не меняет.
  *
- * Здесь же проверяется поставляемый config.yml: он должен сам читаться и содержать все ключи,
- * которые читает код, — иначе «полный конфиг» остался бы неполным.
+ * Здесь же проверяются поставляемые settings/*.yml: они должны сами читаться и вместе
+ * содержать все ключи, которые читает код, — иначе «полный конфиг» остался бы неполным.
  */
 class ConfigSyncTest {
 
@@ -203,33 +206,36 @@ class ConfigSyncTest {
     }
 
     @Test
-    void shippedConfigIsCompleteAndSurvivesAnOldFile() throws IOException {
-        String defaults = shipped("config.yml");
-        YamlConfiguration full = parse(defaults);
+    void shippedSettingsAreCompleteAndAnOldFileSurvives() throws IOException {
+        // Раскладка: настройки лежат по темам, но вместе обязаны покрыть все ключи,
+        // которые читает код, — иначе /f8 reload подставит значения по умолчанию.
+        YamlConfiguration full = parse(shippedMerged());
         Set<String> everyKey = full.getKeys(true);
 
-        // Ключи, которые читает код: если хоть одного не будет в комплекте, «полный конфиг»
-        // окажется неполным — этот список и есть проверка.
         for (String key : List.of("settings.required-hits.lvl1", "settings.damage-interval-normal-ms",
                 "rollback.history-seconds", "rollback.effects.slowness-duration",
                 "caviar.chance-percent", "constellations.sky-rotation-degrees-per-second",
-                "constellations.render-distance", "constellations.depth-fill", "profiles.date-time-zone",
+                "constellations.render-distance", "constellations.depth-fill",
+                "constellations.follow-interpolation-ticks", "profiles.date-time-zone",
                 "profiles.overhead-tags",
                 "gouge.config-version", "gouge.hold-grace-ticks", "gouge.reach",
                 "gouge.slide.hard-friction", "gouge.slide.drift-deceleration",
                 "gouge.slide-durability.per-block", "gouge.wall-jump.upward-boost",
                 "fishing.special-item-chance-percent", "fishing.special-minigame.hit-radius",
                 "fishing.special-minigame.ping-compensation", "fishing.crab-claw.reach-blocks",
-                "fishing.crab-claw.wear-per-block")) {
-            assertTrue(everyKey.contains(key), "в config.yml нет ключа " + key);
+                "fishing.crab-claw.wear-per-block",
+                "pets.speech.player-scale", "pets.crown-gap", "cat-battles.chance-per-tick",
+                "copper-note-block.oxidation-minutes", "shaker.glass-models",
+                "bamboo_barrel.ticks_per_year", "cigarette.addiction.first-stage-ticks")) {
+            assertTrue(everyKey.contains(key), "в settings/ нет ключа " + key);
         }
 
-        // «Старый файл»: нет раздела gouge, нет подраздела special-minigame, значение владельца другое.
+        // Старый файл: в fishing.yml нет подраздела special-minigame, значение владельца другое.
+        String defaults = shipped("settings/fishing.yml");
         List<String> lines = ConfigSync.linesOf(defaults);
         var blocks = ConfigSync.blocks(lines);
         StringBuilder old = new StringBuilder();
         for (int i = 0; i < lines.size(); i++) {
-            if (i >= blocks.get("gouge").start() && i < blocks.get("gouge").end()) continue;
             if (i >= blocks.get("fishing.special-minigame").start()
                     && i < blocks.get("fishing.special-minigame").end()) continue;
             old.append(lines.get(i)).append('\n');
@@ -237,24 +243,63 @@ class ConfigSyncTest {
         String oldText = old.toString().replace("special-item-chance-percent: 5", "special-item-chance-percent: 42");
         assertTrue(oldText.contains("42"));
 
-        String result = ConfigSync.topUp(oldText, defaults, ConfigSync.missing(full, parse(oldText)));
+        String result = ConfigSync.topUp(oldText, defaults, ConfigSync.missing(parse(defaults), parse(oldText)));
         YamlConfiguration parsed = parse(result);                 // дубликатов ключей быть не должно
         assertEquals(42, parsed.getInt("fishing.special-item-chance-percent"));   // своё значение сохранилось
         assertEquals(0.8, parsed.getDouble("fishing.special-minigame.hit-radius"), 1e-9);
         assertEquals(true, parsed.getBoolean("fishing.special-minigame.ping-compensation"));
-        assertEquals(8, parsed.getInt("gouge.hold-grace-ticks"));
-        assertEquals(3.0, parsed.getDouble("fishing.crab-claw.reach-blocks"), 1e-9);
-        assertEquals(everyKey, parsed.getKeys(true));             // файл снова полный
+        assertEquals(parse(defaults).getKeys(true), parsed.getKeys(true));        // файл снова полный
         assertTrue(result.contains(ConfigSync.MARKER));
     }
 
+    /** Все settings/*.yml, склеенные так же, как это делает PluginSettings. */
+    private static String shippedMerged() throws IOException {
+        StringBuilder merged = new StringBuilder();
+        for (String file : PluginSettings.FILES) merged.append(shipped("settings/" + file)).append('\n');
+        return merged.toString();
+    }
+
     @Test
-    void shippedConfigReadsAndHasNoDuplicateKeys() throws IOException {
-        for (String name : ConfigSync.FILES) {
+    void everySettingsFileReadsAndIsNotAPlaceholder() throws IOException {
+        assertEquals(PluginSettings.FILES.size(), ConfigSync.FILES.size());
+        for (String file : PluginSettings.FILES) {
+            String name = "settings/" + file;
             String text = shipped(name);
             assertNotNull(ConfigSync.parse(text), name + " должен читаться как YAML");
             assertFalse(text.isBlank(), name + " не должен быть пустым");
             assertTrue(text.contains(":"), name + " должен содержать ключи");
         }
+    }
+
+    @Test
+    void settingsFilesDoNotOverlap() throws IOException {
+        // Один ключ — один файл: иначе значение молча перекрывалось бы соседним.
+        Map<String, String> owner = new HashMap<>();
+        for (String file : PluginSettings.FILES) {
+            YamlConfiguration part = ConfigSync.parse(ShippedSettings.read("settings/" + file));
+            assertNotNull(part, "settings/" + file + " должен читаться как YAML");
+            for (String key : part.getKeys(true)) {
+                if (part.get(key) instanceof ConfigurationSection) continue;
+                String previous = owner.put(key, file);
+                assertNull(previous, "ключ " + key + " есть и в " + previous + ", и в " + file);
+            }
+        }
+    }
+
+    @Test
+    void everySettingsFileStartsWithItsTopic() {
+        // /f8 config показывает тему файла — её первая строка-комментарий.
+        for (String file : PluginSettings.FILES) {
+            String first = ShippedSettings.read("settings/" + file).lines().findFirst().orElse("");
+            assertTrue(first.startsWith("# ") && first.length() > 15,
+                    "settings/" + file + " должен начинаться с короткой темы, а не с «" + first + "»");
+        }
+    }
+
+    @Test
+    void shippedFolderHasNoMonolithLeftBehind() {
+        // Старый общий config.yml в комплекте не остаётся: настройки живут только в settings/.
+        assertFalse(ConfigSync.FILES.contains("config.yml"));
+        assertTrue(ConfigSync.FILES.stream().allMatch(name -> name.startsWith("settings/")));
     }
 }

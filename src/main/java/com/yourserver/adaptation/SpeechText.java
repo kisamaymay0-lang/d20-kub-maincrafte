@@ -20,7 +20,7 @@ import org.bukkit.util.Transformation;
 final class SpeechText {
     /** Секунда на появление и секунда на затухание. */
     static final int FADE_TICKS = 20;
-    /** Размер берётся из config.yml; здесь только безопасные границы. */
+    /** Размер берётся из settings/pets.yml; здесь только безопасные границы. */
     static final float MIN_SCALE = 0.05f;
     static final float MAX_SCALE = 4.0f;
     static final float DEFAULT_SCALE = 0.5f;

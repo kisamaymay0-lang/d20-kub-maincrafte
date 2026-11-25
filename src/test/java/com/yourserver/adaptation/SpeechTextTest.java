@@ -3,12 +3,8 @@ package com.yourserver.adaptation;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -58,14 +54,10 @@ class SpeechTextTest {
                 "буквы успевают появиться за половину времени жизни: " + typingTicks);
     }
 
-    /** Размеры и высоты слов должны быть в поставляемом config.yml. */
+    /** Размеры и высоты слов должны быть в поставляемых settings/*.yml. */
     @Test
     void speechSizesAndHeightsAreDocumentedInConfig() throws Exception {
-        YamlConfiguration config = new YamlConfiguration();
-        try (InputStream stream = SpeechTextTest.class.getClassLoader().getResourceAsStream("config.yml")) {
-            assertNotNull(stream, "config.yml должен лежать в комплекте");
-            config.load(new InputStreamReader(stream, StandardCharsets.UTF_8));
-        }
+        YamlConfiguration config = ShippedSettings.merged();
 
         assertEquals(1.0D, config.getDouble("pets.speech.player-scale"), 0.0001D,
                 "слова игроков вдвое крупнее прежних 0.5");
