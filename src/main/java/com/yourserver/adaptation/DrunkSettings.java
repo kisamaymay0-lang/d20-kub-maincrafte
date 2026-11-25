@@ -97,13 +97,19 @@ record DrunkSettings(int scale,
                 phantomMax);
     }
 
-    /** Блок блевотины и «пол» под ним: незнакомые названия просто пропускаем. */
+    /**
+     * Блок блевотины и «пол» под ним: незнакомые названия просто пропускаем.
+     *
+     * <p>Проверять «а это точно блок» здесь нечем: {@code Material#isBlock()} лезет в
+     * реестр сервера, которого в тестах нет. Поэтому берём всё, что нашлось по имени,
+     * а на не-блок плагин просто не поставит лужу (проверка в {@link Vomit}).
+     */
     static List<Material> materials(List<String> names, List<Material> fallback) {
         List<Material> materials = new ArrayList<>();
         if (names != null) {
             for (String raw : names) {
                 Material material = material(raw);
-                if (material != null && material.isBlock() && !materials.contains(material)) {
+                if (material != null && !materials.contains(material)) {
                     materials.add(material);
                 }
             }

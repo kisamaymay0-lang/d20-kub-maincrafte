@@ -95,7 +95,7 @@ final class DrunkSettingsTest {
                   decay-ticks: 400
                   hangover: false
                   puddles: false
-                  puddle-seconds: 30
+                  puddles-seconds: 30
                   phantom-max: 4
                 """));
         assertEquals(100, settings.scale());

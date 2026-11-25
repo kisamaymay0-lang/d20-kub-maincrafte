@@ -170,7 +170,12 @@ final class Vomit {
 
             Material material = settings.puddleMaterials().get(random.nextInt(settings.puddleMaterials().size()));
             BlockData old = target.getBlockData().clone();
-            target.setType(material, false);
+            try {
+                target.setType(material, false);
+            } catch (RuntimeException ex) {
+                // В настройках оказался не блок (палка, стрела) — просто не пачкаем мир.
+                continue;
+            }
 
             long expire = tick + Math.max(20, settings.puddleSeconds()) * 20L;
             puddles.add(new Puddle(world, target.getX(), target.getY(), target.getZ(), old, expire));
