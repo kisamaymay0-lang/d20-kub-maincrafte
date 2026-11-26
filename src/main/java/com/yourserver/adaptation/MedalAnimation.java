@@ -27,7 +27,7 @@ final class MedalAnimation {
     void play(Player player) {
         if (player == null || plugin == null || !plugin.isEnabled()) return;
         try {
-            player.sendEntityEffect(EntityEffect.TOTEM_RESURRECT);
+            player.sendEntityEffect(EntityEffect.TOTEM_RESURRECT, player);
         } catch (RuntimeException ex) {
             // Сервер не знает такого события — медаль всё равно выдана, просто без анимации.
             return;
