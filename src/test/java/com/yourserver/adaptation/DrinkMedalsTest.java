@@ -200,17 +200,17 @@ class DrinkMedalsTest {
         try {
             Path file = directory.resolve("poilo.yml");
             Files.writeString(file, """
-                    drinks:
+                    recipes:
                       mead:
                         name: 'Медовуха'
+                        color: '#E6B94B'
                         method: shaker
-                        ingredients:
-                          - honey_bottle
+                        ingredients: [honey_bottle]
                       mead_with_rum:
                         name: 'Медовуха с ромом'
+                        color: '#C98B2E'
                         method: shaker
-                        ingredients:
-                          - mead
+                        ingredients: [mead]
                         alcohol: 6
                     """);
             DrinkRecipes.install(DrinkRecipes.load(file));
