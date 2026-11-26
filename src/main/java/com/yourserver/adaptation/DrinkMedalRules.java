@@ -74,9 +74,10 @@ final class DrinkMedalRules {
     }
 
     /**
-     * Совпадают ли id напитка из настроек и из игры. Регистр и дефисы не важны, а одна
-     * опечатка в длинном id прощается: в файле легко написать {@code daquiri} вместо
-     * {@code daiquiri}.
+     * Совпадают ли id напитка из настроек и из игры. Регистр и дефисы не важны, приставка
+     * {@code true_} тоже: «истинная медовуха» {@code true_mead} — это та же медовуха
+     * {@code mead}, и в настройках хватает одного из имён. Одна опечатка в длинном id
+     * прощается: в файле легко написать {@code daquiri} вместо {@code daiquiri}.
      */
     static boolean sameDrink(String configured, String actual) {
         if (configured == null || actual == null) return false;
@@ -84,8 +85,15 @@ final class DrinkMedalRules {
         String right = DrinkRecipes.normalizeId(actual);
         if (left.isEmpty() || right.isEmpty()) return false;
         if (left.equals(right)) return true;
+        // true_mead = mead, true_daiquiri = daiquiri: приставка ничего не меняет.
+        if (baseName(left).equals(baseName(right))) return true;
         if (left.length() < 5 || right.length() < 5) return false;
         return distance(left, right) <= 1;
+    }
+
+    /** id без приставки {@code true_} — «истинный» вариант того же напитка. */
+    private static String baseName(String normalizedId) {
+        return normalizedId.startsWith("true_") ? normalizedId.substring("true_".length()) : normalizedId;
     }
 
     /**

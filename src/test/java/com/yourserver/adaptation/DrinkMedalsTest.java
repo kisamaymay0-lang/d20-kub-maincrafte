@@ -78,11 +78,11 @@ class DrinkMedalsTest {
 
         MedalSettings.DrinkSpec mead = settings.drinkMedals().get("mead");
         assertEquals("drink-made", mead.trigger());
-        assertEquals("mead", mead.drink(), "напиток берётся из drink, а не из ключа медали");
+        assertEquals("true_mead", mead.drink(), "напиток берётся из drink, а не из ключа медали");
         assertTrue(mead.alcoholOnly(), "по умолчанию засчитывается только алкогольный вариант");
 
         assertEquals("drink-made", settings.drinkMedals().get("daquiri").trigger());
-        assertEquals("daiquiri", settings.drinkMedals().get("daquiri").drink(),
+        assertEquals("true_daiquiri", settings.drinkMedals().get("daquiri").drink(),
                 "опечатка в ключе медали не мешает найти напиток");
         assertEquals("Истинный дайкири.", settings.drinkMedals().get("daquiri").title());
         assertEquals("rum-in-ocean", settings.drinkMedals().get("pirat").trigger());
@@ -179,12 +179,15 @@ class DrinkMedalsTest {
         assertEquals("drunk-max", settings.drinkMedals().get("buxlo").trigger());
         assertTrue(settings.problems().isEmpty(), () -> "проблемы: " + settings.problems());
         assertEquals("Без упрёков.", settings.drinkMedals().get("bezuprek").title(), "текст владельца не меняется");
-        assertEquals("mead", settings.drinkMedals().get("mead").drink(), "drink дописан из комплекта");
+        assertEquals("true_mead", settings.drinkMedals().get("mead").drink(), "drink дописан из комплекта");
     }
 
     @Test
     void опечаткаВIdДлинногоНапиткаПрощается() {
         assertTrue(DrinkMedalRules.sameDrink("daquiri", "daiquiri"), "одна пропущенная буква");
+        assertTrue(DrinkMedalRules.sameDrink("mead", "true_mead"), "true_mead — та же медовуха");
+        assertTrue(DrinkMedalRules.sameDrink("true_daiquiri", "daiquiri"), "и наоборот");
+        assertFalse(DrinkMedalRules.sameDrink("mead", "true_tea"), "приставка не уравнивает чужие напитки");
         assertTrue(DrinkMedalRules.sameDrink("Daiquiri", "daiquiri"));
         assertTrue(DrinkMedalRules.sameDrink("sweet-wine", "sweet_wine"));
         assertFalse(DrinkMedalRules.sameDrink("beer", "wine"));
@@ -194,6 +197,7 @@ class DrinkMedalsTest {
     @Test
     void коктейльЗасчитываетсяКакНапитокИзСвоегоСостава() throws Exception {
         assertTrue(DrinkMedalRules.drinkIncludes("mead", "mead"), "сама медовуха");
+        assertTrue(DrinkMedalRules.drinkIncludes("true_mead", "true_mead"), "истинная медовуха из настроек");
         assertFalse(DrinkMedalRules.drinkIncludes("mead", "beer"));
 
         DrinkRecipes previous = DrinkRecipes.current();

@@ -91,14 +91,14 @@ napitki:
     - 'Сделайте алко-напиток БЕЗУПРЕЧНОГО качества!'
   mead:
     when: drink-made
-    drink: mead
+    drink: true_mead
     metal: copper
     title: 'Истинная медовуха.'
     reasons:
     - 'Сделайте алкогольную медовуху.'
   daquiri:
     when: drink-made
-    drink: daiquiri
+    drink: true_daiquiri
     metal: copper
     title: 'Истинный дайкири.'
     reasons:
