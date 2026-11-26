@@ -9,6 +9,7 @@ import org.bukkit.Color;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -24,6 +25,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 public class AdaptationPlugin extends JavaPlugin implements Listener {
@@ -43,6 +46,9 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
 
     private final Map<UUID, Long> cooldownEndTimes = new HashMap<>();
 
+    /** Все файлы settings/ как один конфиг — см. {@link PluginSettings}. */
+    private final PluginSettings settings = new PluginSettings(this);
+
     private AsyncTextWriter dataWriter;
     private DiceRollListener diceRollListener;
     private RollbackListener rollbackListener;
@@ -51,9 +57,33 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
     private CaviarListener caviarListener;
     private WinterFishing winterFishing;
     private AncientJug ancientJug;
+    private PetManager petManager;
+    /** Второй питомец — «живая корона» из /f8 pet 2. */
+    private CrownPet crownPet;
+    /** Сообщения игроков над головой: та же надпись, что у питомцев, но без звука. */
+    private ChatBubble chatBubble;
+    private CatBattleManager catBattleManager;
+    private Apvsh apvsh;
+    private SweetBerryBlock sweetBerryBlock;
+    private Shaker shaker;
+
+    /** Последняя ошибка чтения settings/recipe-poilo.yml — её показывает /f8 drinks. */
+    private volatile String lastDrinkError = null;
+
+    /** Последняя ошибка чтения data/napitki/napitki.yml — её показывает /f8 drinks. */
+    private volatile String lastBarrelError = null;
+    /** Рюмка из RP Engine: налить напиток прямо из шейкера. */
+    private ShotGlass shotGlass;
+    private BambooBarrel bambooBarrel;
+    /** Опьянение: невидимая шкала, стадии, тошнота и похмелье. */
+    private DrunkManager drunk;
+    /** Сигарета из /f8: тикает шкалу тяги и дым, поэтому нужен доступ на выключении. */
+    private Cigarette cigarette;
+    /** Политые кораллы: список живёт в файле, поэтому нужен доступ на выключении. */
+    private CoralCare coralCare;
+    private SpecialCatch specialCatch;
     private ConstellationManager constellationManager;
     private ProfileManager profileManager;
-    private ResourcePackPusher resourcePackPusher;
 
     private final Particle.DustOptions meleeDust =
             new Particle.DustOptions(Color.fromRGB(255, 0, 0), 1.2f);
@@ -66,7 +96,14 @@ public class AdaptationPlugin extends JavaPlugin implements Listener {
 
 @Override
 public void onEnable() {
-    saveDefaultConfig();
+    // Раскладка папки: настройки в settings/, контент в content/, данные в data/.
+    // Переезд идёт до ConfigSync, иначе комплект занял бы места старых файлов.
+    // Прежний общий config.yml уходит в config.yml.old — значения можно посмотреть.
+    Layout.migrateLegacy(this);
+    // Файлы настроек держим полными: чего в них нет — дописываем из комплекта (значения владельца
+    // не трогаем), сломанный файл уходит в копию и заменяется новым.
+    ConfigSync.sync(this);
+    settings.reload();
     dataWriter = new AsyncTextWriter(getLogger());
 
     getServer().getPluginManager().registerEvents(
@@ -117,12 +154,71 @@ public void onEnable() {
     winterFishing = new WinterFishing(this);
     getServer().getPluginManager().registerEvents(winterFishing, this);
 
+    // Уход за блоками руками: вода по меди и кораллам, блок света спрятанной
+    // рамкой — всё это шифт + ПКМ, отдельными слушателями.
+    getServer().getPluginManager().registerEvents(new CopperCare(copperBlockListener), this);
+
+    coralCare = new CoralCare(this, dataWriter);
+    getServer().getPluginManager().registerEvents(coralCare, this);
+
+    getServer().getPluginManager().registerEvents(new LightBlocks(this), this);
+    getServer().getPluginManager().registerEvents(new FrameVeil(), this);
+    getServer().getPluginManager().registerEvents(new PaintingListener(), this);
+
     ancientJug = new AncientJug(this, dataWriter);
     getServer().getPluginManager().registerEvents(ancientJug, this);
 
-    // Раздача актуального ресурспака клиентам при входе.
-    resourcePackPusher = new ResourcePackPusher(this);
-    getServer().getPluginManager().registerEvents(resourcePackPusher, this);
+    petManager = new PetManager(this);
+    getServer().getPluginManager().registerEvents(petManager, this);
+
+    // Второй питомец: корона над головой, /f8 pet 2.
+    crownPet = new CrownPet(this);
+    getServer().getPluginManager().registerEvents(crownPet, this);
+
+    // Сообщения игроков над головой — та же надпись, без звука.
+    chatBubble = new ChatBubble(this, crownPet);
+    getServer().getPluginManager().registerEvents(chatBubble, this);
+
+    // Дикие коты: дуэли тикаются вместе с питомцами, но не связаны с их сущностями.
+    catBattleManager = new CatBattleManager(this);
+    getServer().getPluginManager().registerEvents(catBattleManager, this);
+
+    // АПВШ — аппарат для создания и наполнения сигарет и другого.
+    apvsh = new Apvsh(this, dataWriter);
+    getServer().getPluginManager().registerEvents(apvsh, this);
+
+    // Блок сладких ягод.
+    sweetBerryBlock = new SweetBerryBlock(this, dataWriter);
+    getServer().getPluginManager().registerEvents(sweetBerryBlock, this);
+
+    // Сигарета: слушает клики сама, поэтому registerEvents внутри конструктора.
+    cigarette = new Cigarette(this);
+
+    // Напитки: рецепты, названия, цвета и модели — из settings/recipe-poilo.yml.
+    // Итог пишем в журнал сразу: иначе опечатка в файле выглядит как «плагин не видит рецепт».
+    getLogger().info(reloadDrinkRecipes());
+
+    // Шейкер — инструмент для смешивания напитков и коктейлей.
+    shaker = new Shaker(this);
+    getServer().getPluginManager().registerEvents(shaker, this);
+    shaker.registerRecipe();
+
+    // Рюмка RP Engine: событие клика по поставленной модели, свой класс —
+    // без RP Engine плагин молча работает дальше.
+    shotGlass = new ShotGlass(this);
+    shotGlass.register();
+
+    // Бамбуковая бочка для брожения пиратского рома.
+    bambooBarrel = new BambooBarrel(this);
+    getServer().getPluginManager().registerEvents(bambooBarrel, this);
+
+    // Опьянение: шкала, стадии и «шумные» эффекты (фантомные блоки, шатание, похмелье).
+    drunk = new DrunkManager(this);
+    getServer().getPluginManager().registerEvents(drunk, this);
+    drunk.start();
+    // Миниигра особого предмета биома: вылавливается вместо обычной рыбы.
+    specialCatch = new SpecialCatch(this, ancientJug, winterFishing);
+    getServer().getPluginManager().registerEvents(specialCatch, this);
 
     profileManager = new ProfileManager(this, dataWriter);
     getServer().getPluginManager().registerEvents(profileManager, this);
@@ -160,7 +256,10 @@ public void onEnable() {
                     copperBlockListener,
                     caviarListener,
                     winterFishing,
-                    ancientJug
+                    ancientJug,
+                    petManager,
+                    crownPet,
+                    apvsh
             );
 
     getServer().getPluginManager().registerEvents(
@@ -173,6 +272,16 @@ public void onEnable() {
                 f8Command
         );
     }
+
+    new BukkitRunnable() {
+        @Override
+        public void run() {
+            petManager.tick();
+            if (crownPet != null) crownPet.tick();
+            if (chatBubble != null) chatBubble.tick();
+            if (catBattleManager != null) catBattleManager.tick();
+        }
+    }.runTaskTimer(this, 0L, 1L);
 
     // Регистрируем обработчик команды /d20.
     // Без этого команда из plugin.yml не будет работать.
@@ -187,6 +296,11 @@ public void onEnable() {
     );
 }
     
+    /** Медали профиля; до создания (ранние события) — null, вызывающие это учитывают. */
+    ProfileManager profileManager() {
+        return profileManager;
+    }
+
     @Override
     public void onDisable() {
         cleanupAll();
@@ -216,15 +330,225 @@ public void onEnable() {
         if (winterFishing != null) {
             winterFishing.disable();
         }
+        if (specialCatch != null) {
+            specialCatch.disable();
+        }
         if (ancientJug != null) {
             ancientJug.disable();
         }
-        if (resourcePackPusher != null) {
-            resourcePackPusher.disable();
+        if (petManager != null) {
+            petManager.stopAll();
+        }
+        if (crownPet != null) {
+            crownPet.stopAll();
+        }
+        if (chatBubble != null) {
+            chatBubble.stopAll();
+        }
+        if (catBattleManager != null) {
+            catBattleManager.disable();
+        }
+        if (apvsh != null) {
+            apvsh.disable();
+        }
+        if (sweetBerryBlock != null) {
+            sweetBerryBlock.disable();
+        }
+        if (cigarette != null) {
+            cigarette.disable();
+        }
+        if (coralCare != null) {
+            coralCare.flush();
+        }
+        if (drunk != null) {
+            // Опьянение: убрать лужи из мира и сохранить шкалы на диск.
+            drunk.stop();
         }
         if (dataWriter != null) {
             dataWriter.close();
         }
+    }
+
+    /**
+     * Перечитать settings/*.yml и настройки подсистем (/f8 reload).
+     * Настройки миниигры и кувшина читаются на ходу, поэтому им reload не нужен;
+     * созвездия и зацеп изморози держат копию настроек в памяти — их просим перечитаться.
+     * Префиксы, косметика и паки живут в своих файлах, поэтому их тоже перечитываем:
+     * без этого правки YAML и новые файлы до перезапуска не доходили.
+     * Шанс дуэлей диких котов также применяется здесь.
+     */
+    /** Посуда RP Engine: нужна /f8 rp и шейкеру. */
+    ShotGlass shotGlass() {
+        return shotGlass;
+    }
+
+    /**
+     * Настройки плагина — одно дерево из файлов {@code settings/*.yml}.
+     *
+     * <p>Код по-прежнему спрашивает {@code getConfig().getInt("pets.speech.player-scale")}:
+     * пути те же, что были в прежнем общем config.yml, но искать их по одному файлу на двести строк
+     * больше не нужно. Файлы склеиваются в {@link PluginSettings}.
+     */
+    @Override
+    public FileConfiguration getConfig() {
+        return settings.current();
+    }
+
+    /** Перечитать {@code settings/} целиком. Так делает /f8 reload и /stars reload. */
+    @Override
+    public void reloadConfig() {
+        settings.reload();
+    }
+
+    /**
+     * Перезапись настроек из памяти не нужна: файлы ведёт {@link ConfigSync}, а обычное
+     * сохранение Bukkit потеряло бы все комментарии.
+     */
+    @Override
+    public void saveConfig() {
+        // намеренно пусто
+    }
+
+    /**
+     * Напитки из {@code settings/recipe-poilo.yml}: рецепты шейкера, бочка и подсказки.
+     * Файл копируется из комплекта при первом запуске, дальше живёт сам.
+     *
+     * <p>Ошибка в файле не снимает напитки: остаются прежние, а причина уходит в журнал.
+     */
+    public String reloadDrinkRecipes() {
+        // Сначала выдержка: бочковому напитку нужен свой блок в napitki.yml, иначе он
+        // не создаётся вовсе (см. DrinkRecipes#requireBarrelProfiles).
+        String barrel = reloadBarrelDrinks();
+        String drinks = reloadDrinkCatalog();
+        return drinks + " " + barrel;
+    }
+
+    /** Напитки из {@code settings/recipe-poilo.yml}: рецепты, названия, цвета, модели. */
+    private String reloadDrinkCatalog() {
+        Path path = Layout.settings(this, "recipe-poilo.yml");
+        if (!Files.exists(path)) {
+            saveResource("settings/recipe-poilo.yml", false);
+            getLogger().info("Создан файл напитков: " + path);
+        }
+        try {
+            DrinkRecipes next = DrinkRecipes.load(path);
+            // Если napitki.yml прочитался, требуем для каждого бочкового напитка свой блок:
+            // без него нет ни сроков, ни качеств, ни крепости — значит, нет и напитка.
+            if (lastBarrelError == null) {
+                next = next.requireBarrelProfiles(BarrelDrinks.current().ids());
+            }
+            DrinkRecipes.install(next);
+            lastDrinkError = null;
+            // Напиток с ошибкой не отменяет остальные, но в журнале должно быть видно,
+            // какой именно пропущен и почему.
+            for (String problem : next.problems()) {
+                getLogger().warning("settings/recipe-poilo.yml: " + problem);
+            }
+            String skipped = next.problems().isEmpty()
+                    ? ""
+                    : " Пропущено напитков: " + next.problems().size() + " (разбор: /f8 drinks).";
+            return "Напитки: " + next.size() + " (шейкер: " + next.shakerDrinks().size()
+                    + ", бочка: " + next.barrelDrinks().size() + "), файл " + path + "." + skipped;
+        } catch (Exception ex) {
+            lastDrinkError = ex.getMessage();
+            getLogger().log(java.util.logging.Level.WARNING,
+                    "Ошибка settings/recipe-poilo.yml; остаются прежние напитки (" + ex.getMessage() + ")", ex);
+            return "§cНапитки НЕ перечитаны: ошибка в settings/recipe-poilo.yml — " + ex.getMessage()
+                    + " (подробности в журнале, разбор: /f8 drinks).";
+        }
+    }
+
+    /**
+     * Бочковые напитки из {@code data/napitki/napitki.yml}: сколько варится, сколько лет
+     * до какого качества и что написано в подсказке. Файл кладётся из комплекта при первом
+     * запуске, дальше живёт сам — плагин его не перезаписывает.
+     */
+    private String reloadBarrelDrinks() {
+        Path path = Layout.data(this, BarrelDrinks.FILE);
+        if (!Files.exists(path)) {
+            saveResource("data/" + BarrelDrinks.FILE, false);
+            getLogger().info("Создан файл бочковых напитков: " + path);
+        }
+        try {
+            BarrelDrinks.install(BarrelDrinks.load(path));
+            lastBarrelError = null;
+            return "Выдержка: файл " + path + ".";
+        } catch (Exception ex) {
+            lastBarrelError = ex.getMessage();
+            getLogger().log(java.util.logging.Level.WARNING,
+                    "Ошибка data/" + BarrelDrinks.FILE + "; остаются прежние сроки и качества ("
+                            + ex.getMessage() + ")", ex);
+            return "§cСроки выдержки НЕ перечитаны: ошибка в data/" + BarrelDrinks.FILE + " — "
+                    + ex.getMessage() + " (подробности в журнале, разбор: /f8 drinks).";
+        }
+    }
+
+    /** Ошибка settings/recipe-poilo.yml при последнем чтении; null — файл прочитан. */
+    public String lastDrinkError() {
+        return lastDrinkError;
+    }
+
+    /** Ошибка data/napitki/napitki.yml при последнем чтении; null — файл прочитан. */
+    public String lastBarrelError() {
+        return lastBarrelError;
+    }
+
+    public String reloadPluginSettings() {
+        ConfigSync.sync(this);   // /f8 reload тоже доводит файлы до полного вида
+        reloadConfig();
+        String drinkSummary = null;
+        if (shaker != null) {
+            // Рецепты напитков: settings/recipe-poilo.yml и data/napitki/napitki.yml.
+            drinkSummary = reloadDrinkRecipes();
+        }
+        if (constellationManager != null) {
+            constellationManager.reloadSettings();
+        }
+        if (winterFishing != null) {
+            winterFishing.reloadSettings();
+        }
+        if (bambooBarrel != null) {
+            bambooBarrel.reloadSettings();
+        }
+        if (drunk != null) {
+            // Опьянение: settings/drunk.yml (шкала, затухание, тошнота).
+            drunk.loadSettings();
+        }
+        if (shotGlass != null) {
+            // Список рюмок: shaker.glass-models.
+            shotGlass.reloadSettings();
+        }
+        if (catBattleManager != null) {
+            catBattleManager.reloadSettings();
+        }
+        if (copperBlockListener != null) {
+            // Время окисления медного нотного блока.
+            copperBlockListener.reloadSettings();
+        }
+        if (petManager != null) {
+            petManager.reloadSettings();
+        }
+        if (crownPet != null) {
+            crownPet.reloadSettings();
+        }
+        if (chatBubble != null) {
+            chatBubble.reloadSettings();
+        }
+        List<String> summaries = new ArrayList<>();
+        if (drinkSummary != null && !drinkSummary.isBlank()) {
+            summaries.add(drinkSummary);
+        }
+        if (profileManager != null) {
+            summaries.add(profileManager.reloadPrefixes());
+            // Косметика живёт в отдельных YAML: /f8 reload тоже обязан
+            // перечитать их и заметить новые файлы без рестарта.
+            summaries.add(profileManager.reloadCosmetics());
+        }
+        if (catBattleManager != null) summaries.add(catBattleManager.describe());
+        if (crownPet != null) summaries.add(crownPet.describe());
+        if (specialCatch != null && !specialCatch.describe().isBlank()) summaries.add(specialCatch.describe());
+        summaries.removeIf(String::isBlank);
+        return String.join("\n", summaries);
     }
 
     public void breakAdaptation(Player player) {
@@ -1373,5 +1697,17 @@ public void onEnable() {
         superDamageCounters.remove(uuid);
 
         damageHitLimiter.remove(uuid);
+    }
+
+    public Apvsh getApvsh() {
+        return apvsh;
+    }
+
+    public SweetBerryBlock getSweetBerryBlock() {
+        return sweetBerryBlock;
+    }
+
+    public Shaker getShaker() {
+        return shaker;
     }
 }

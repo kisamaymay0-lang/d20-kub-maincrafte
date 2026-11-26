@@ -13,28 +13,112 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
-/** Неизменяемые настройки оформления и сообщений из medals/config.yml. */
+/** Неизменяемые настройки оформления и сообщений из settings/medals.yml. */
 final class MedalSettings {
     record Style(String label, String rarity, TextColor end) { }
-    /** Автоматическая медаль из medals/config.yml: пустые название/заслуги отключают выдачу. */
+    /** Автоматическая медаль из settings/medals.yml: пустые название/заслуги отключают выдачу. */
     record SandwichSpec(ProfileMedal.Metal metal, String title, List<String> reasons, boolean filled) {
         static SandwichSpec disabled(ProfileMedal.Metal metal) { return new SandwichSpec(metal, "", List.of(), false); }
     }
+    /**
+     * Автоматическая медаль за напитки из раздела {@code napitki:} (синоним — {@code drinks:}).
+     *
+     * <p>{@code trigger} — условие выдачи:
+     * <ul>
+     *   <li>{@code drink-made} — сделал напиток {@code drink} (по умолчанию — сам ключ);</li>
+     *   <li>{@code flawless-alcohol} — сделал алкогольный напиток безупречного качества;</li>
+     *   <li>{@code all-flawless-wines} — сделал безупречные бутылки всех видов вина;</li>
+     *   <li>{@code rum-in-ocean} — выпил пиратский ром, находясь в океане;</li>
+     *   <li>{@code drunk-max} — дошёл до предела шкалы опьянения.</li>
+     * </ul>
+     */
+    record DrinkSpec(String source, String trigger, String drink, boolean alcoholOnly,
+                     ProfileMedal.Metal metal, String title, List<String> reasons, boolean filled) { }
+
+    /** Все условия, которые понимает плагин. */
+    static final Set<String> TRIGGERS = Set.of(
+            "drink-made", "flawless-alcohol", "all-flawless-wines", "rum-in-ocean", "drunk-max");
+
     private final Map<ProfileMedal.Metal, Style> styles;
     private final Map<String, String> messages;
     final String astronomyTitle;
     final List<String> astronomyReasons;
     final SandwichSpec sandwichAllKinds;
     final SandwichSpec sandwichIceCaviar;
+    private final Map<String, DrinkSpec> drinkMedals;
+    /** Тексты медалей из файла: по source — то, что должно быть написано у игрока. */
+    private final Map<String, Text> medalTexts;
+    private final List<String> problems;
 
     private MedalSettings(Map<ProfileMedal.Metal, Style> styles, Map<String, String> messages, String title, List<String> reasons,
-                          SandwichSpec sandwichAllKinds, SandwichSpec sandwichIceCaviar) {
+                          SandwichSpec sandwichAllKinds, SandwichSpec sandwichIceCaviar,
+                          Map<String, DrinkSpec> drinkMedals, List<String> problems) {
         this.styles = Map.copyOf(styles); this.messages = Map.copyOf(messages);
         astronomyTitle = title; astronomyReasons = List.copyOf(reasons);
         this.sandwichAllKinds = sandwichAllKinds; this.sandwichIceCaviar = sandwichIceCaviar;
+        // Порядок из файла важен: медали выдаются в том же порядке, что в medals.yml.
+        this.drinkMedals = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(drinkMedals));
+        this.problems = List.copyOf(problems);
+        // Названия и заслуги всегда берутся из файла, а не запоминаются в профиле:
+        // правка medals.yml должна быть видна в игре сразу.
+        Map<String, Text> texts = new HashMap<>();
+        if (sandwichAllKinds.filled()) {
+            texts.put(ProfileMedal.SANDWICH_ALL_KINDS,
+                    new Text(sandwichAllKinds.metal(), sandwichAllKinds.title(), sandwichAllKinds.reasons()));
+        }
+        if (sandwichIceCaviar.filled()) {
+            texts.put(ProfileMedal.SANDWICH_ICE_CAVIAR,
+                    new Text(sandwichIceCaviar.metal(), sandwichIceCaviar.title(), sandwichIceCaviar.reasons()));
+        }
+        texts.put(ProfileMedal.FIRST_CONSTELLATION, new Text(ProfileMedal.Metal.COPPER, title, List.copyOf(reasons)));
+        for (DrinkSpec spec : drinkMedals.values()) {
+            if (spec.filled()) texts.put(spec.source(), new Text(spec.metal(), spec.title(), spec.reasons()));
+        }
+        this.medalTexts = Map.copyOf(texts);
+    }
+
+    /** Название, заслуги и металл медали с этим источником — как в файле. */
+    private record Text(ProfileMedal.Metal metal, String title, List<String> reasons) { }
+
+    /**
+     * Медали игрока с текстом из файла: возвращает те, что надо переписать.
+     * Пустой список — всё уже совпадает.
+     */
+    List<ProfileMedal> refreshAll(ProfileData data) {
+        List<ProfileMedal> updated = new java.util.ArrayList<>();
+        if (data == null) return updated;
+        for (ProfileMedal medal : data.medals().values()) {
+            ProfileMedal next = refresh(medal);
+            if (next != null) updated.add(next);
+        }
+        return updated;
+    }
+
+    /** Тот же id и дата, но название, заслуги и металл — из файла. */
+    ProfileMedal refresh(ProfileMedal medal) {
+        if (medal == null || medal.source() == null || medal.source().isEmpty()) return null;
+        Text text = medalTexts.get(medal.source());
+        if (text == null) return null;
+        if (text.metal() == medal.metal() && text.title().equals(medal.title()) && text.reasons().equals(medal.reasons())) {
+            return null;
+        }
+        return new ProfileMedal(medal.id(), text.metal(), text.title(), text.reasons(), medal.awardedAt(), medal.source());
+    }
+
+    /** Проблемы отдельных медалей за напитки: одна кривая медаль не отменяет остальные. */
+    List<String> problems() {
+        return problems;
+    }
+
+    /** Медали за напитки в порядке файла. */
+    Map<String, DrinkSpec> drinkMedals() {
+        return drinkMedals;
     }
 
     static MedalSettings defaults() {
@@ -54,12 +138,14 @@ final class MedalSettings {
         messages.put("pending-error", "<red>Медаль пока не удалось записать. Право на неё сохранено; обратитесь к администратору.</red>");
         messages.put("no-permission", "<red>Нет прав управлять медалями.</red>");
         return new MedalSettings(styles, messages, "Астрономия!", List.of("Собрано 1 созвездие."),
-                SandwichSpec.disabled(ProfileMedal.Metal.GOLD), SandwichSpec.disabled(ProfileMedal.Metal.COPPER));
+                SandwichSpec.disabled(ProfileMedal.Metal.GOLD), SandwichSpec.disabled(ProfileMedal.Metal.COPPER),
+                Map.of(), List.of());
     }
 
     static MedalSettings load(Path file) throws Exception {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.loadFromString(Files.readString(file));
+        List<String> problems = new java.util.ArrayList<>();
         MedalSettings defaults = defaults();
         Map<ProfileMedal.Metal, Style> styles = new EnumMap<>(ProfileMedal.Metal.class);
         for (ProfileMedal.Metal metal : ProfileMedal.Metal.values()) {
@@ -80,7 +166,8 @@ final class MedalSettings {
         ProfileMedal validation = new ProfileMedal(java.util.UUID.randomUUID(), ProfileMedal.Metal.COPPER, title, reasons, 0, "");
         MedalSettings settings = new MedalSettings(styles, messages, validation.title(), validation.reasons(),
                 sandwichSpec(yaml, "sandwiches.all-kinds", ProfileMedal.Metal.GOLD),
-                sandwichSpec(yaml, "sandwiches.ice-caviar", ProfileMedal.Metal.COPPER));
+                sandwichSpec(yaml, "sandwiches.ice-caviar", ProfileMedal.Metal.COPPER),
+                drinkSpecs(yaml, problems), problems);
         for (String key : messages.keySet()) settings.message(key, "Player", "Медную медаль", "Медаль", 1, "Ошибка");
         return settings;
     }
@@ -97,6 +184,69 @@ final class MedalSettings {
         if (title.isEmpty() || reasons.isEmpty()) throw new IllegalArgumentException("Заполните и название, и заслуги " + root);
         new ProfileMedal(java.util.UUID.randomUUID(), metal, title, reasons, 0, ""); // Те же ограничения, что у выдаваемой медали.
         return new SandwichSpec(metal, title, reasons, true);
+    }
+
+    /**
+     * Медали за напитки: раздел {@code napitki:} (синоним {@code drinks:}). Ключ — имя
+     * медали, {@code when} — условие.
+     * Пустые название и заслуги отключают выдачу, как у бутербродов: можно заготовить
+     * список медалей и заполнять по одной.
+     */
+    private static Map<String, DrinkSpec> drinkSpecs(YamlConfiguration yaml, List<String> problems) {
+        Map<String, DrinkSpec> specs = new LinkedHashMap<>();
+        // Раздел называется napitki:; drinks: понимается как синоним. Если в файле
+        // оказались оба, побеждает napitki: — владелец пишет именно там.
+        for (String rootKey : List.of("drinks", "napitki")) {
+            org.bukkit.configuration.ConfigurationSection section = yaml.getConfigurationSection(rootKey);
+            if (section == null) continue;
+            for (String rawId : section.getKeys(false)) {
+                String root = rootKey + "." + rawId + ".";
+                String id = ProfileText.clean(rawId);
+                if (id.isEmpty()) continue;
+                // Одна кривая медаль не должна отменять остальные: пишем проблему и идём дальше.
+                try {
+                    specs.put(id, drinkSpec(yaml, root, id));
+                } catch (IllegalArgumentException ex) {
+                    problems.add(rootKey + "." + id + ": " + ex.getMessage());
+                }
+            }
+        }
+        return specs;
+    }
+
+    private static DrinkSpec drinkSpec(YamlConfiguration yaml, String root, String id) {
+        String triggerText = ProfileText.clean(yaml.getString(root + "when", ""));
+        // Без when считаем, что медаль — за изготовление напитка с этим же id:
+        // так владельцу достаточно дописать блок, не разбираясь в условиях.
+        String trigger = triggerText.isEmpty() ? "drink-made" : normalizeTrigger(triggerText);
+        if (!TRIGGERS.contains(trigger)) {
+            throw new IllegalArgumentException("неизвестное when «" + triggerText + "». Можно: "
+                    + String.join(", ", TRIGGERS.stream().sorted().toList()));
+        }
+        String drink = ProfileText.clean(yaml.getString(root + "drink", id));
+        boolean alcoholOnly = yaml.getBoolean(root + "alcohol", true);
+        ProfileMedal.Metal metal = ProfileMedal.Metal.COPPER;
+        String metalName = ProfileText.clean(yaml.getString(root + "metal", ""));
+        if (!metalName.isEmpty()) metal = ProfileMedal.Metal.parse(metalName);
+        String title = ProfileText.clean(yaml.getString(root + "title", ""));
+        List<String> reasons = yaml.isList(root + "reasons")
+                ? yaml.getStringList(root + "reasons").stream().map(ProfileText::clean)
+                .filter(reason -> !reason.isEmpty()).toList()
+                : List.of();
+        String source = "drink_medal_" + id;
+        if (title.isEmpty() && reasons.isEmpty()) {
+            return new DrinkSpec(source, trigger, drink, alcoholOnly, metal, "", List.of(), false);
+        }
+        if (title.isEmpty() || reasons.isEmpty()) {
+            throw new IllegalArgumentException("заполните и название, и заслуги");
+        }
+        // Те же ограничения, что у выдаваемой медали.
+        new ProfileMedal(java.util.UUID.randomUUID(), metal, title, reasons, 0, "");
+        return new DrinkSpec(source, trigger, drink, alcoholOnly, metal, title, reasons, true);
+    }
+
+    private static String normalizeTrigger(String text) {
+        return ProfileText.clean(text).toLowerCase(Locale.ROOT).replace('_', '-').replace(' ', '-');
     }
 
     Style style(ProfileMedal.Metal metal) { return styles.get(metal); }

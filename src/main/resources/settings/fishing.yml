@@ -1,0 +1,45 @@
+# Рыбалка: миниигра особого предмета биома, клешня краба и икра.
+# Применяется по /f8 reload.
+
+fishing:
+  special-item-chance-percent: 5   # 100 — для теста
+  special-minigame:
+    hits-required: 4               # сколько раз ударить предмет
+    misses-allowed: 4              # столько промахов — предмет срывается
+    duration-seconds: 10
+    radius: 3.2                    # купол вокруг игрока
+    height: 1.7                    # высота полёта предмета
+    dash-strength: 1.4
+    hit-range: 4.0                 # близость предмета к лучу взгляда
+    hit-radius: 0.8
+    hit-angle-degrees: 22.0        # ширина трубки попадания
+    ping-compensation: true        # судить удар по картинке игрока
+    particle-interval-ticks: 2
+    particle-radius: 1.5
+    revolution-seconds: 2.2        # оборот в начале охоты
+    speed-per-hit: 0.35            # +35 % к скорости за удар
+    bob-height: 0.5
+    bob-per-hit: 0.6
+    dash-per-hit: 0.5
+  # Особый предмет по биому: ключ — ID или шаблон с «*», значение — ANCIENT_JUG,
+  # ICY_RIME, CRAB_CLAW либо ID ванильного предмета. Точное совпадение важнее шаблона.
+  special-items:
+    "*:*desert*": ANCIENT_JUG
+    "*:*badlands*": ANCIENT_JUG
+    "*:swamp": CRAB_CLAW
+    "*:*swamp*": CRAB_CLAW
+    "*:snowy*": ICY_RIME
+    "*:*frozen*": ICY_RIME
+    "*:ice_spikes*": ICY_RIME
+    "*:grove": ICY_RIME
+    "*:jagged_peaks": ICY_RIME
+  # Клешня краба: +3 блока к дальности; в правой руке копает инструментами из инвентаря
+  # с двойным расходом прочности.
+  crab-claw:
+    reach-blocks: 3.0
+    wear-per-block: 2
+
+# Икра: шифт + ПКМ по треске/лососю.
+caviar:
+  chance-percent: 12
+  max-amount: 8

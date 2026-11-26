@@ -83,12 +83,74 @@ class SkyMotionTest {
 
     @Test
     void fartherSphereIsLimitedByClientAndServerViewDistance() {
-        assertEquals(1f, SkyOrbit.depthScale(100, 4, 10, 3));
-        float scale = SkyOrbit.depthScale(100, 16, 10, 3);
+        float scale = SkyOrbit.depthScale(100, 16, 10, 3, 0.7);
         assertEquals(1.12f, scale, 0.0001);
         assertTrue(100 * scale <= 10 * 16 * 0.7 + 0.001);
-        assertEquals(3f, SkyOrbit.depthScale(80, 32, 32, 3));
+        assertEquals(3f, SkyOrbit.depthScale(80, 32, 32, 3, 0.7));
+        // depth-fill отодвигает сферу к краю видимой дальности: звёзды прячутся
+        // за деревьями и облаками, а не наоборот.
+        assertTrue(SkyOrbit.depthScale(80, 16, 16, 8, 0.95) > SkyOrbit.depthScale(80, 16, 16, 8, 0.7));
+        // fill больше 1.0 обрезается до 1.0, дальше сфера ограничена множителем:
+        // 16 чанков * 16 блоков / 80 = 3.2.
+        assertEquals(3.2f, SkyOrbit.depthScale(80, 16, 16, 8, 2.0), 0.0001f);
     }
+
+    @Test
+    void bigRadiusShrinksTheSphereInsteadOfThrowingItBeyondTheClient() {
+        // 10 чанков * 16 блоков * 0.95 = 152 блока: дальше клиент просто не рисует.
+        float scale = SkyOrbit.depthScale(200, 10, 10, 3, 0.95);
+        assertEquals(0.76f, scale, 0.0001f);
+        assertTrue(200 * scale <= 10 * 16 * 0.95 + 0.001, "звезда не должна уехать за видимость");
+        // И наоборот: радиус меньше видимости — сфера отодвигается, как раньше.
+        assertTrue(SkyOrbit.depthScale(80, 10, 10, 3, 0.95) > 1f);
+    }
+
+    @Test
+    void legacyStarLookIsReplacedButOwnSettingsAreKept() {
+        // 80 / 2.0 / 0.4 — значения прошлых сборок, их поднимаем до нового вида.
+        assertEquals(200.0, ConstellationManager.starsViewDistance(80, 2.0, 0.4));
+        // Своё значение не трогаем: человек сознательно поставил другой масштаб.
+        assertEquals(80.0, ConstellationManager.starsViewDistance(80, 2.0, 0.6));
+        assertEquals(120.0, ConstellationManager.starsViewDistance(120, 2.0, 0.4));
+        assertEquals(80.0, ConstellationManager.starsViewDistance(80, 1.0, 0.4));
+    }
+    @Test
+    void starsKeepTheOriginalStarTexture() {
+        // Звезда снова та самая star.png + star.json из пака.
+        assertEquals(new org.bukkit.NamespacedKey("f8resurs", "star"),
+                ConstellationManager.starModelKey(null));
+        assertEquals(new org.bukkit.NamespacedKey("f8resurs", "star"),
+                ConstellationManager.starModelKey("  "));
+        // Прежнее написание того же файла не ломает созвездия старых сборок.
+        assertEquals(new org.bukkit.NamespacedKey("f8resurs", "star"),
+                ConstellationManager.starModelKey("f8resurs:item/star"));
+        // Мягкая звезда из прошлой сборки больше не существует: и её ключ ведёт к star.
+        assertEquals(new org.bukkit.NamespacedKey("f8resurs", "star"),
+                ConstellationManager.starModelKey("f8resurs:item/star_soft"));
+        assertEquals(new org.bukkit.NamespacedKey("f8resurs", "star"),
+                ConstellationManager.starModelKey("f8resurs:star_soft"));
+        // Своя модель у созвездия остаётся возможной.
+        assertEquals(new org.bukkit.NamespacedKey("mypack", "big_star"),
+                ConstellationManager.starModelKey("mypack:big_star"));
+    }
+
+    @Test
+    void followInterpolationStaysInsideTheSmoothRange() {
+        // 0 — рывками по тикам, 1..3 — плавно, больше 10 небо уже опаздывает.
+        assertEquals(0, ConstellationManager.followInterpolationTicks(-4));
+        assertEquals(2, ConstellationManager.followInterpolationTicks(2));
+        assertEquals(10, ConstellationManager.followInterpolationTicks(40));
+    }
+
+    @Test
+    void viewRangeCoversTheWholeSphereButStaysReasonable() {
+        // Дальность считается от сущности, а звезда может стоять в 200 блоках от неё.
+        assertTrue(ConstellationManager.viewRangeFor(200) > 200);
+        assertTrue(ConstellationManager.viewRangeFor(600) <= 512);
+        assertEquals(160f, ConstellationManager.viewRangeFor(0), 0.0001f);
+        assertEquals(160f, ConstellationManager.viewRangeFor(Double.NaN), 0.0001f);
+    }
+
     @Test
     void positiveOrbitSpeedNowMovesRightAndKeepsTargetingAligned() {
         double phase = SkyOrbit.advance(0, 0.15, 20);

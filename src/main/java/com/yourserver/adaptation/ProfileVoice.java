@@ -47,9 +47,9 @@ final class ProfileVoice {
 
     ProfileVoice(JavaPlugin plugin, BiPredicate<Player, ProfileVoiceNote> commit) {
         this.plugin = plugin; this.commit = commit;
-        directory = plugin.getDataFolder().toPath().resolve("voice/records");
-        Path config = plugin.getDataFolder().toPath().resolve("voice/config.yml");
-        if (!Files.exists(config)) plugin.saveResource("voice/config.yml", false);
+        directory = Layout.data(plugin, "voice/records");
+        Path config = Layout.settings(plugin, "voice.yml");
+        if (!Files.exists(config)) plugin.saveResource("settings/voice.yml", false);
         messages = YamlConfiguration.loadConfiguration(config.toFile());
         migrateDurationMessages(config);
         if (plugin.getServer().getPluginManager().isPluginEnabled("PlasmoVoice")) {
@@ -67,9 +67,9 @@ final class ProfileVoice {
 
     void reloadMessages() throws Exception {
         YamlConfiguration next = new YamlConfiguration();
-        next.load(plugin.getDataFolder().toPath().resolve("voice/config.yml").toFile());
+        next.load(Layout.settings(plugin, "voice.yml").toFile());
         messages = next;
-        migrateDurationMessages(plugin.getDataFolder().toPath().resolve("voice/config.yml"));
+        migrateDurationMessages(Layout.settings(plugin, "voice.yml"));
     }
 
     private void migrateDurationMessages(Path config) {
@@ -82,7 +82,7 @@ final class ProfileVoice {
             messages.set("messages.recording-hint", oldHint.replace("30 секунд", "{seconds} секунд")); changed = true;
         }
         if (changed) try { messages.save(config.toFile()); }
-        catch (IOException ex) { plugin.getLogger().warning("Не удалось обновить стандартную длительность в voice/config.yml"); }
+        catch (IOException ex) { plugin.getLogger().warning("Не удалось обновить стандартную длительность в settings/voice.yml"); }
     }
 
     VoicePlaybackView view(UUID listener, ProfileVoiceNote note) {

@@ -181,6 +181,67 @@ class ProfileDataTest {
     }
 
     @Test
+    void cosmeticOwnershipCasesAndEquippedCosmeticPersistInProfileFile() throws Exception {
+        ProfileData data = new ProfileData(owner, "Player");
+        assertTrue(data.addCosmetic("kosmetika1"));
+        assertFalse(data.addCosmetic("kosmetika1"), "Повторное добавление той же косметики не меняет файл");
+        assertTrue(data.addCosmetic("kosmetika2"));
+        assertTrue(data.equipCosmetic("kosmetika2"));
+        assertFalse(data.equipCosmetic("kosmetika99"), "Чужую косметику нельзя надеть");
+        assertTrue(data.addCosmeticCase());
+        ProfileData back = ProfileCodec.decode(owner, ProfileCodec.encodeProfile(data));
+        assertTrue(back.ownsCosmetic("kosmetika1"));
+        assertTrue(back.ownsCosmetic("kosmetika2"));
+        assertFalse(back.ownsCosmetic("kosmetika3"));
+        assertEquals("kosmetika2", back.equippedCosmetic());
+        assertEquals(1, back.cosmeticCases());
+        assertTrue(back.takeCosmeticCase());
+        assertFalse(back.takeCosmeticCase(), "Нельзя взять кейс, которого нет");
+        // Косметика живёт отдельно от префиксов: снятие одного не трогает другое.
+        assertTrue(data.addPrefix("pref1"));
+        assertTrue(data.equipPrefix("pref1"));
+        assertTrue(data.revokeCosmetic("kosmetika2"));
+        assertEquals("pref1", data.equippedPrefix());
+        assertNull(data.equippedCosmetic(), "Изъятая надетая косметика снимается");
+        assertTrue(data.clearCosmetics(), "Очистка убирает и оставшуюся косметику");
+        assertFalse(data.ownsCosmetic("kosmetika1"));
+        assertTrue(data.ownsPrefix("pref1"), "Префиксы при этом целы");
+    }
+
+    @Test
+    void cosmeticPackCasesLiveSeparatelyFromPrefixPackCases() throws Exception {
+        ProfileData data = new ProfileData(owner, "Player");
+        long now = System.currentTimeMillis();
+
+        // Один и тот же id пака у префиксов и у косметики — разные стопки.
+        data.addPackCase("nabor", now + 3_600_000L);
+        data.addCosmeticPackCase("nabor", now + 2 * 3_600_000L);
+        data.addCosmeticPackCase("nabor", now + 5 * 3_600_000L);
+
+        assertEquals(1, data.packCases("nabor"));
+        assertEquals(2, data.cosmeticPackCases("nabor"));
+        assertEquals(now + 2 * 3_600_000L, data.nearestCosmeticPackExpiry("nabor"),
+                "первым забирается кейс с ближайшим сроком");
+
+        ProfileData back = ProfileCodec.decode(owner, ProfileCodec.encodeProfile(data));
+        assertEquals(1, back.packCases("nabor"));
+        assertEquals(2, back.cosmeticPackCases("nabor"));
+        assertEquals(now + 2 * 3_600_000L, back.nearestCosmeticPackExpiry("nabor"));
+
+        assertTrue(back.takeCosmeticPackCase("nabor"));
+        assertEquals(now + 5 * 3_600_000L, back.nearestCosmeticPackExpiry("nabor"));
+        assertTrue(back.takeCosmeticPackCase("nabor"));
+        assertEquals(0, back.cosmeticPackCases("nabor"));
+        assertFalse(back.takeCosmeticPackCase("nabor"), "нельзя взять кейс, которого нет");
+        assertEquals(1, back.packCases("nabor"), "кейс префиксов не тронут");
+
+        // Сгоревшие кейсы убираются сами.
+        back.addCosmeticPackCase("prosrochenniy", now - 1_000L);
+        assertEquals(0, back.cosmeticPackCases("prosrochenniy"));
+        assertTrue(back.cosmeticPackCasesSnapshot().isEmpty());
+    }
+
+    @Test
     void onlyTheUpperAndLowerRowsArePlacementTargets() {
         for (int i = 0; i < 27; i++) {
             int logical = ProfileText.medalSlot(i);

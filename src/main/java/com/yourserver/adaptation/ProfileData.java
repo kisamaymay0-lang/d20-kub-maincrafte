@@ -1,8 +1,11 @@
 package com.yourserver.adaptation;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
@@ -34,6 +37,17 @@ final class ProfileData {
     private final Set<String> ownedPrefixes = new HashSet<>();
     private String equippedPrefix;
     private int prefixCases;
+    private final Set<String> ownedCosmetics = new HashSet<>();
+    private String equippedCosmetic;
+    private int cosmeticCases;
+    /**
+     * Кейсы паков префиксов: id пака -> список сроков, по одному на кейс
+     * (мс от эпохи; {@link Long#MAX_VALUE} — бессрочный). Список отсортирован:
+     * первым забирается тот кейс, который сгорит раньше.
+     */
+    private final Map<String, List<Long>> packCases = new HashMap<>();
+    /** То же самое для паков косметики: id пака -> сроки его кейсов. */
+    private final Map<String, List<Long>> cosmeticPackCases = new HashMap<>();
 
     ProfileData(UUID owner, String name) {
         this.owner = Objects.requireNonNull(owner);
@@ -63,6 +77,15 @@ final class ProfileData {
         copy.ownedPrefixes.addAll(ownedPrefixes);
         copy.equippedPrefix = equippedPrefix;
         copy.prefixCases = prefixCases;
+        copy.ownedCosmetics.addAll(ownedCosmetics);
+        copy.equippedCosmetic = equippedCosmetic;
+        copy.cosmeticCases = cosmeticCases;
+        for (Map.Entry<String, List<Long>> entry : packCases.entrySet()) {
+            copy.packCases.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+        }
+        for (Map.Entry<String, List<Long>> entry : cosmeticPackCases.entrySet()) {
+            copy.cosmeticPackCases.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+        }
         System.arraycopy(layout, 0, copy.layout, 0, layout.length);
         copy.astronomyProgress = astronomyProgress;
         return copy;
@@ -130,6 +153,200 @@ final class ProfileData {
         equippedPrefix = (equipped != null && ownedPrefixes.contains(equipped)) ? equipped : null;
         prefixCases = Math.max(0, cases);
     }
+
+    // ===== КОСМЕТИКА =====
+    // Устройство ровно как у префиксов: своя коллекция, одна надетая и свои кейсы.
+    // Отличие только в показе: косметика визуально надета на голову игрока.
+
+    boolean ownsCosmetic(String id) { return id != null && ownedCosmetics.contains(id); }
+    Set<String> ownedCosmetics() { return Set.copyOf(ownedCosmetics); }
+    String equippedCosmetic() { return equippedCosmetic; }
+    int cosmeticCases() { return cosmeticCases; }
+    boolean addCosmetic(String id) {
+        if (id == null || id.isEmpty() || !ownedCosmetics.add(id)) return false;
+        revision++;
+        return true;
+    }
+    /** Забрать косметику; надетая косметика при этом снимается. */
+    boolean revokeCosmetic(String id) {
+        if (id == null || !ownedCosmetics.remove(id)) return false;
+        if (java.util.Objects.equals(equippedCosmetic, id)) equippedCosmetic = null;
+        revision++;
+        return true;
+    }
+    boolean clearCosmetics() {
+        boolean changed = !ownedCosmetics.isEmpty();
+        ownedCosmetics.clear();
+        if (equippedCosmetic != null) { equippedCosmetic = null; changed = true; }
+        if (changed) revision++;
+        return changed;
+    }
+    boolean equipCosmetic(String id) {
+        if (id != null && !ownedCosmetics.contains(id)) return false;
+        if (java.util.Objects.equals(equippedCosmetic, id)) return false;
+        equippedCosmetic = id;
+        revision++;
+        return true;
+    }
+    boolean addCosmeticCase() {
+        cosmeticCases++;
+        revision++;
+        return true;
+    }
+    boolean takeCosmeticCase() {
+        if (cosmeticCases <= 0) return false;
+        cosmeticCases--;
+        revision++;
+        return true;
+    }
+    /** Только чтение из файла: без пометки изменения, как restorePrefixes. */
+    void restoreCosmetics(Set<String> owned, String equipped, int cases) {
+        ownedCosmetics.clear();
+        if (owned != null) {
+            for (String id : owned) if (id != null && !id.isEmpty()) ownedCosmetics.add(id);
+        }
+        equippedCosmetic = (equipped != null && ownedCosmetics.contains(equipped)) ? equipped : null;
+        cosmeticCases = Math.max(0, cases);
+    }
+    // ===== КЕЙСЫ ПАКОВ =====
+    // У пака своя стопка кейсов и у каждого кейса свой срок: «время пака в
+    // часах» считается с момента выдачи, а не с момента вскрытия. Считается
+    // одинаково для паков префиксов и паков косметики — общие методы ниже.
+
+    /** Сколько живых кейсов этого пака префиксов у игрока; сгоревшие выбрасываются. */
+    int packCases(String packId) {
+        return countCases(packCases, packId);
+    }
+
+    /** Ближайший срок сгорания кейса пака префиксов; {@link Long#MAX_VALUE} — бессрочный или кейсов нет. */
+    long nearestPackExpiry(String packId) {
+        return nearestCase(packCases, packId);
+    }
+
+    /** Забрать один кейс пака префиксов — тот, что сгорит раньше. */
+    boolean takePackCase(String packId) {
+        return takeCase(packCases, packId);
+    }
+
+    /** Выдать кейс пака префиксов со сроком {@code expiresAt} ({@link Long#MAX_VALUE} — бессрочный). */
+    void addPackCase(String packId, long expiresAt) {
+        addCase(packCases, packId, expiresAt);
+    }
+
+    /** Убрать сгоревшие кейсы паков префиксов. */
+    boolean purgeExpiredPacks(long now) {
+        return purgeCases(packCases, now);
+    }
+
+    Map<String, List<Long>> packCasesSnapshot() {
+        return snapshotCases(packCases);
+    }
+
+    /** Только чтение из файла: без пометки изменения, как restorePrefixes. */
+    void restorePackCases(Map<String, List<Long>> snapshot) {
+        restoreCases(packCases, snapshot);
+    }
+
+    /** Сколько живых кейсов этого пака косметики у игрока. */
+    int cosmeticPackCases(String packId) {
+        return countCases(cosmeticPackCases, packId);
+    }
+
+    /** Ближайший срок сгорания кейса пака косметики. */
+    long nearestCosmeticPackExpiry(String packId) {
+        return nearestCase(cosmeticPackCases, packId);
+    }
+
+    /** Забрать один кейс пака косметики — тот, что сгорит раньше. */
+    boolean takeCosmeticPackCase(String packId) {
+        return takeCase(cosmeticPackCases, packId);
+    }
+
+    /** Выдать кейс пака косметики со сроком {@code expiresAt}. */
+    void addCosmeticPackCase(String packId, long expiresAt) {
+        addCase(cosmeticPackCases, packId, expiresAt);
+    }
+
+    /** Убрать сгоревшие кейсы паков косметики. */
+    boolean purgeExpiredCosmeticPacks(long now) {
+        return purgeCases(cosmeticPackCases, now);
+    }
+
+    Map<String, List<Long>> cosmeticPackCasesSnapshot() {
+        return snapshotCases(cosmeticPackCases);
+    }
+
+    void restoreCosmeticPackCases(Map<String, List<Long>> snapshot) {
+        restoreCases(cosmeticPackCases, snapshot);
+    }
+
+    private int countCases(Map<String, List<Long>> cases, String packId) {
+        if (packId == null) return 0;
+        purgeCases(cases, System.currentTimeMillis());
+        List<Long> list = cases.get(packId);
+        return list == null ? 0 : list.size();
+    }
+
+    private long nearestCase(Map<String, List<Long>> cases, String packId) {
+        if (packId == null) return Long.MAX_VALUE;
+        purgeCases(cases, System.currentTimeMillis());
+        List<Long> list = cases.get(packId);
+        if (list == null || list.isEmpty()) return Long.MAX_VALUE;
+        return list.get(0);
+    }
+
+    private boolean takeCase(Map<String, List<Long>> cases, String packId) {
+        if (packId == null) return false;
+        purgeCases(cases, System.currentTimeMillis());
+        List<Long> list = cases.get(packId);
+        if (list == null || list.isEmpty()) return false;
+        list.remove(0);
+        if (list.isEmpty()) cases.remove(packId);
+        revision++;
+        return true;
+    }
+
+    private void addCase(Map<String, List<Long>> cases, String packId, long expiresAt) {
+        if (packId == null || packId.isEmpty()) return;
+        List<Long> list = cases.computeIfAbsent(packId, key -> new ArrayList<>());
+        list.add(expiresAt);
+        list.sort(null);
+        revision++;
+    }
+
+    /** Уборка сгоревших кейсов: это не правка игрока, поэтому ревизию профиля не двигаем. */
+    private boolean purgeCases(Map<String, List<Long>> cases, long now) {
+        boolean changed = false;
+        for (Iterator<Map.Entry<String, List<Long>>> it = cases.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, List<Long>> entry = it.next();
+            List<Long> list = entry.getValue();
+            if (list.removeIf(deadline -> deadline != Long.MAX_VALUE && deadline <= now)) changed = true;
+            if (list.isEmpty()) { it.remove(); changed = true; }
+        }
+        return changed;
+    }
+
+    private Map<String, List<Long>> snapshotCases(Map<String, List<Long>> cases) {
+        Map<String, List<Long>> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Long>> entry : cases.entrySet()) {
+            copy.put(entry.getKey(), List.copyOf(entry.getValue()));
+        }
+        return copy;
+    }
+
+    private void restoreCases(Map<String, List<Long>> cases, Map<String, List<Long>> snapshot) {
+        cases.clear();
+        if (snapshot == null) return;
+        for (Map.Entry<String, List<Long>> entry : snapshot.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().isBlank()) continue;
+            List<Long> deadlines = new ArrayList<>();
+            for (Long deadline : entry.getValue()) if (deadline != null) deadlines.add(deadline);
+            if (deadlines.isEmpty()) continue;
+            deadlines.sort(null);
+            cases.put(entry.getKey(), deadlines);
+        }
+    }
+
     Map<UUID, Long> notificationHistory() { return Map.copyOf(notified); }
     Vote voteBy(UUID voter) { return votes.get(voter); }
     Map<UUID, Vote> votes() { return Collections.unmodifiableMap(votes); }
@@ -178,6 +395,19 @@ final class ProfileData {
         }
         medals.put(medal.id(), medal);
         if (!notified.containsKey(medal.id())) unannounced.add(medal.id());
+        medalRevision++;
+        revision++;
+        return true;
+    }
+
+    /**
+     * Переписать текст уже выданной медали (id и дата остаются): названия и заслуги
+     * берутся из файла настроек, поэтому их правки видны без выдачи медали заново.
+     */
+    boolean refresh(ProfileMedal medal) {
+        ProfileMedal existing = medals.get(medal.id());
+        if (existing == null || existing.equals(medal)) return false;
+        medals.put(medal.id(), medal);
         medalRevision++;
         revision++;
         return true;

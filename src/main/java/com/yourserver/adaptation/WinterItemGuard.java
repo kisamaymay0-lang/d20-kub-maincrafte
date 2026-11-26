@@ -17,6 +17,7 @@ import org.bukkit.event.inventory.InventoryCreativeEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
+import org.bukkit.event.inventory.PrepareGrindstoneEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -37,6 +38,9 @@ final class WinterItemGuard implements Listener {
     }
 
     private boolean tool(ItemStack item) { return items.kind(item) == WinterItems.Kind.TOOL; }
+    /** Клешня: её зачарования заимствованы у инструментов и живут в компоненте предмета,
+     *  поэтому стол, книга и точильный камень её не трогают — своё она берёт сама. */
+    private boolean claw(ItemStack item) { return items.kind(item) == WinterItems.Kind.CLAW; }
     private boolean rune(ItemStack item) {
         if (item == null || !item.hasItemMeta()) return false;
         var lore = item.getItemMeta().lore();
@@ -52,14 +56,34 @@ final class WinterItemGuard implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
-    public void prepare(PrepareItemEnchantEvent event) { if (tool(event.getItem())) event.setCancelled(true); }
+    public void prepare(PrepareItemEnchantEvent event) {
+        if (tool(event.getItem()) || claw(event.getItem())) event.setCancelled(true);
+    }
 
     @EventHandler(priority = EventPriority.HIGHEST)
-    public void enchant(EnchantItemEvent event) { if (tool(event.getItem())) event.setCancelled(true); }
+    public void enchant(EnchantItemEvent event) {
+        if (tool(event.getItem()) || claw(event.getItem())) event.setCancelled(true);
+    }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void anvil(PrepareAnvilEvent event) {
+        ItemStack right = event.getInventory().getItem(1);
+        // Клешне чужие зачарования не добавляем: «Эффективность» из книги посчиталась бы дважды,
+        // а «Удача» и «Шелк» у неё уже свои, от инструментов. Переименовать её по-прежнему можно.
+        if (claw(event.getInventory().getItem(0)) && right != null && !right.getType().isAir()
+                && (right.getType() == Material.ENCHANTED_BOOK || !right.getEnchantments().isEmpty())) {
+            event.setResult(null);
+            return;
+        }
         if (forbidden(event.getInventory(), event.getResult())) event.setResult(null);
+    }
+
+    /** Точильный камень снял бы с клешни заимствованные зачарования и выдал за них опыт. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void grindstone(PrepareGrindstoneEvent event) {
+        if (claw(event.getInventory().getItem(0)) || claw(event.getInventory().getItem(1))) {
+            event.setResult(null);
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)

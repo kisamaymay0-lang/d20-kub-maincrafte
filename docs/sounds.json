@@ -1,0 +1,22 @@
+{
+  "pet-talking1": {
+    "category": "master",
+    "sounds": [
+      {
+        "name": "f8resurs:pet-talking1",
+        "stream": false,
+        "preload": true
+      }
+    ]
+  },
+  "pet-talking2": {
+    "category": "master",
+    "sounds": [
+      {
+        "name": "f8resurs:pet-talking2",
+        "stream": false,
+        "preload": true
+      }
+    ]
+  }
+}

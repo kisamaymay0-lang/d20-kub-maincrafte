@@ -49,7 +49,9 @@ final class ProfileTags {
     ProfileTags(JavaPlugin plugin, Function<Player, PrefixCatalog.Prefix> equipped) {
         this.plugin = plugin;
         this.equipped = equipped;
-        task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 2L, 2L);
+        // Каждый тик: анимация префикса (кадр может держаться 0,05 с) и перенос тега.
+        // Лишних пакетов нет — текст уходит только когда правда сменился кадр.
+        task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
     }
 
     /** Обновить тег после смены/снятия префикса; null убирает замену полностью. */
@@ -121,6 +123,13 @@ final class ProfileTags {
                 at.setYaw(0); at.setPitch(0);
                 at.add(0, TAG_HEIGHT, 0);
                 if (tag.display.getLocation().distanceSquared(at) > 0.000001) tag.display.teleport(at);
+                // Анимированный префикс: над головой показываем текущий кадр.
+                // У обычного префикса строка не меняется, поэтому пакетов нет.
+                PrefixCatalog.Prefix prefix = equipped.apply(player);
+                if (prefix != null && prefix.animated()) {
+                    Component line = ProfileIcons.prefixedName(prefix, player.getName());
+                    if (!line.equals(tag.display.text())) tag.display.text(line);
+                }
             } catch (RuntimeException ex) {
                 remove(entry.getKey());
             }

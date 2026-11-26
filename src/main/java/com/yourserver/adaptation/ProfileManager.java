@@ -34,6 +34,7 @@ import org.bukkit.entity.Firework;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.FireworkMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -56,7 +57,24 @@ import java.util.function.ToLongFunction;
 
 /** Профиль/коллекция/размещение. Доступ проверяется по UUID и серверному holder, не по названию предмета. */
 public final class ProfileManager implements Listener, CommandExecutor, TabCompleter {
-    private enum Screen { PROFILE, COLLECTION, PLACE, PREFIX, PREFIX_CASE }
+    private enum Screen { PROFILE, COLLECTION, PLACE, PREFIX, PREFIX_CASE, CUSTOMIZE, COSMETIC, COSMETIC_CASE, PACKS, PACK }
+
+    /** Место кнопок в меню «Настроить косметику» (второй ряд инвентаря). */
+    private static final int CUSTOMIZE_PREFIX_SLOT = 11;
+    private static final int CUSTOMIZE_COSMETIC_SLOT = 13;
+    /** Кнопка «Наборы косметики» в меню косметики: сундучки-наборы и их кейсы. */
+    private static final int COSMETIC_PACKS_SLOT = 11;
+    /** Третья кнопка «Настроить»: список своих префиксов, чтобы надеть любой. */
+    private static final int CUSTOMIZE_MY_PREFIXES_SLOT = 15;
+    /** Средний ряд меню паков: на нём стоят сундучки (до девяти паков). */
+    private static final int PACK_ROW_START = 9;
+    private static final int PACK_ROW_SIZE = 9;
+    /** Экран одного пака: содержимое сверху и снизу, в середине — кейс и отмена. */
+    private static final int PACK_TOP_ROW = 0;
+    private static final int PACK_BOTTOM_ROW = 18;
+    /** Кнопка «назад к пакам» и «крутить кейс пака» — обе в среднем ряду. */
+    private static final int PACK_BACK_SLOT = 9;
+    private static final int PACK_SPIN_SLOT = 13;
 
     /** Сколько префиксов помещается в кейс и как они «бьются».
      *  Моменты «поломок» (тики от открытия, 20 тиков = 1 с): первая через 2 с,
@@ -71,6 +89,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     private static final class CaseRun {
         final UUID owner;
+        /** Что вскрывается: кейс префиксов или кейс косметики. Анимация одна на оба. */
+        final boolean cosmetic;
+        /** Из какого пака кейс (null — обычный кейс префиксов). */
+        final String pack;
         /** Префиксы в порядке мест: индекс i всегда занимает слот CASE_SLOT_START + i и не съезжает. */
         final List<String> slots = new ArrayList<>();
         final boolean[] broken = new boolean[CASE_MAX];
@@ -79,12 +101,20 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         boolean victory;
         int victoryTick;
         BukkitTask task;
-        CaseRun(UUID owner, int alive) { this.owner = owner; this.alive = alive; }
+        CaseRun(UUID owner, int alive, boolean cosmetic, String pack) {
+            this.owner = owner; this.alive = alive; this.cosmetic = cosmetic; this.pack = pack;
+        }
         String survivor() {
             for (int i = 0; i < slots.size(); i++) if (!broken[i]) return slots.get(i);
             return null;
         }
     }
+
+    /**
+     * Что за паки открыты на экранах {@code PACKS} и {@code PACK}: префиксы или
+     * косметика. Экраны одни и те же — различается только содержимое.
+     */
+    private enum PackKind { PREFIX, COSMETIC }
 
     private static final class Menu implements InventoryHolder {
         final UUID viewer;
@@ -93,10 +123,27 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         final UUID chosen;
         final Map<Integer, UUID> medalsBySlot = new HashMap<>();
         final Map<Integer, String> prefixesBySlot = new HashMap<>();
+        final Map<Integer, String> cosmeticsBySlot = new HashMap<>();
+        /** Сундучки паков: слот -> id пака. */
+        final Map<Integer, String> packsBySlot = new HashMap<>();
+        /** Какой пак открыт на экране PACK (id пака). */
+        final String pack;
+        /** Паки префиксов или паки косметики открыты на экране PACKS/PACK. */
+        final PackKind packKind;
         int page;
         Inventory inventory;
         Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen) {
+            this(viewer, owner, screen, page, chosen, null, PackKind.PREFIX);
+        }
+
+        Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen, String pack) {
+            this(viewer, owner, screen, page, chosen, pack, PackKind.PREFIX);
+        }
+
+        Menu(UUID viewer, UUID owner, Screen screen, int page, UUID chosen, String pack, PackKind packKind) {
             this.viewer = viewer; this.owner = owner; this.screen = screen; this.page = page; this.chosen = chosen;
+            this.pack = pack;
+            this.packKind = packKind == null ? PackKind.PREFIX : packKind;
         }
         @Override public Inventory getInventory() { return inventory; }
     }
@@ -111,9 +158,20 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private final ProfileStorage storage;
     private final Path medalConfig;
     private final Path prefixConfig;
+    private final Path cosmeticConfig;
+    /** Папка с паками косметики: plugins/f8-plugin/content/cosmeticpacks/. */
+    private final Path cosmeticPackFolder;
+    /** Паки косметики: сундучки-наборы в меню косметики. */
+    private volatile CosmeticPackCatalog cosmeticPacks;
     private volatile PrefixCatalog prefixes;
+    private volatile CosmeticCatalog cosmetics;
+    /** Папка с паками префиксов: plugins/f8-plugin/content/prefixpacks/. */
+    private final Path packFolder;
+    private volatile PrefixPackCatalog packs;
     private MedalSettings medalSettings;
     private final ProfileItems items;
+    /** «Тотем медали»: при получении медали перед глазами игрока всплывает её картинка. */
+    private final MedalAnimation medalAnimation;
     private final ProfileCards cards;
     private final ProfileVoice voice;
     private final ProfileSubjects subjects;
@@ -125,32 +183,61 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private final ConcurrentHashMap<UUID, Editing> editing = new ConcurrentHashMap<>();
     private final Map<UUID, CaseRun> caseRuns = new HashMap<>();
     private final Map<UUID, String> pendingPrefixGrants = new HashMap<>();
+    /** Косметика, выигранная в кейсе, пока игрок был не в сети: сообщим при входе. */
+    private final Map<UUID, String> pendingCosmeticGrants = new HashMap<>();
     /** Надетый префикс для быстрого чтения из асинхронных событий (чат) без обращения к хранилищу. */
     private final Map<UUID, String> equippedPrefixes = new ConcurrentHashMap<>();
+    /** Какой кадр анимации уже показан игроку: ник и tab обновляем только при смене кадра. */
+    private final Map<UUID, Integer> animatedFrames = new ConcurrentHashMap<>();
+    private final BukkitTask prefixAnimation;
+    /** Надетая косметика: так же быстро читается тиком отображения на голове. */
+    private final Map<UUID, String> equippedCosmetics = new ConcurrentHashMap<>();
     private ToLongFunction<UUID> constellationMilestone = ignored -> 0L;
     /** Замена ванильного ника над головой на картинку префикса + белый ник. */
     private ProfileTags tags;
+    /** Косметика, визуально надетая на голову игрока. */
+    private final Cosmetics headCosmetics;
     private volatile boolean stopping;
 
     public ProfileManager(JavaPlugin plugin, AsyncTextWriter writer) {
         this.plugin = plugin;
-        medalConfig = plugin.getDataFolder().toPath().resolve("medals/config.yml");
-        if (!Files.exists(medalConfig)) plugin.saveResource("medals/config.yml", false);
+        medalConfig = Layout.settings(plugin, "medals.yml");
+        if (!Files.exists(medalConfig)) plugin.saveResource("settings/medals.yml", false);
         medalSettings = MedalSettings.defaults();
-        try { medalSettings = MedalSettings.load(medalConfig); }
+        try { medalSettings = MedalSettings.load(medalConfig); reportMedalProblems(null); }
         catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка настройки медалей; временно используются стандартные значения", ex); }
-        prefixConfig = plugin.getDataFolder().toPath().resolve("prefixes.yml");
+        prefixConfig = Layout.settings(plugin, "prefixes.yml");
         if (!Files.exists(prefixConfig)) {
-            plugin.saveResource("prefixes.yml", false);
+            plugin.saveResource("settings/prefixes.yml", false);
             plugin.getLogger().info("Создан файл префиксов: " + prefixConfig + " (правьте его и применяйте через /profile prefix reload)");
         }
-        PrefixCatalog loadedPrefixes = PrefixCatalog.defaults();
-        try { loadedPrefixes = PrefixCatalog.load(prefixConfig); }
+        packFolder = Layout.content(plugin, "prefixpacks");
+        PrefixCatalog base = PrefixCatalog.defaults();
+        try { base = PrefixCatalog.load(prefixConfig); }
         catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка prefixes.yml; используются стандартные префиксы", ex); }
-        prefixes = loadedPrefixes;
-        plugin.getLogger().info("Префиксы профиля: " + prefixes.size() + " шт., файл " + prefixConfig);
-        storage = new ProfileStorage(plugin.getDataFolder().toPath().resolve("profiles"),
-                plugin.getDataFolder().toPath().resolve("medals/players"), writer, plugin.getLogger(), medal -> medalSettings.migrate(medal));
+        packs = loadPacks(base);
+        prefixes = base.withPacks(packs);
+        plugin.getLogger().info("Префиксы профиля: " + prefixes.size() + " шт., файл " + prefixConfig
+                + ", паков " + packs.size()
+                + (prefixes.animatedCount() > 0 ? ", с анимацией " + prefixes.animatedCount() : ""));
+        cosmeticConfig = Layout.settings(plugin, "cosmetics.yml");
+        cosmeticPackFolder = Layout.content(plugin, "cosmeticpacks");
+        if (!Files.exists(cosmeticConfig)) {
+            plugin.saveResource("settings/cosmetics.yml", false);
+            plugin.getLogger().info("Создан файл косметики: " + cosmeticConfig + " (правьте его и применяйте через /f8 reload)");
+        }
+        CosmeticCatalog baseCosmetics = CosmeticCatalog.defaults();
+        try { baseCosmetics = CosmeticCatalog.load(cosmeticConfig); }
+        catch (Exception ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING,
+                    "Ошибка settings/cosmetics.yml; используется стандартная косметика", ex);
+        }
+        cosmeticPacks = loadCosmeticPacks(baseCosmetics);
+        cosmetics = baseCosmetics.withPacks(cosmeticPacks);
+        plugin.getLogger().info("Косметика профиля: " + cosmetics.size() + " шт., файл " + cosmeticConfig
+                + ", наборов " + cosmeticPacks.size());
+        storage = new ProfileStorage(Layout.data(plugin, "profiles"),
+                Layout.data(plugin, "medals/players"), writer, plugin.getLogger(), medal -> medalSettings.migrate(medal));
         ZoneId zone = ZoneId.systemDefault();
         String configuredZone = plugin.getConfig().getString("profiles.date-time-zone", "system");
         if (configuredZone != null && !configuredZone.equalsIgnoreCase("system")) {
@@ -159,12 +246,20 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         voice = new ProfileVoice(plugin, this::saveVoice);
         items = new ProfileItems(zone, medalSettings);
+        medalAnimation = new MedalAnimation(plugin);
         subjects = new ProfileSubjects(plugin, this::profile);
         cards = new ProfileCards(plugin, subject -> profile(subject.profile(), subject.name()), items, subjects, voice, prefixes);
         // Тег префикса над головой — чисто визуальное. По умолчанию выключен
         // (профили показываются в карточке/чате, над головой в игре ничего не висит).
         boolean overheadTags = plugin.getConfig().getBoolean("profiles.overhead-tags", false);
         tags = overheadTags ? new ProfileTags(plugin, player -> prefixes.get(equippedPrefixes.get(player.getUniqueId()))) : null;
+        // Анимация префиксов: ник в tab и displayName перерисовываются только когда
+        // реально сменился кадр, поэтому задача дешёвая даже при десятках игроков.
+        prefixAnimation = Bukkit.getScheduler().runTaskTimer(plugin, this::animatePrefixes, 1L, 1L);
+        headCosmetics = new Cosmetics(plugin, player -> cosmetics.get(equippedCosmetics.get(player.getUniqueId())));
+        // Косметика — настоящий предмет в слоте шлема, поэтому ей нужны события
+        // инвентаря: не дать вытащить, выкинуть, перетащить или потерять.
+        plugin.getServer().getPluginManager().registerEvents(headCosmetics, plugin);
         maintenance = Bukkit.getScheduler().runTaskTimer(plugin, this::maintenance, 20L, 20L);
         for (Player player : Bukkit.getOnlinePlayers()) join(player);
     }
@@ -175,11 +270,74 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         for (Player player : Bukkit.getOnlinePlayers()) join(player);
     }
 
+    /**
+     * Паки префиксов: plugins/f8-plugin/content/prefixpacks/*.yml. Папка создаётся при
+     * первом запуске, и в неё кладётся тестовый пак pref-pack1 — по нему видно,
+     * как писать свои.
+     *
+     * Имена и цвета префиксов паков берутся из {@code prefixes.yml} (каталог
+     * {@code base}): в файле пака пишется только файл префикса.
+     */
+    private PrefixPackCatalog loadPacks(PrefixCatalog base) {
+        try {
+            if (!Files.isDirectory(packFolder)) {
+                Files.createDirectories(packFolder);
+                plugin.saveResource("content/prefixpacks/pref-pack1.yml", false);
+                plugin.getLogger().info("Создан тестовый пак префиксов: " + packFolder.resolve("pref-pack1.yml"));
+            }
+            PrefixPackCatalog loaded = PrefixPackCatalog.load(packFolder, base,
+                    message -> plugin.getLogger().warning(message));
+            plugin.getLogger().info("Паки префиксов: " + loaded.size() + " шт., папка " + packFolder);
+            return loaded;
+        } catch (Exception ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка паков префиксов; паки не используются", ex);
+            return PrefixPackCatalog.load(null);
+        }
+    }
+
+    /**
+     * Паки косметики: plugins/f8-plugin/content/cosmeticpacks/*.yml. Папка создаётся
+     * при первом запуске, и в неё кладётся тестовый набор kosmetika-nabor1 —
+     * по нему видно, как писать свои. Имена и цвета косметики наборов берутся
+     * из {@code settings/cosmetics.yml}: в файле набора пишется только файл модели.
+     */
+    private CosmeticPackCatalog loadCosmeticPacks(CosmeticCatalog base) {
+        try {
+            if (!Files.isDirectory(cosmeticPackFolder)) {
+                Files.createDirectories(cosmeticPackFolder);
+                plugin.saveResource("content/cosmeticpacks/kosmetika-nabor1.yml", false);
+                plugin.getLogger().info("Создан тестовый набор косметики: "
+                        + cosmeticPackFolder.resolve("kosmetika-nabor1.yml"));
+            }
+            CosmeticPackCatalog loaded = CosmeticPackCatalog.load(cosmeticPackFolder, base,
+                    message -> plugin.getLogger().warning(message));
+            plugin.getLogger().info("Наборы косметики: " + loaded.size() + " шт., папка " + cosmeticPackFolder);
+            return loaded;
+        } catch (Exception ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка наборов косметики; наборы не используются", ex);
+            return CosmeticPackCatalog.load(null);
+        }
+    }
+
     private ProfileData profile(Player player) { return profile(player.getUniqueId(), player.getName()); }
 
     private ProfileData profile(UUID owner, String name) {
         if (subjects != null && subjects.preview(owner)) return subjects.profile(owner);
         ProfileData data = storage.get(owner, name);
+        // Название и заслуги медалей — из medals.yml: правка файла видна в игре сразу,
+        // даже если медаль уже была выдана (id и дата остаются прежними).
+        List<ProfileMedal> renamed = medalSettings.refreshAll(data);
+        if (!renamed.isEmpty()) {
+            storage.prepareMedalChange(owner);
+            boolean changed = false;
+            for (ProfileMedal medal : renamed) changed |= data.refresh(medal);
+            if (changed) {
+                storage.changed(owner);
+                if (!storage.flushBlocking(owner)) {
+                    throw new IllegalStateException("Медали не записаны; проверьте файл и примените /profile medal reload");
+                }
+            }
+        }
         Player online = Bukkit.getPlayer(owner);
         if (online != null && data.rename(online.getName())) storage.changed(owner);
         long earnedAt = constellationMilestone.applyAsLong(owner);
@@ -211,10 +369,13 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         for (ProfileMedal medal : pending) {
             String rarity = medalSettings.style(medal.metal()).rarity();
-            Component broadcast = medalSettings.message("public", data.name(), rarity, medal.title(), 1, "", items.publicMedal(medal).asHoverEvent());
+            ItemStack picture = items.publicMedal(medal);
+            Component broadcast = medalSettings.message("public", data.name(), rarity, medal.title(), 1, "", picture.asHoverEvent());
             Component personal = medalSettings.message("personal", data.name(), rarity, medal.title(), 1, "");
             MedalDelivery.send(broadcast, personal, Bukkit::broadcast, player::sendMessage,
                     () -> player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f));
+            // Вместо тотема — изображение полученной медали (её модель из ресурспака).
+            medalAnimation.play(player);
         }
     }
 
@@ -233,7 +394,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     }
 
     /**
-     * Съеден бутерброд: отмечаем вид навсегда и выдаём медали, заполненные в medals/config.yml.
+     * Съеден бутерброд: отмечаем вид навсегда и выдаём медали, заполненные в settings/medals.yml.
      * Запрет дубля — только пока медаль ЕСТЬ у игрока: изъятую (take/очистку) можно
      * получить заново следующим подходящим съеденным бутербродом.
      */
@@ -266,6 +427,103 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         return new ProfileMedal(UUID.randomUUID(), spec.metal(), spec.title(), spec.reasons(), System.currentTimeMillis(), source);
     }
 
+    // ===================== Медали за напитки =====================
+    //
+    // Условия живут в settings/medals.yml (блок napitki:, он же drinks:). Java ничего не
+    // знает про конкретные медали — только про пять условий, которые вызывают эти методы.
+
+    /**
+     * Игрок изготовил напиток: шейкер — ступень 0, бутылочка из бочки — 1..5.
+     * Безупречное качество = 5-я ступень.
+     */
+    void drinkMade(Player player, String drinkId, int tier) {
+        if (player == null || drinkId == null) return;
+        Map<String, MedalSettings.DrinkSpec> specs = medalSettings.drinkMedals();
+        if (specs.isEmpty()) return;
+        boolean alcoholic = DrinkMedalRules.isAlcoholic(drinkId);
+        boolean flawless = tier >= 5;
+        try {
+            ProfileData data = profile(player);
+            UUID owner = player.getUniqueId();
+            storage.prepareMedalChange(owner);
+            boolean changed = false;
+            if (flawless && DrinkMedalRules.isWine(drinkId)) {
+                // «Сделал безупречное вино» запоминается навсегда: по этим маркерам
+                // и выдаётся медаль за все виды вин.
+                changed |= data.markClaimed(DrinkMedalRules.flawlessWineMarker(drinkId));
+            }
+            for (MedalSettings.DrinkSpec spec : specs.values()) {
+                if (!spec.filled() || data.ownsReward(spec.source())) continue;
+                boolean match = switch (spec.trigger()) {
+                    case "drink-made" -> (!spec.alcoholOnly() || alcoholic)
+                            && DrinkMedalRules.drinkIncludes(spec.drink(), drinkId);
+                    case "flawless-alcohol" -> flawless && alcoholic;
+                    case "all-flawless-wines" -> flawless && DrinkMedalRules.allWinesFlawless(data);
+                    default -> false;
+                };
+                if (match) changed |= data.award(drinkMedal(spec));
+            }
+            commitDrinkAwards(player, data, owner, changed);
+        } catch (RuntimeException ex) {
+            medalMessage(player, "pending-error", player.getName(), "", 0, ex.getMessage());
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Не выдана медаль за напиток игроку " + player.getName(), ex);
+        }
+    }
+
+    /** Игрок выпил напиток: пиратский ром в океане засчитывается здесь. */
+    void drinkConsumed(Player player, String drinkId) {
+        if (player == null || drinkId == null) return;
+        if (medalSettings.drinkMedals().isEmpty()) return;
+        if (!inOcean(player)) return;
+        awardDrinkMedals(player, "ром в океане", spec -> "rum-in-ocean".equals(spec.trigger())
+                && (DrinkMedalRules.sameDrink(spec.drink(), drinkId) || DrinkMedalRules.isRum(drinkId)));
+    }
+
+    /** Шкала опьянения дошла до предела. */
+    void drunkMax(Player player) {
+        if (player == null || medalSettings.drinkMedals().isEmpty()) return;
+        awardDrinkMedals(player, "предел опьянения", spec -> "drunk-max".equals(spec.trigger()));
+    }
+
+    private void awardDrinkMedals(Player player, String reason, java.util.function.Predicate<MedalSettings.DrinkSpec> test) {
+        try {
+            ProfileData data = profile(player);
+            UUID owner = player.getUniqueId();
+            storage.prepareMedalChange(owner);
+            boolean changed = false;
+            for (MedalSettings.DrinkSpec spec : medalSettings.drinkMedals().values()) {
+                if (!spec.filled() || data.ownsReward(spec.source())) continue;
+                if (!test.test(spec)) continue;
+                changed |= data.award(drinkMedal(spec));
+            }
+            commitDrinkAwards(player, data, owner, changed);
+        } catch (RuntimeException ex) {
+            medalMessage(player, "pending-error", player.getName(), "", 0, ex.getMessage());
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Не выдана медаль за напиток (" + reason + ") игроку " + player.getName(), ex);
+        }
+    }
+
+    private void commitDrinkAwards(Player player, ProfileData data, UUID owner, boolean changed) {
+        if (!changed) return;
+        storage.changed(owner);
+        if (!storage.flushBlocking(owner)) throw new IllegalStateException("Медали не записаны; проверьте файл и примените /profile medal reload");
+        announcePending(player, data);
+        refresh(owner);
+    }
+
+    private static ProfileMedal drinkMedal(MedalSettings.DrinkSpec spec) {
+        return new ProfileMedal(UUID.randomUUID(), spec.metal(), spec.title(), spec.reasons(), System.currentTimeMillis(), spec.source());
+    }
+
+    /** Океан — любой биом океана. Проверка спрятана в try/catch: в тестах Bukkit нет. */
+    private static boolean inOcean(Player player) {
+        try {
+            return player.getWorld().getBiome(player.getLocation()).getKey().getKey().contains("ocean");
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
     // ===================== Префиксы и кейсы =====================
 
     private void savePrefix(ProfileData data) {
@@ -277,12 +535,43 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
      *  displayName красим только ник — чтобы события, берущие displayName сами, не задваивали иконку. */
     private void applyPrefixName(Player player, ProfileData data) {
         PrefixCatalog.Prefix prefix = prefixes.get(data.equippedPrefix());
-        if (prefix == null) equippedPrefixes.remove(player.getUniqueId());
-        else equippedPrefixes.put(player.getUniqueId(), prefix.id());
+        if (prefix == null) {
+            equippedPrefixes.remove(player.getUniqueId());
+            animatedFrames.remove(player.getUniqueId());
+        } else {
+            equippedPrefixes.put(player.getUniqueId(), prefix.id());
+            animatedFrames.remove(player.getUniqueId());
+        }
         Component line = ProfileIcons.prefixedName(prefix, player.getName());
         player.displayName(line);
         player.playerListName(line);
         if (tags != null) tags.apply(player, prefix);
+    }
+
+    /**
+     * Смена кадров у анимированных префиксов: {@code animation.frames} и
+     * {@code animation.interval-hundredths} из settings/prefixes.yml.
+     *
+     * <p>Картинка префикса — это глиф шрифта, сам по себе он не двигается, поэтому
+     * «анимацию» делает сервер: ник в tab и displayName перерисовываются новым
+     * кадром, а тег над головой (если включён) — в {@link ProfileTags}. При смене
+     * кадра уходит одно обновление, между кадрами трафика нет.
+     */
+    private void animatePrefixes() {
+        if (prefixes.animatedCount() == 0 || equippedPrefixes.isEmpty()) return;
+        long millis = System.currentTimeMillis();
+        for (Map.Entry<UUID, String> entry : equippedPrefixes.entrySet()) {
+            PrefixCatalog.Prefix prefix = prefixes.get(entry.getValue());
+            if (prefix == null || !prefix.animated()) continue;
+            int frame = ProfileIcons.frameIndex(prefix, millis);
+            Integer shown = animatedFrames.put(entry.getKey(), frame);
+            if (shown != null && shown == frame) continue;
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null || !player.isOnline()) continue;
+            Component line = ProfileIcons.prefixedName(prefix, player.getName(), millis);
+            player.displayName(line);
+            player.playerListName(line);
+        }
     }
 
     private void equipPrefix(Player player, ProfileData data, String id) {
@@ -305,6 +594,125 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         clickSound(player);
         applyPrefixName(player, data);
         refresh(data.owner);
+    }
+
+    /**
+     * Косметика на голове: запоминаем надетую и показываем её всем — и владельцу тоже.
+     * Ник при этом не меняется — косметика ничего не рисует в чате и в табе.
+     */
+    private void applyCosmetic(Player player, ProfileData data) {
+        CosmeticCatalog.Cosmetic cosmetic = cosmetics.get(data.equippedCosmetic());
+        if (cosmetic == null) equippedCosmetics.remove(player.getUniqueId());
+        else equippedCosmetics.put(player.getUniqueId(), cosmetic.id());
+        headCosmetics.apply(player, cosmetic);
+    }
+
+    private void equipCosmetic(Player player, ProfileData data, String id) {
+        String previous = data.equippedCosmetic();
+        if (previous != null && previous.equals(id)) return;
+        if (!data.equipCosmetic(id)) return;
+        try { savePrefix(data); }
+        catch (RuntimeException ex) { data.equipCosmetic(previous); throw ex; }
+        clickSound(player);
+        applyCosmetic(player, data);
+        refresh(data.owner);
+    }
+
+    private void unequipCosmetic(Player player, ProfileData data) {
+        String previous = data.equippedCosmetic();
+        if (previous == null) return;
+        if (!data.equipCosmetic(null)) return;
+        try { savePrefix(data); }
+        catch (RuntimeException ex) { data.equipCosmetic(previous); throw ex; }
+        clickSound(player);
+        applyCosmetic(player, data);
+        refresh(data.owner);
+    }
+
+    /** Списывает кейс косметики и запускает вскрытие до одной косметики. */
+    private void openCosmeticCase(Player player, ProfileData data) {
+        if (caseRuns.containsKey(data.owner)) {
+            player.sendMessage(ProfileItems.text("Вскрытие кейса уже идёт.", NamedTextColor.RED));
+            return;
+        }
+        List<CosmeticCatalog.Cosmetic> pool = cosmetics.list().stream()
+                .filter(cosmetic -> !data.ownsCosmetic(cosmetic.id())).toList();
+        if (pool.isEmpty()) {
+            player.sendMessage(ProfileItems.text("У вас уже есть вся косметика.", NamedTextColor.RED));
+            return;
+        }
+        if (!data.takeCosmeticCase()) {
+            player.sendMessage(ProfileItems.text("У вас нет кейсов косметики.", NamedTextColor.RED));
+            return;
+        }
+        try { savePrefix(data); }
+        catch (RuntimeException ex) {
+            data.addCosmeticCase();
+            player.sendMessage(ProfileItems.text("Не удалось открыть кейс: " + ex.getMessage(), NamedTextColor.RED));
+            return;
+        }
+        List<CosmeticCatalog.Cosmetic> shuffled = new ArrayList<>(pool);
+        Collections.shuffle(shuffled, new java.util.Random());
+        int count = Math.min(CASE_MAX, shuffled.size());
+        CaseRun run = new CaseRun(data.owner, count, true, null);
+        for (int i = 0; i < count; i++) run.slots.add(shuffled.get(i).id());
+        caseRuns.put(data.owner, run);
+        clickSound(player);
+        open(player, data.owner, Screen.COSMETIC_CASE, 0, null);
+        if (count == 1) {
+            // Не выбитой косметики меньше двух: показываем единственную и забираем через 4 секунды.
+            run.victory = true;
+            run.victoryTick = 0;
+            player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.1f);
+            fireworks(player, run.slots.get(0), true);
+        }
+        run.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> caseStep(run), CASE_TICK, CASE_TICK);
+    }
+
+    /**
+     * Вскрыть кейс набора косметики: кейс списывается сразу, участвуют только
+     * косметика этого набора, которой у игрока ещё нет.
+     */
+    private void openCosmeticPackCase(Player player, ProfileData data, CosmeticPackCatalog.Pack pack) {
+        if (caseRuns.containsKey(data.owner)) {
+            player.sendMessage(ProfileItems.text("Вскрытие кейса уже идёт.", NamedTextColor.RED));
+            return;
+        }
+        if (data.cosmeticPackCases(pack.id()) <= 0) {
+            player.sendMessage(ProfileItems.text("У вас нет кейсов набора «" + pack.name() + "».", NamedTextColor.RED));
+            return;
+        }
+        List<CosmeticCatalog.Cosmetic> pool = pack.cosmetics().stream()
+                .filter(cosmetic -> !data.ownsCosmetic(cosmetic.id())).toList();
+        if (pool.isEmpty()) {
+            player.sendMessage(ProfileItems.text("Из набора «" + pack.name() + "» у вас уже вся косметика.", NamedTextColor.RED));
+            return;
+        }
+        if (!data.takeCosmeticPackCase(pack.id())) return;
+        try {
+            savePrefix(data);
+        } catch (RuntimeException ex) {
+            // Не записали — возвращаем кейс, чтобы он не пропал зря.
+            data.addCosmeticPackCase(pack.id(), CosmeticPackCatalog.expiresAt(System.currentTimeMillis(), pack.timeHours()));
+            player.sendMessage(ProfileItems.text("Не удалось открыть кейс: " + ex.getMessage(), NamedTextColor.RED));
+            return;
+        }
+        List<CosmeticCatalog.Cosmetic> shuffled = new ArrayList<>(pool);
+        Collections.shuffle(shuffled, new java.util.Random());
+        int count = Math.min(CASE_MAX, shuffled.size());
+        CaseRun run = new CaseRun(data.owner, count, true, pack.id());
+        for (int i = 0; i < count; i++) run.slots.add(shuffled.get(i).id());
+        caseRuns.put(data.owner, run);
+        clickSound(player);
+        open(player, data.owner, Screen.COSMETIC_CASE, 0, null);
+        if (count == 1) {
+            // Не выбитой косметики набора меньше двух: показываем единственную и забираем через 4 секунды.
+            run.victory = true;
+            run.victoryTick = 0;
+            player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.1f);
+            fireworks(player, run.slots.get(0), true);
+        }
+        run.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> caseStep(run), CASE_TICK, CASE_TICK);
     }
 
     /** Списывает кейс и запускает вскрытие до одного префикса (кейс не возвращается даже при выходе).
@@ -333,7 +741,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         List<PrefixCatalog.Prefix> shuffled = new ArrayList<>(pool);
         Collections.shuffle(shuffled, new java.util.Random());
         int count = Math.min(CASE_MAX, shuffled.size());
-        CaseRun run = new CaseRun(data.owner, count);
+        CaseRun run = new CaseRun(data.owner, count, false, null);
         for (int i = 0; i < count; i++) run.slots.add(shuffled.get(i).id());
         caseRuns.put(data.owner, run);
         clickSound(player);
@@ -343,7 +751,53 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             run.victory = true;
             run.victoryTick = 0;
             player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.1f);
-            fireworks(player, run.slots.get(0));
+            fireworks(player, run.slots.get(0), run.cosmetic);
+        }
+        run.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> caseStep(run), CASE_TICK, CASE_TICK);
+    }
+
+    /**
+     * Вскрыть кейс пака: кейс списывается сразу (как и обычный), участвуют
+     * только префиксы этого пака, которых у игрока ещё нет.
+     */
+    private void openPackCase(Player player, ProfileData data, PrefixPackCatalog.Pack pack) {
+        if (caseRuns.containsKey(data.owner)) {
+            player.sendMessage(ProfileItems.text("Вскрытие кейса уже идёт.", NamedTextColor.RED));
+            return;
+        }
+        if (data.packCases(pack.id()) <= 0) {
+            player.sendMessage(ProfileItems.text("У вас нет кейсов пака «" + pack.name() + "».", NamedTextColor.RED));
+            return;
+        }
+        List<PrefixCatalog.Prefix> pool = pack.prefixes().stream()
+                .filter(prefix -> !data.ownsPrefix(prefix.id())).toList();
+        if (pool.isEmpty()) {
+            player.sendMessage(ProfileItems.text("Из пака «" + pack.name() + "» у вас уже есть все префиксы.", NamedTextColor.RED));
+            return;
+        }
+        if (!data.takePackCase(pack.id())) return;
+        try {
+            savePrefix(data);
+        } catch (RuntimeException ex) {
+            // Не записали — возвращаем кейс, чтобы он не пропал зря.
+            data.addPackCase(pack.id(), PrefixPackCatalog.expiresAt(System.currentTimeMillis(), pack.timeHours()));
+            player.sendMessage(ProfileItems.text("Не удалось открыть кейс: " + ex.getMessage(), NamedTextColor.RED));
+            return;
+        }
+        List<PrefixCatalog.Prefix> shuffled = new ArrayList<>(pool);
+        Collections.shuffle(shuffled, new java.util.Random());
+        int count = Math.min(CASE_MAX, shuffled.size());
+        CaseRun run = new CaseRun(data.owner, count, false, pack.id());
+        for (int i = 0; i < count; i++) run.slots.add(shuffled.get(i).id());
+        caseRuns.put(data.owner, run);
+        clickSound(player);
+        open(player, data.owner, Screen.PREFIX_CASE, 0, null);
+        if (count == 1) {
+            // Остался один префикс: показываем его и забираем через 4 секунды.
+            run.victory = true;
+            run.victoryTick = 0;
+            player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.1f);
+            fireworks(player, run.slots.get(0), run.cosmetic);
         }
         run.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> caseStep(run), CASE_TICK, CASE_TICK);
     }
@@ -354,7 +808,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         } catch (RuntimeException ex) {
             // Даже если анимация упала (например, не загрузился мир), кейс уже списан —
             // завершаем вскрытие и выдаём оставшийся префикс.
-            plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка анимации кейса префиксов " + run.owner, ex);
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка анимации кейса " + (run.cosmetic ? "косметики " : "префиксов ") + run.owner, ex);
             if (caseRuns.get(run.owner) == run) finalizeCase(run);
         }
     }
@@ -375,7 +829,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 run.victoryTick = run.elapsed;
                 if (player != null) {
                     player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 1.0f, 1.1f);
-                    fireworks(player, run.survivor());
+                    fireworks(player, run.survivor(), run.cosmetic);
                 }
             }
         }
@@ -405,12 +859,14 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         run.alive--;
     }
 
-    /** Салют цветом выигранного префикса над игроком. */
-    private void fireworks(Player player, String prefixId) {
-        PrefixCatalog.Prefix prefix = prefixes.get(prefixId);
-        if (prefix == null) return;
+    /** Салют цветом выигранного префикса (или косметики) над игроком. */
+    private void fireworks(Player player, String winnerId, boolean cosmetic) {
+        net.kyori.adventure.text.format.TextColor won = cosmetic
+                ? (cosmetics.get(winnerId) == null ? null : cosmetics.get(winnerId).color())
+                : (prefixes.get(winnerId) == null ? null : prefixes.get(winnerId).color());
+        if (won == null) return;
         try {
-            int rgb = prefix.color().value();
+            int rgb = won.value();
             var color = org.bukkit.Color.fromRGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
             for (int i = 0; i < 2; i++) {
                 Location location = player.getLocation().add(0, 1.2, 0);
@@ -430,66 +886,126 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         caseRuns.remove(run.owner);
         Player player = Bukkit.getPlayer(run.owner);
         String winner = run.survivor();
+        // Каталог мог измениться во время анимации: не выдаём удалённый id,
+        // а выбираем запасного победителя из актуального каталога ниже.
+        if (run.cosmetic ? cosmetics.get(winner) == null : prefixes.get(winner) == null) winner = null;
         try {
             ProfileData data = profile(run.owner, player == null ? run.owner.toString() : player.getName());
-            if (winner == null || !data.addPrefix(winner)) {
+            if (!addWon(run.cosmetic, data, winner)) {
                 // Победитель уже был получен (например, выдан администратором во время вскрытия):
-                // кейс не пропадает, добираем любой ещё не полученный префикс.
-                winner = prefixes.list().stream().map(PrefixCatalog.Prefix::id)
-                        .filter(candidate -> !data.ownsPrefix(candidate)).findFirst().orElse(null);
-                if (winner == null || !data.addPrefix(winner)) {
-                    plugin.getLogger().warning("Кейс префиксов " + run.owner + ": все префиксы уже получены");
+                // кейс не пропадает, добираем любой ещё не полученный.
+                winner = run.cosmetic
+                        ? cosmetics.list().stream().map(CosmeticCatalog.Cosmetic::id)
+                                .filter(candidate -> !data.ownsCosmetic(candidate)).findFirst().orElse(null)
+                        : prefixes.list().stream().map(PrefixCatalog.Prefix::id)
+                                .filter(candidate -> !data.ownsPrefix(candidate)).findFirst().orElse(null);
+                if (!addWon(run.cosmetic, data, winner)) {
+                    plugin.getLogger().warning("Кейс " + (run.cosmetic ? "косметики " : "префиксов ")
+                            + run.owner + ": получено уже всё");
                     return;
                 }
             }
             savePrefix(data);
         } catch (RuntimeException ex) {
-            plugin.getLogger().log(java.util.logging.Level.WARNING, "Префикс из кейса не сохранён: " + run.owner, ex);
+            plugin.getLogger().log(java.util.logging.Level.WARNING,
+                    "Выигрыш из кейса не сохранён: " + run.owner, ex);
             return;
         }
         if (player == null || !player.isOnline()) {
-            pendingPrefixGrants.put(run.owner, winner); // Сообщим при входе.
+            // Сообщим при входе.
+            if (run.cosmetic) pendingCosmeticGrants.put(run.owner, winner);
+            else pendingPrefixGrants.put(run.owner, winner);
             return;
         }
-        announcePrefix(player, winner);
+        announceWin(player, winner, run.cosmetic);
         if (player.getOpenInventory().getTopInventory() != null
                 && player.getOpenInventory().getTopInventory().getHolder() instanceof Menu menu
-                && menu.owner.equals(run.owner) && menu.screen == Screen.PREFIX_CASE) {
+                && menu.owner.equals(run.owner)
+                && (menu.screen == Screen.PREFIX_CASE || menu.screen == Screen.COSMETIC_CASE)) {
             open(player, run.owner, Screen.PROFILE, 0, null);
         }
     }
 
-    private void announcePrefix(Player player, String winner) {
-        PrefixCatalog.Prefix prefix = prefixes.get(winner);
-        String name = prefix == null ? winner : prefix.name();
-        player.sendMessage(ProfileItems.text("Вы получили префикс «" + name + "»!", NamedTextColor.GREEN)
-                .append(ProfileItems.text(" Поменяйте его в /profile", NamedTextColor.WHITE)));
+    /** Положить выигрыш в коллекцию игрока: префикс или косметика. */
+    private static boolean addWon(boolean cosmetic, ProfileData data, String winner) {
+        if (winner == null) return false;
+        return cosmetic ? data.addCosmetic(winner) : data.addPrefix(winner);
+    }
+
+    private void announceWin(Player player, String winner, boolean cosmetic) {
+        String name;
+        if (cosmetic) {
+            CosmeticCatalog.Cosmetic won = cosmetics.get(winner);
+            name = won == null ? winner : won.name();
+        } else {
+            PrefixCatalog.Prefix won = prefixes.get(winner);
+            name = won == null ? winner : won.name();
+        }
+        player.sendMessage(ProfileItems.text("Вы получили " + (cosmetic ? "косметику «" : "префикс «") + name + "»!",
+                        NamedTextColor.GREEN)
+                .append(ProfileItems.text(" Выберите в /profile → «Настроить косметику»", NamedTextColor.WHITE)));
         player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
     }
 
     private void renderOpenCase(Player player) {
         Menu menu = menus.get(player.getUniqueId());
-        if (menu == null || menu.screen != Screen.PREFIX_CASE
+        if (menu == null || (menu.screen != Screen.PREFIX_CASE && menu.screen != Screen.COSMETIC_CASE)
                 || player.getOpenInventory().getTopInventory() != menu.inventory) return;
         populate(menu, profile(menu.owner, menu.owner.toString()));
     }
 
     private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen) {
+        open(viewer, owner, screen, page, chosen, null);
+    }
+
+    /** Открыть экран; для экрана пака ({@code Screen.PACK}) нужен ещё id пака. */
+    private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen, String pack) {
+        open(viewer, owner, screen, page, chosen, pack, PackKind.PREFIX);
+    }
+
+    /** Открыть экран паков префиксов или паков косметики. */
+    private void open(Player viewer, UUID owner, Screen screen, int page, UUID chosen, String pack, PackKind kind) {
         if (stopping) return;
         if (screen != Screen.PROFILE && !viewer.getUniqueId().equals(owner)) return;
         editing.remove(viewer.getUniqueId());
         try {
             ProfileData data = profile(owner, owner.toString());
             if (screen == Screen.PLACE && !data.medals().containsKey(chosen)) return;
-            Menu menu = new Menu(viewer.getUniqueId(), owner, screen, page, chosen);
-            String title = switch (screen) {
-                case PROFILE -> "Профиль • " + data.name();
-                case COLLECTION -> "Выбрать медаль";
-                case PLACE -> "Разместить медаль";
-                case PREFIX -> "Выбрать префикс";
-                case PREFIX_CASE -> "Вскрытие кейса префиксов";
-            };
-            menu.inventory = Bukkit.createInventory(menu, 27, Component.text(title, NamedTextColor.DARK_GRAY));
+            // Пака могло не стать (файл убрали, пока меню открыто): покажем список паков.
+            if (screen == Screen.PACK && findPack(kind, pack) == null) {
+                screen = Screen.PACKS;
+                pack = null;
+            }
+            Menu menu = new Menu(viewer.getUniqueId(), owner, screen, page, chosen, pack, kind);
+            Component titleComponent;
+            if (screen == Screen.PROFILE) {
+                // Основное меню профиля: кастомная фоновая текстура profile-menu1.png
+                titleComponent = Component.text("\uF808\uE121", NamedTextColor.WHITE).font(ProfileIcons.FONT);
+            } else if (screen == Screen.CUSTOMIZE) {
+                // Меню кастомизации и косметики: кастомная фоновая текстура profile-menu3.png
+                titleComponent = Component.text("\uF808\uE123", NamedTextColor.WHITE).font(ProfileIcons.FONT);
+            } else {
+                String title = switch (screen) {
+                    case PROFILE -> "Профиль • " + data.name();
+                    case COLLECTION -> "Выбрать медаль";
+                    case PLACE -> "Разместить медаль";
+                    case PREFIX -> "Выбрать префикс";
+                    case PREFIX_CASE -> "Вскрытие кейса префиксов";
+                    case CUSTOMIZE -> "Настроить";
+                    case COSMETIC -> "Выбрать косметику";
+                    case COSMETIC_CASE -> "Вскрытие кейса косметики";
+                    case PACKS -> menu.packKind == PackKind.COSMETIC ? "Наборы косметики" : "Префиксы";
+                    case PACK -> {
+                        ItemPack shown = findPack(menu.packKind, menu.pack);
+                        yield shown == null
+                                ? (menu.packKind == PackKind.COSMETIC ? "Пак косметики" : "Пак префиксов")
+                                : shown.name();
+                    }
+                };
+                titleComponent = Component.text(title, NamedTextColor.DARK_GRAY);
+            }
+            int size = (screen == Screen.PROFILE || screen == Screen.PLACE || screen == Screen.CUSTOMIZE) ? 54 : 27;
+            menu.inventory = Bukkit.createInventory(menu, size, titleComponent);
             populate(menu, data);
             Menu previous = menus.put(viewer.getUniqueId(), menu);
             if (viewer.openInventory(menu.inventory) == null) {
@@ -505,11 +1021,45 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private void populate(Menu menu, ProfileData data) {
         Inventory inventory = menu.inventory;
         inventory.clear();
-        var filler = ProfileItems.filler();
-        for (int i = 0; i < 27; i++) if (ProfileText.medalSlot(i) >= 0) inventory.setItem(i, filler);
         menu.medalsBySlot.clear();
         menu.prefixesBySlot.clear();
+        menu.cosmeticsBySlot.clear();
+        if (menu.screen == Screen.PROFILE) {
+            populateProfileScreen(menu, data);
+            return;
+        }
+        if (menu.screen == Screen.PLACE) {
+            populatePlaceScreen(menu, data);
+            return;
+        }
+        if (menu.screen == Screen.CUSTOMIZE) {
+            populateCustomizeScreen(menu, data);
+            return;
+        }
+        var filler = ProfileItems.filler();
+        for (int i = 0; i < 27; i++) if (ProfileText.medalSlot(i) >= 0) inventory.setItem(i, filler);
         populateDetails(menu, data);
+        if (menu.screen == Screen.COSMETIC) {
+            List<CosmeticCatalog.Cosmetic> all = cosmetics.list();
+            int pages = Math.max(1, (all.size() + 17) / 18);
+            menu.page = Math.clamp(menu.page, 0, pages - 1);
+            for (int i = 0; i < 18 && menu.page * 18 + i < all.size(); i++) {
+                CosmeticCatalog.Cosmetic cosmetic = all.get(menu.page * 18 + i);
+                int slot = ProfileText.inventorySlot(i);
+                menu.cosmeticsBySlot.put(slot, cosmetic.id());
+                inventory.setItem(slot, items.cosmeticEntry(cosmetic, data.ownsCosmetic(cosmetic.id()),
+                        cosmetic.id().equals(data.equippedCosmetic())));
+            }
+            if (menu.page > 0) inventory.setItem(9, items.page(false, menu.page, pages));
+            if (menu.page + 1 < pages) inventory.setItem(17, items.page(true, menu.page, pages));
+            inventory.setItem(13, items.cosmeticCase(data.cosmeticCases()));
+            inventory.setItem(COSMETIC_PACKS_SLOT, items.cosmeticPacksButton(cosmeticPackCaseTotal(data)));
+            return;
+        }
+        if (menu.screen == Screen.COSMETIC_CASE) {
+            renderCaseMenu(menu);
+            return;
+        }
         if (menu.screen == Screen.COLLECTION) {
             List<ProfileMedal> medals = new ArrayList<>(data.medals().values());
             int pages = Math.max(1, (medals.size() + 17) / 18);
@@ -523,6 +1073,16 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             }
             if (menu.page > 0) inventory.setItem(9, items.page(false, menu.page, pages));
             if (menu.page + 1 < pages) inventory.setItem(17, items.page(true, menu.page, pages));
+            return;
+        }
+        if (menu.screen == Screen.PACKS) {
+            if (menu.packKind == PackKind.COSMETIC) populateCosmeticPacks(menu, data);
+            else populatePacks(menu, data);
+            return;
+        }
+        if (menu.screen == Screen.PACK) {
+            if (menu.packKind == PackKind.COSMETIC) populateCosmeticPack(menu, data);
+            else populatePack(menu, data);
             return;
         }
         if (menu.screen == Screen.PREFIX) {
@@ -548,9 +1108,386 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         for (int i = 0; i < 18; i++) {
             ProfileMedal medal = data.medals().get(data.medalAt(i));
             int slot = ProfileText.inventorySlot(i);
-            if (menu.screen == Screen.PLACE) inventory.setItem(slot, items.destination(medal));
-            else if (medal != null) inventory.setItem(slot, items.medal(medal, List.of()));
+            if (medal != null) inventory.setItem(slot, items.medal(medal, List.of()));
         }
+    }
+
+    private void populateProfileScreen(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        inventory.clear();
+        boolean owner = menu.viewer.equals(menu.owner);
+
+        ItemStack empty = ProfileItems.emptySlot();
+
+        // 1 строка: витрина медалей (индексы 0..8). На пустом слоте — модель empty.json.
+        for (int i = 0; i < 9; i++) {
+            UUID medalId = data.medalAt(i);
+            ProfileMedal medal = medalId == null ? null : data.medals().get(medalId);
+            if (medal != null) {
+                inventory.setItem(i, items.medal(medal, List.of("Нажмите, чтобы переместить", "Shift + клик — снять с профиля")));
+            } else {
+                inventory.setItem(i, empty);
+            }
+        }
+
+        // 2 строка: пустые слоты (9..17) с моделью empty.json
+        for (int i = 9; i < 18; i++) {
+            inventory.setItem(i, empty);
+        }
+
+        // 3 строка: [1] [1] [2] [2] [3] [4] [4] [5] [5]  (слоты 18..26)
+        // 4 строка: [1] [1] [2] [2]  -  [4] [4] [5] [5]  (слоты 27..35)
+        ItemStack cosmeticBtn = items.invisibleCosmeticButton(owner);
+        ItemStack dislikeBtn = items.invisibleVoteButton(ProfileData.Vote.DISLIKE, data.voteBy(menu.viewer) == ProfileData.Vote.DISLIKE, data.dislikes(), owner);
+        ItemStack likeBtn = items.invisibleVoteButton(ProfileData.Vote.LIKE, data.voteBy(menu.viewer) == ProfileData.Vote.LIKE, data.likes(), owner);
+        ItemStack settingsBtn = items.invisibleSettingsButton(data.medals().size(), owner);
+
+        // [1] Настройка косметики
+        inventory.setItem(18, cosmeticBtn);
+        inventory.setItem(19, cosmeticBtn);
+        inventory.setItem(27, cosmeticBtn);
+        inventory.setItem(28, cosmeticBtn);
+
+        // [2] Кнопка дизлайка
+        inventory.setItem(20, dislikeBtn);
+        inventory.setItem(21, dislikeBtn);
+        inventory.setItem(29, dislikeBtn);
+        inventory.setItem(30, dislikeBtn);
+
+        // [3] Голова игрока (единственный предмет с видимой картинкой)
+        PrefixCatalog.Prefix equipped = prefixes.get(data.equippedPrefix());
+        inventory.setItem(22, items.head(data, data.name(), owner, equipped));
+
+        // [4] Кнопка лайка
+        inventory.setItem(23, likeBtn);
+        inventory.setItem(24, likeBtn);
+        inventory.setItem(32, likeBtn);
+        inventory.setItem(33, likeBtn);
+
+        // [5] Кнопка настройки медалей
+        inventory.setItem(25, settingsBtn);
+        inventory.setItem(26, settingsBtn);
+        inventory.setItem(34, settingsBtn);
+        inventory.setItem(35, settingsBtn);
+
+        // 4 строка слот 31: пустой слот с моделью empty.json
+        inventory.setItem(31, empty);
+
+        // 5 строка: пустые слоты (36..44) с моделью empty.json
+        for (int i = 36; i < 45; i++) {
+            inventory.setItem(i, empty);
+        }
+
+        // 6 строка: витрина медалей (индексы 9..17, слоты 45..53). На пустом слоте — модель empty.json.
+        for (int i = 9; i < 18; i++) {
+            UUID medalId = data.medalAt(i);
+            ProfileMedal medal = medalId == null ? null : data.medals().get(medalId);
+            int slot = ProfileText.profileInventorySlot(i);
+            if (medal != null) {
+                inventory.setItem(slot, items.medal(medal, List.of("Нажмите, чтобы переместить", "Shift + клик — снять с профиля")));
+            } else {
+                inventory.setItem(slot, empty);
+            }
+        }
+    }
+
+    private void populatePlaceScreen(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        inventory.clear();
+        for (int i = 0; i < 18; i++) {
+            ProfileMedal medal = data.medals().get(data.medalAt(i));
+            int slot = ProfileText.profileInventorySlot(i);
+            inventory.setItem(slot, items.destination(medal));
+        }
+        inventory.setItem(22, items.head(data, "Отмена.", true, null));
+    }
+
+    private void populateCustomizeScreen(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        inventory.clear();
+        boolean owner = menu.viewer.equals(menu.owner);
+
+        ItemStack empty = ProfileItems.emptySlot();
+        for (int i = 0; i < 54; i++) {
+            inventory.setItem(i, empty);
+        }
+
+        // [1] Кнопка «Обратно» золотым цветом (слот 9)
+        inventory.setItem(9, items.backButton());
+
+        // [2] Кнопка «Префиксы» белым цветом (слоты 11, 12, 20, 21)
+        ItemStack prefBtn = items.prefixesButton();
+        inventory.setItem(11, prefBtn);
+        inventory.setItem(12, prefBtn);
+        inventory.setItem(20, prefBtn);
+        inventory.setItem(21, prefBtn);
+
+        // [3] Кнопка «Косметика» белым цветом (слоты 13, 14, 22, 23)
+        ItemStack cosmBtn = items.cosmeticButton();
+        inventory.setItem(13, cosmBtn);
+        inventory.setItem(14, cosmBtn);
+        inventory.setItem(22, cosmBtn);
+        inventory.setItem(23, cosmBtn);
+
+        // [5] Голова игрока с основного профиля (слот 18)
+        PrefixCatalog.Prefix equipped = prefixes.get(data.equippedPrefix());
+        inventory.setItem(18, items.head(data, data.name(), owner, equipped));
+
+        // [6] «Все остальное» белым цветом (слоты 29, 30, 38, 39)
+        ItemStack everythingElse = items.everythingElseButton();
+        inventory.setItem(29, everythingElse);
+        inventory.setItem(30, everythingElse);
+        inventory.setItem(38, everythingElse);
+        inventory.setItem(39, everythingElse);
+
+        // [7] «Инвентарь» белым цветом (слоты 31, 32, 40, 41)
+        ItemStack invBtn = items.inventoryButton();
+        inventory.setItem(31, invBtn);
+        inventory.setItem(32, invBtn);
+        inventory.setItem(40, invBtn);
+        inventory.setItem(41, invBtn);
+
+        // [8] Сумма всех круток (слот 43)
+        int totalSpins = data.prefixCases() + data.cosmeticCases()
+                + cosmeticPackCaseTotal(data);
+        for (List<Long> list : data.packCasesSnapshot().values()) {
+            if (list != null) totalSpins += list.size();
+        }
+        inventory.setItem(43, items.totalSpinsItem(totalSpins, data.prefixCases(), data.cosmeticCases()));
+
+        // [4] 3 случайных неповторяющихся префикса и 3 случайных косметики (слоты 15, 16, 24, 25, 33, 34)
+        List<PrefixCatalog.Prefix> allPrefixes = new ArrayList<>(prefixes.list());
+        Collections.shuffle(allPrefixes);
+        List<CosmeticCatalog.Cosmetic> allCosmetics = new ArrayList<>(cosmetics.list());
+        Collections.shuffle(allCosmetics);
+
+        ItemStack p1 = allPrefixes.size() > 0 ? items.randomPrefixShowcase(allPrefixes.get(0)) : empty;
+        ItemStack p2 = allPrefixes.size() > 1 ? items.randomPrefixShowcase(allPrefixes.get(1)) : empty;
+        ItemStack p3 = allPrefixes.size() > 2 ? items.randomPrefixShowcase(allPrefixes.get(2)) : empty;
+
+        ItemStack c1 = allCosmetics.size() > 0 ? items.randomCosmeticShowcase(allCosmetics.get(0)) : empty;
+        ItemStack c2 = allCosmetics.size() > 1 ? items.randomCosmeticShowcase(allCosmetics.get(1)) : empty;
+        ItemStack c3 = allCosmetics.size() > 2 ? items.randomCosmeticShowcase(allCosmetics.get(2)) : empty;
+
+        inventory.setItem(15, c1);
+        inventory.setItem(16, c2);
+        inventory.setItem(24, c3);
+        inventory.setItem(25, p1);
+        inventory.setItem(33, p2);
+        inventory.setItem(34, p3);
+    }
+
+    private static boolean isCosmeticSlot(int slot) {
+        return slot == 18 || slot == 19 || slot == 27 || slot == 28;
+    }
+
+    private static boolean isDislikeSlot(int slot) {
+        return slot == 20 || slot == 21 || slot == 29 || slot == 30;
+    }
+
+    private static boolean isLikeSlot(int slot) {
+        return slot == 23 || slot == 24 || slot == 32 || slot == 33;
+    }
+
+    private static boolean isMedalSettingsSlot(int slot) {
+        return slot == 25 || slot == 26 || slot == 34 || slot == 35;
+    }
+
+    /** Пак по виду и id: префиксов или косметики. */
+    private ItemPack findPack(PackKind kind, String id) {
+        return kind == PackKind.COSMETIC ? cosmeticPacks.get(id) : packs.get(id);
+    }
+
+    /** Сколько всего кейсов наборов косметики у игрока — для кнопки «Наборы косметики». */
+    private static int cosmeticPackCaseTotal(ProfileData data) {
+        int total = 0;
+        for (List<Long> list : data.cosmeticPackCasesSnapshot().values()) {
+            if (list != null) total += list.size();
+        }
+        return total;
+    }
+
+    /**
+     * Меню паков: средний ряд — сундучки паков (по центру, до девяти штук),
+     * верхний и нижний ряды — случайные префиксы из всего каталога. Случайные
+     * префиксы можно надеть, если они у игрока есть: меню остаётся витриной
+     * того, что бывает, и в то же время не запирает надевание за вскрытием.
+     */
+    private void populatePacks(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        menu.packsBySlot.clear();
+        menu.prefixesBySlot.clear();
+
+        List<PrefixPackCatalog.Pack> all = packs.packs();
+        int shown = Math.min(all.size(), PACK_ROW_SIZE);
+        int start = PACK_ROW_START + Math.max(0, (PACK_ROW_SIZE - shown) / 2);
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < shown; i++) {
+            PrefixPackCatalog.Pack pack = all.get(i);
+            int slot = start + i;
+            menu.packsBySlot.put(slot, pack.id());
+            inventory.setItem(slot, items.prefixPack(pack, data.packCases(pack.id()),
+                    data.nearestPackExpiry(pack.id()), now));
+        }
+
+        List<PrefixCatalog.Prefix> catalog = prefixes.list();
+        if (catalog.isEmpty()) return;
+        for (int row : new int[] {0, 2}) {
+            for (int column = 0; column < 9; column++) {
+                PrefixCatalog.Prefix prefix = catalog.get(
+                        java.util.concurrent.ThreadLocalRandom.current().nextInt(catalog.size()));
+                int slot = row * 9 + column;
+                menu.prefixesBySlot.put(slot, prefix.id());
+                inventory.setItem(slot, items.prefixEntry(prefix, data.ownsPrefix(prefix.id()),
+                        prefix.id().equals(data.equippedPrefix())));
+            }
+        }
+    }
+
+    /**
+     * Экран одного пака: что внутри — сверху и снизу, а посередине кнопка
+     * «крутить кейс пака» и отмена обратно к списку паков.
+     *
+     * Префиксы пака показываются как в списке выбора: чужой — красным, надетый
+     * — с блеском. Нажать можно тоже как в списке: надеть свой, снять шифтом.
+     * Пак, которого больше нет (файл убрали, пока меню открыто), показывает
+     * список паков — меню не остаётся пустым.
+     */
+    private void populatePack(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        menu.packsBySlot.clear();
+        menu.prefixesBySlot.clear();
+
+        PrefixPackCatalog.Pack pack = menu.pack == null ? null : packs.get(menu.pack);
+        if (pack == null) {
+            populatePacks(menu, data);
+            return;
+        }
+
+        List<PrefixCatalog.Prefix> inside = pack.prefixes();
+        long now = System.currentTimeMillis();
+        int slot = PACK_TOP_ROW;
+        for (PrefixCatalog.Prefix raw : inside) {
+            // Показываем запись из общего каталога: у неё тот же номер, что при выдаче
+            // командой, и её анимация. Префикс, которого в каталоге уже нет, показываем как есть.
+            PrefixCatalog.Prefix prefix = prefixes.get(raw.id()) == null ? raw : prefixes.get(raw.id());
+            if (slot > PACK_TOP_ROW + 8) slot = PACK_BOTTOM_ROW;
+            if (slot > PACK_BOTTOM_ROW + 8) break; // Больше восемнадцати в меню не помест.
+            menu.prefixesBySlot.put(slot, prefix.id());
+            inventory.setItem(slot, items.prefixEntry(prefix, data.ownsPrefix(prefix.id()),
+                    prefix.id().equals(data.equippedPrefix())));
+            slot++;
+        }
+
+        inventory.setItem(PACK_BACK_SLOT, items.backToPacks());
+        inventory.setItem(PACK_SPIN_SLOT, items.packCase(pack, data.packCases(pack.id()),
+                data.nearestPackExpiry(pack.id()), now));
+    }
+
+    /**
+     * Меню наборов косметики: средний ряд — сундучки наборов (до девяти),
+     * верхний и нижний — случайная косметика из всего каталога. Устройство
+     * ровно как у меню паков префиксов.
+     */
+    private void populateCosmeticPacks(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        menu.packsBySlot.clear();
+        menu.cosmeticsBySlot.clear();
+
+        List<CosmeticPackCatalog.Pack> all = cosmeticPacks.packs();
+        int shown = Math.min(all.size(), PACK_ROW_SIZE);
+        int start = PACK_ROW_START + Math.max(0, (PACK_ROW_SIZE - shown) / 2);
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < shown; i++) {
+            CosmeticPackCatalog.Pack pack = all.get(i);
+            int slot = start + i;
+            menu.packsBySlot.put(slot, pack.id());
+            inventory.setItem(slot, items.cosmeticPack(pack, data.cosmeticPackCases(pack.id()),
+                    data.nearestCosmeticPackExpiry(pack.id()), now));
+        }
+
+        List<CosmeticCatalog.Cosmetic> catalog = cosmetics.list();
+        if (catalog.isEmpty()) return;
+        for (int row : new int[] {0, 2}) {
+            for (int column = 0; column < 9; column++) {
+                CosmeticCatalog.Cosmetic cosmetic = catalog.get(
+                        java.util.concurrent.ThreadLocalRandom.current().nextInt(catalog.size()));
+                int slot = row * 9 + column;
+                menu.cosmeticsBySlot.put(slot, cosmetic.id());
+                inventory.setItem(slot, items.cosmeticEntry(cosmetic, data.ownsCosmetic(cosmetic.id()),
+                        cosmetic.id().equals(data.equippedCosmetic())));
+            }
+        }
+    }
+
+    /**
+     * Экран одного набора косметики: что внутри — сверху и снизу, в середине
+     * кнопка «крутить кейс набора» и отмена назад к списку наборов.
+     */
+    private void populateCosmeticPack(Menu menu, ProfileData data) {
+        Inventory inventory = menu.inventory;
+        menu.packsBySlot.clear();
+        menu.cosmeticsBySlot.clear();
+
+        CosmeticPackCatalog.Pack pack = menu.pack == null ? null : cosmeticPacks.get(menu.pack);
+        if (pack == null) {
+            populateCosmeticPacks(menu, data);
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        int slot = PACK_TOP_ROW;
+        for (CosmeticCatalog.Cosmetic raw : pack.cosmetics()) {
+            // Показываем запись из общего каталога: у неё тот же номер, что при выдаче
+            // командой. Косметику, которой в каталоге уже нет, показываем как есть.
+            CosmeticCatalog.Cosmetic cosmetic = cosmetics.get(raw.id()) == null ? raw : cosmetics.get(raw.id());
+            if (slot > PACK_TOP_ROW + 8) slot = PACK_BOTTOM_ROW;
+            if (slot > PACK_BOTTOM_ROW + 8) break; // Больше восемнадцати в меню не поместят.
+            menu.cosmeticsBySlot.put(slot, cosmetic.id());
+            inventory.setItem(slot, items.cosmeticEntry(cosmetic, data.ownsCosmetic(cosmetic.id()),
+                    cosmetic.id().equals(data.equippedCosmetic())));
+            slot++;
+        }
+
+        inventory.setItem(PACK_BACK_SLOT, items.backToPacks());
+        inventory.setItem(PACK_SPIN_SLOT, items.cosmeticPackCase(pack, data.cosmeticPackCases(pack.id()),
+                data.nearestCosmeticPackExpiry(pack.id()), now));
+    }
+
+    /**
+     * Нажать префикс в меню: надеть свой, снять шифтом, если надет. Чужой не
+     * трогаем — просто говорим, что его нет.
+     */
+    private void pickPrefix(Player player, Menu menu, ProfileData data, int slot, boolean shift) {
+        String picked = menu.prefixesBySlot.get(slot);
+        if (picked == null) return;
+        PrefixCatalog.Prefix prefix = prefixes.get(picked);
+        if (prefix == null) return;
+        if (!data.ownsPrefix(picked)) {
+            player.sendMessage(ProfileItems.text("У вас нету этого префикса!", NamedTextColor.RED));
+            return;
+        }
+        if (shift && picked.equals(data.equippedPrefix())) unequipPrefix(player, data);
+        else if (!picked.equals(data.equippedPrefix())) equipPrefix(player, data, picked);
+        else clickSound(player);
+    }
+
+    /**
+     * Нажать косметику в меню (список косметики, наборы): надеть свою, снять
+     * шифтом, если надета. Чужую не трогаем — просто говорим, что её нет.
+     */
+    private void pickCosmetic(Player player, Menu menu, ProfileData data, int slot, boolean shift) {
+        String picked = menu.cosmeticsBySlot.get(slot);
+        if (picked == null) return;
+        CosmeticCatalog.Cosmetic cosmetic = cosmetics.get(picked);
+        if (cosmetic == null) return;
+        if (!data.ownsCosmetic(picked)) {
+            player.sendMessage(ProfileItems.text("У вас нету этой косметики!", NamedTextColor.RED));
+            return;
+        }
+        if (shift && picked.equals(data.equippedCosmetic())) unequipCosmetic(player, data);
+        else if (!picked.equals(data.equippedCosmetic())) equipCosmetic(player, data, picked);
+        else clickSound(player);
     }
 
     private void populateDetails(Menu menu, ProfileData data) {
@@ -565,9 +1502,9 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             menu.inventory.setItem(17, items.settings(data.medals().size(), owner));
         }
         if (profileScreen) {
-            // Кнопка: иконка надетого префикса как образец (без подписи «Текущий: …»), иначе случайный образец.
-            PrefixCatalog.Prefix equipped = prefixes.get(data.equippedPrefix());
-            menu.inventory.setItem(9, items.prefixButton(equipped != null ? equipped : randomPrefix(), owner));
+            // Кнопка «Настроить косметику» — незерская звезда. Префикс и косметика
+            // лежат за ней, в меню «Настроить» (второй ряд).
+            menu.inventory.setItem(9, items.cosmeticMenuButton(owner));
         }
     }
 
@@ -585,6 +1522,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 menu.inventory.setItem(slot, null);
                 continue;
             }
+            if (run.cosmetic) {
+                CosmeticCatalog.Cosmetic cosmetic = cosmetics.get(run.slots.get(i));
+                if (cosmetic != null) menu.inventory.setItem(slot, items.cosmeticReveal(cosmetic, i + 1));
+                continue;
+            }
             PrefixCatalog.Prefix prefix = prefixes.get(run.slots.get(i));
             if (prefix != null) menu.inventory.setItem(slot, items.prefixReveal(prefix, i + 1));
         }
@@ -595,7 +1537,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             if (!menu.owner.equals(owner)) continue;
             Player viewer = Bukkit.getPlayer(menu.viewer);
             if (viewer != null && viewer.getOpenInventory().getTopInventory() == menu.inventory) {
-                populateDetails(menu, profile(owner, owner.toString()));
+                populate(menu, profile(owner, owner.toString()));
             }
         }
     }
@@ -618,7 +1560,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         event.setCancelled(true); // Включая shift/цифры/двойной/creative: иконки не забираются из GUI.
         if (!(event.getWhoClicked() instanceof Player player) || !menu.viewer.equals(player.getUniqueId())) return;
         int slot = event.getRawSlot();
-        if (slot < 0 || slot >= 27 || !event.getClick().isMouseClick() || !queued.add(player.getUniqueId())) return;
+        if (slot < 0 || slot >= menu.inventory.getSize() || !event.getClick().isMouseClick() || !queued.add(player.getUniqueId())) return;
         boolean shift = event.isShiftClick();
         Bukkit.getScheduler().runTask(plugin, () -> {
             queued.remove(player.getUniqueId());
@@ -635,25 +1577,139 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         ProfileData data = profile(menu.owner, menu.owner.toString());
         boolean own = player.getUniqueId().equals(data.owner);
         if (menu.screen == Screen.PROFILE) {
-            if (slot == 12 || slot == 14) {
-                if (!own && subjects.vote(data, player.getUniqueId(), slot == 12 ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE)) {
+            if (isLikeSlot(slot) || isDislikeSlot(slot)) {
+                ProfileData.Vote vote = isLikeSlot(slot) ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE;
+                if (!own && subjects.vote(data, player.getUniqueId(), vote)) {
                     storage.changed(data.owner); refreshDetails(data.owner); clickSound(player);
+                    announceVote(data.owner, player, vote);
                 }
-            } else if (own && slot == 13) {
+            } else if (slot == 22) {
+                // Описание: в чужом профиле раньше молча ничего не происходило.
+                if (!own) { player.sendMessage(ProfileItems.text("Описание можно менять только в своём профиле.", NamedTextColor.RED)); return; }
                 if (voice.active(player.getUniqueId())) { voice.chat(player, ""); return; }
                 player.closeInventory();
                 editing.put(player.getUniqueId(), new Editing());
                 player.sendMessage(voice.prompt());
-            } else if (own && slot == 17) {
+            } else if (isMedalSettingsSlot(slot)) {
+                // Медали: то же самое — чужой профиль отвечает сообщением, а не молчанием.
+                if (!own) { player.sendMessage(ProfileItems.text("Медали можно расставлять только в своём профиле.", NamedTextColor.RED)); return; }
                 clickSound(player); open(player, data.owner, Screen.COLLECTION, 0, null);
-            } else if (slot == 9) {
+            } else if (isCosmeticSlot(slot)) {
                 clickSound(player);
-                if (own) open(player, data.owner, Screen.PREFIX, 0, null);
+                if (own) open(player, data.owner, Screen.CUSTOMIZE, 0, null);
                 else player.sendMessage(ProfileItems.text("Настраивать можно только свой профиль.", NamedTextColor.RED));
+            } else {
+                int medalIndex = ProfileText.profileMedalSlot(slot);
+                if (medalIndex >= 0) {
+                    UUID placedMedal = data.medalAt(medalIndex);
+                    if (placedMedal != null && own) {
+                        clickSound(player);
+                        if (shift) {
+                            data.unplace(player.getUniqueId(), placedMedal);
+                            storage.changed(data.owner);
+                            refresh(data.owner);
+                        } else {
+                            open(player, data.owner, Screen.PLACE, 0, placedMedal);
+                        }
+                    } else if (own) {
+                        clickSound(player);
+                        open(player, data.owner, Screen.COLLECTION, 0, null);
+                    }
+                }
             }
             return;
         }
         if (!own) return;
+        if (menu.screen == Screen.PLACE) {
+            int destination = ProfileText.profileMedalSlot(slot);
+            if (destination >= 0 && data.medals().containsKey(menu.chosen)) {
+                if (data.place(player.getUniqueId(), menu.chosen, destination)) storage.changed(data.owner);
+                clickSound(player); open(player, data.owner, Screen.PROFILE, 0, null); refresh(data.owner);
+            } else if (slot == 22) {
+                clickSound(player); open(player, data.owner, Screen.COLLECTION, 0, null);
+            }
+            return;
+        }
+        if (menu.screen == Screen.CUSTOMIZE) {
+            if (slot == 9) {
+                // [1] Обратно в профиль
+                clickSound(player);
+                open(player, data.owner, Screen.PROFILE, 0, null);
+                return;
+            }
+            if (slot == 11 || slot == 12 || slot == 20 || slot == 21) {
+                // [2] Префиксы
+                clickSound(player);
+                open(player, data.owner, Screen.PACKS, 0, null);
+                return;
+            }
+            if (slot == 13 || slot == 14 || slot == 22 || slot == 23) {
+                // [3] Косметика
+                clickSound(player);
+                open(player, data.owner, Screen.COSMETIC, 0, null);
+                return;
+            }
+            if (slot == 29 || slot == 30 || slot == 38 || slot == 39) {
+                // [6] Все остальное (заглушка)
+                clickSound(player);
+                return;
+            }
+            if (slot == 31 || slot == 32 || slot == 40 || slot == 41) {
+                // [7] Инвентарь (заглушка)
+                clickSound(player);
+                return;
+            }
+            if (slot == 43) {
+                // [8] Крутки
+                clickSound(player);
+                return;
+            }
+            if (slot == 18) {
+                // [5] Голова игрока
+                clickSound(player);
+                return;
+            }
+            if (slot == 15 || slot == 16 || slot == 24 || slot == 25 || slot == 33 || slot == 34) {
+                // [4] Случайные префиксы/косметика
+                clickSound(player);
+                return;
+            }
+            return;
+        }
+        if (menu.screen == Screen.PACKS) {
+            String packId = menu.packsBySlot.get(slot);
+            if (packId != null) {
+                // Сундучок пака — не сразу кейс: сначала показываем, что внутри.
+                if (findPack(menu.packKind, packId) != null) {
+                    clickSound(player);
+                    open(player, data.owner, Screen.PACK, 0, null, packId, menu.packKind);
+                }
+                return;
+            }
+            if (menu.packKind == PackKind.COSMETIC) pickCosmetic(player, menu, data, slot, shift);
+            else pickPrefix(player, menu, data, slot, shift);
+            return;
+        }
+        if (menu.screen == Screen.PACK) {
+            if (slot == PACK_BACK_SLOT) {
+                clickSound(player);
+                open(player, data.owner, Screen.PACKS, 0, null, null, menu.packKind);
+                return;
+            }
+            if (slot == PACK_SPIN_SLOT) {
+                if (menu.packKind == PackKind.COSMETIC) {
+                    CosmeticPackCatalog.Pack pack = menu.pack == null ? null : cosmeticPacks.get(menu.pack);
+                    if (pack != null) { clickSound(player); openCosmeticPackCase(player, data, pack); }
+                } else {
+                    PrefixPackCatalog.Pack pack = menu.pack == null ? null : packs.get(menu.pack);
+                    if (pack != null) { clickSound(player); openPackCase(player, data, pack); }
+                }
+                return;
+            }
+            if (menu.packKind == PackKind.COSMETIC) pickCosmetic(player, menu, data, slot, shift);
+            else pickPrefix(player, menu, data, slot, shift);
+            return;
+        }
         if (menu.screen == Screen.PREFIX) {
             if (slot == 9 && menu.page > 0) { clickSound(player); open(player, data.owner, Screen.PREFIX, menu.page - 1, null); return; }
             if (slot == 17 && (menu.page + 1) * 18 < prefixes.size()) { clickSound(player); open(player, data.owner, Screen.PREFIX, menu.page + 1, null); return; }
@@ -675,7 +1731,20 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             }
             return;
         }
-        if (menu.screen == Screen.PREFIX_CASE) return; // Вскрытие идёт само; клики по меню не мешают.
+        if (menu.screen == Screen.COSMETIC) {
+            if (slot == 9 && menu.page > 0) { clickSound(player); open(player, data.owner, Screen.COSMETIC, menu.page - 1, null); return; }
+            if (slot == 17 && (menu.page + 1) * 18 < cosmetics.size()) { clickSound(player); open(player, data.owner, Screen.COSMETIC, menu.page + 1, null); return; }
+            if (slot == 13) { clickSound(player); openCosmeticCase(player, data); return; }
+            if (slot == COSMETIC_PACKS_SLOT) {
+                // Наборы косметики — те же экраны паков, только с косметикой внутри.
+                clickSound(player);
+                open(player, data.owner, Screen.PACKS, 0, null, null, PackKind.COSMETIC);
+                return;
+            }
+            pickCosmetic(player, menu, data, slot, shift);
+            return;
+        }
+        if (menu.screen == Screen.PREFIX_CASE || menu.screen == Screen.COSMETIC_CASE) return; // Вскрытие идёт само; клики по меню не мешают.
         if (slot == 13) {
             clickSound(player);
             open(player, data.owner, menu.screen == Screen.PLACE ? Screen.COLLECTION : Screen.PROFILE, menu.page, null);
@@ -698,6 +1767,21 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                 clickSound(player); open(player, data.owner, Screen.PROFILE, 0, null); refresh(data.owner);
             }
         }
+    }
+
+    /**
+     * Владелец профиля узнаёт об оценке: зелёная строка за лайк, красная — за
+     * дизлайк, с ником того, кто поставил. Сообщение уходит тихо
+     * ({@link ChatNotice}): оценка не должна звучать среди игры.
+     *
+     * Себе оценку поставить нельзя, поэтому «свой» голос сюда не попадает.
+     */
+    private void announceVote(UUID owner, Player voter, ProfileData.Vote vote) {
+        Player target = Bukkit.getPlayer(owner);
+        if (target == null || target.getUniqueId().equals(voter.getUniqueId())) return;
+        boolean like = vote == ProfileData.Vote.LIKE;
+        ChatNotice.silent(target, (like ? "Вам поставили лайк — " : "Вам поставили дизлайк — ") + voter.getName(),
+                like ? NamedTextColor.GREEN : NamedTextColor.RED);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -762,7 +1846,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
                     ProfileData data = profile(target.profile(), target.name());
                     if (hit.action() == ProfilePanelGeometry.Action.PLAY_VOICE) { voice.play(player, data.voice()); return; }
                     ProfileData.Vote vote = hit.action() == ProfilePanelGeometry.Action.LIKE ? ProfileData.Vote.LIKE : ProfileData.Vote.DISLIKE;
-                    if (subjects.vote(data, player.getUniqueId(), vote)) { storage.changed(data.owner); refreshDetails(data.owner); clickSound(player); }
+                    if (subjects.vote(data, player.getUniqueId(), vote)) {
+                        storage.changed(data.owner); refreshDetails(data.owner); clickSound(player);
+                        announceVote(data.owner, player, vote);
+                    }
                 } catch (RuntimeException ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не удалось обработать нажатие карточки", ex); }
             }
         });
@@ -872,8 +1959,11 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         try {
             ProfileData data = profile(player);
             applyPrefixName(player, data);
+            applyCosmetic(player, data);
             String pending = pendingPrefixGrants.remove(player.getUniqueId());
-            if (pending != null) announcePrefix(player, pending);
+            if (pending != null) announceWin(player, pending, false);
+            String pendingCosmetic = pendingCosmeticGrants.remove(player.getUniqueId());
+            if (pendingCosmetic != null) announceWin(player, pendingCosmetic, true);
         }
         catch (RuntimeException ex) { player.sendMessage("§cПрофиль недоступен; обратитесь к администратору."); }
         cards.sneaking(player.getUniqueId(), player.isSneaking());
@@ -892,8 +1982,10 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         UUID id = event.getPlayer().getUniqueId();
         editing.remove(id); menus.remove(id); cardClicks.remove(id); rightClicks.remove(id); queued.remove(id);
         equippedPrefixes.remove(id);
+        equippedCosmetics.remove(id);
         removeClone(event.getPlayer());
         if (tags != null) tags.quit(event.getPlayer());
+        headCosmetics.quit(event.getPlayer());
         cards.quit(id); voice.quit(id); storage.unpin(id);
     }
 
@@ -917,7 +2009,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         if (args.length == 2 && args[0].equalsIgnoreCase("voice") && args[1].equalsIgnoreCase("reload")) {
             if (!admin(sender)) { sender.sendMessage("§cНет прав."); return true; }
             try { voice.reloadMessages(); sender.sendMessage("§aСообщения голосовых профилей перезагружены."); }
-            catch (Exception ex) { sender.sendMessage("§cНе удалось прочитать voice/config.yml."); }
+            catch (Exception ex) { sender.sendMessage("§cНе удалось прочитать settings/voice.yml."); }
             return true;
         }
         if (args.length > 0 && args[0].equalsIgnoreCase("clone")) {
@@ -945,8 +2037,17 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             if (!admin(sender)) { sender.sendMessage("§cНет прав."); return true; }
             try { caseCommand(sender, args); }
             catch (Exception ex) {
-                sender.sendMessage("§cНе удалось выдать кейс префиксов: " + ex.getMessage());
+                sender.sendMessage("§cНе удалось выдать кейс: " + ex.getMessage());
                 plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применена команда кейсов", ex);
+            }
+            return true;
+        }
+        if (args.length > 0 && args[0].equalsIgnoreCase("cosmetic")) {
+            if (!admin(sender)) { sender.sendMessage("§cНет прав."); return true; }
+            try { cosmeticCommand(sender, args); }
+            catch (Exception ex) {
+                sender.sendMessage("§cНе удалось применить команду косметики: " + ex.getMessage());
+                plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применена команда косметики", ex);
             }
             return true;
         }
@@ -961,6 +2062,160 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         help(sender);
         return true;
+    }
+
+    /**
+     * Перечитать префиксы и паки с диска: и {@code prefixes.yml}, и
+     * {@code plugins/f8-plugin/content/prefixpacks/*.yml}. Этим же методом пользуется
+     * {@code /f8 reload}, чтобы префиксы обновлялись вместе с остальными
+     * настройками плагина.
+     *
+     * Сначала файлы читаются и проверяются: если хоть один сломан, состояние не
+     * меняется, а причина уходит в журнал и в ответ вызывающему.
+     *
+     * @return текст для ответа вызывающему.
+     */
+    public String reloadPrefixes() {
+        PrefixCatalog base;
+        PrefixPackCatalog nextPacks;
+        PrefixCatalog next;
+        try {
+            base = PrefixCatalog.load(prefixConfig);
+            nextPacks = loadPacks(base);
+            next = base.withPacks(nextPacks);
+        } catch (Exception ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING,
+                    "Не перечитаны префиксы и паки: файлы не изменились (" + ex.getMessage() + ")", ex);
+            return "Префиксы и паки не перечитаны: ошибка в файлах (причина в журнале сервера)."
+                    + " Префиксов по-прежнему " + prefixes.size() + ".";
+        }
+        prefixes = next;
+        packs = nextPacks;
+        cards.prefixes(next); // Карточки профиля держали свой каталог — отдаём новый.
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            try {
+                ProfileData data = profile(player);
+                // Надетый префикс исчез из файла: снимаем его, чтобы ник не «завис» без префикса.
+                String equipped = data.equippedPrefix();
+                if (equipped != null && prefixes.get(equipped) == null && data.equipPrefix(null)) savePrefix(data);
+                applyPrefixName(player, data);
+            } catch (RuntimeException ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применён префикс после reload: " + player.getName(), ex); }
+        }
+        for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
+        return "Префиксы перезагружены: " + prefixes.size() + " (№" + prefixes.numbersText() + ")"
+                + (prefixes.animatedCount() > 0 ? ", с анимацией " + prefixes.animatedCount() : "")
+                + ", паков " + packs.size()
+                + ". Файлы: " + prefixConfig + " и " + packFolder;
+    }
+
+    /**
+     * /profile case pack give|take <ник> <пак> [число] — выдать или забрать
+     * кейсы пака префиксов, /profile case pack list <ник> — сколько их у игрока.
+     *
+     * <p>То же самое для наборов косметики — {@code /profile case cpack ...}
+     * (можно писать и {@code cosmeticpack}). Команды одинаковые, различается
+     * только вид пака, поэтому метод один.
+     *
+     * <p>Срок кейса считается с момента выдачи: {@code time-hours} из файла пака
+     * ({@code -1} — бессрочный).
+     */
+    private void packCaseCommand(CommandSender sender, String[] args, boolean cosmetic) throws Exception {
+        String command = cosmetic ? "cpack" : "pack";
+        String what = cosmetic ? "набора" : "пака";
+        if (args.length < 4) {
+            throw new IllegalArgumentException("Использование: /profile case " + command
+                    + " give|take <ник> <пак> [число] | /profile case " + command + " list <ник>");
+        }
+        String action = args[2].toLowerCase(java.util.Locale.ROOT);
+        if (!action.equals("give") && !action.equals("take") && !action.equals("list")) {
+            throw new IllegalArgumentException("Действие: give, take или list");
+        }
+        List<ItemPack> all = new ArrayList<>();
+        if (cosmetic) all.addAll(cosmeticPacks.packs());
+        else all.addAll(packs.packs());
+        if (action.equals("list")) {
+            Target target = medalTarget(args[3]);
+            ProfileData data = profile(target.id(), target.name());
+            sender.sendMessage(ProfileItems.text((cosmetic ? "Кейсы наборов косметики: " : "Кейсы паков: ") + data.name(),
+                    NamedTextColor.GRAY));
+            boolean any = false;
+            for (ItemPack pack : all) {
+                int count = packCaseCount(data, cosmetic, pack.id());
+                if (count <= 0) continue;
+                any = true;
+                sender.sendMessage(ProfileItems.text("  " + pack.name() + " — " + count + " (" + pack.id() + ")",
+                        NamedTextColor.WHITE));
+            }
+            if (!any) sender.sendMessage(ProfileItems.text("  кейсов нет", NamedTextColor.DARK_GRAY));
+            return;
+        }
+        if (args.length < 5) {
+            throw new IllegalArgumentException("Использование: /profile case " + command + " give|take <ник> <пак> [число]");
+        }
+        ItemPack pack;
+        if (cosmetic) pack = cosmeticPacks.resolve(args[4]);
+        else pack = packs.resolve(args[4]);
+        if (pack == null) throw new IllegalArgumentException("Нет такого пака: " + args[4]);
+        int amount = 1;
+        if (args.length >= 6) {
+            try {
+                amount = Integer.parseInt(args[5]);
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException("Число кейсов — целое число");
+            }
+        }
+        if (amount <= 0) throw new IllegalArgumentException("Число кейсов больше нуля");
+        Target target = medalTarget(args[3]);
+        ProfileData data = profile(target.id(), target.name());
+        long now = System.currentTimeMillis();
+        if (action.equals("give")) {
+            for (int i = 0; i < amount; i++) {
+                packCaseAdd(data, cosmetic, pack.id(), PackFile.expiresAt(now, pack.timeHours()));
+            }
+        } else {
+            int taken = 0;
+            for (int i = 0; i < amount; i++) if (packCaseTake(data, cosmetic, pack.id())) taken++;
+            if (taken == 0) {
+                sender.sendMessage(ProfileItems.text("У игрока «" + data.name() + "» нет кейсов " + what + " «"
+                        + pack.name() + "».", NamedTextColor.RED));
+                return;
+            }
+            amount = taken;
+        }
+        savePrefix(data);
+        String tail = pack.timeHours() < 0 ? "бессрочно" : "на " + pack.timeHours() + " ч";
+        Player online = Bukkit.getPlayer(data.owner);
+        if (online != null && online.isOnline()) {
+            online.sendMessage(ProfileItems.text((action.equals("give") ? "Вы получили " : "У вас забрали ")
+                    + amount + " " + ProfileItems.plural(amount, "кейс", "кейса", "кейсов") + " " + what + " «"
+                    + pack.name() + "»" + (action.equals("give") ? " (" + tail + ")" : "") + "!",
+                    action.equals("give") ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
+            if (action.equals("give")) {
+                online.playSound(online.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
+            }
+        }
+        if (!(sender instanceof Player self) || !self.getUniqueId().equals(data.owner)) {
+            sender.sendMessage("§7" + (action.equals("give") ? "Выдано " : "Забрано ") + amount + " "
+                    + ProfileItems.plural(amount, "кейс", "кейса", "кейсов") + " " + what + " «" + pack.name()
+                    + "» (" + pack.id() + "): " + data.name());
+        }
+        refresh(data.owner);
+    }
+
+    /** Сколько кейсов пака у игрока — пака префиксов или набора косметики. */
+    private static int packCaseCount(ProfileData data, boolean cosmetic, String packId) {
+        return cosmetic ? data.cosmeticPackCases(packId) : data.packCases(packId);
+    }
+
+    /** Забрать один кейс пака — префиксов или косметики. */
+    private static boolean packCaseTake(ProfileData data, boolean cosmetic, String packId) {
+        return cosmetic ? data.takeCosmeticPackCase(packId) : data.takePackCase(packId);
+    }
+
+    /** Выдать кейс пака — префиксов или косметики. */
+    private static void packCaseAdd(ProfileData data, boolean cosmetic, String packId, long expiresAt) {
+        if (cosmetic) data.addCosmeticPackCase(packId, expiresAt);
+        else data.addPackCase(packId, expiresAt);
     }
 
     /** /profile prefix give|take <игрок или UUID> <номер|all>, /profile prefix list <игрок>, /profile prefix reload. */
@@ -983,19 +2238,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             return;
         }
         if (args.length == 2 && args[1].equalsIgnoreCase("reload")) {
-            PrefixCatalog next = PrefixCatalog.load(prefixConfig); // Сначала проверяем файл: состояние не меняется при ошибке.
-            prefixes = next;
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                try {
-                    ProfileData data = profile(player);
-                    // Надетый префикс исчез из файла: снимаем его, чтобы ник не «завис» без префикса.
-                    String equipped = data.equippedPrefix();
-                    if (equipped != null && prefixes.get(equipped) == null && data.equipPrefix(null)) savePrefix(data);
-                    applyPrefixName(player, data);
-                } catch (RuntimeException ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Не применён префикс после reload: " + player.getName(), ex); }
-            }
-            for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
-            sender.sendMessage(ProfileItems.text("Префиксы перезагружены: " + prefixes.size() + " (№1–" + prefixes.size() + "). Файл: " + prefixConfig, NamedTextColor.GREEN));
+            sender.sendMessage(ProfileItems.text(reloadPrefixes(), NamedTextColor.GREEN));
             return;
         }
         if (args.length < 3) throw new IllegalArgumentException("Использование: /profile prefix give|take|list <игрок или UUID> [номер|all]");
@@ -1101,27 +2344,248 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
     }
 
-    /** /profile case prefix give <ник> — выдать игроку кейс префиксов. */
+    /** /profile case prefix|cosmetic give <ник> — выдать игроку кейс. */
     private void caseCommand(CommandSender sender, String[] args) throws Exception {
-        if (args.length != 4 || !args[1].equalsIgnoreCase("prefix") || !args[2].equalsIgnoreCase("give")) {
-            throw new IllegalArgumentException("Использование: /profile case prefix give <ник>");
+        if (args.length >= 2 && args[1].equalsIgnoreCase("pack")) {
+            packCaseCommand(sender, args, false);
+            return;
         }
+        if (args.length >= 2 && (args[1].equalsIgnoreCase("cpack") || args[1].equalsIgnoreCase("cosmeticpack"))) {
+            packCaseCommand(sender, args, true);
+            return;
+        }
+        boolean cosmetic = args.length >= 2 && args[1].equalsIgnoreCase("cosmetic");
+        boolean prefix = args.length >= 2 && args[1].equalsIgnoreCase("prefix");
+        if (args.length != 4 || (!cosmetic && !prefix) || !args[2].equalsIgnoreCase("give")) {
+            throw new IllegalArgumentException("Использование: /profile case prefix|cosmetic give <ник>");
+        }
+        String what = cosmetic ? "косметики" : "префиксов";
         Target target = medalTarget(args[3]);
         ProfileData data = profile(target.id(), target.name());
-        data.addPrefixCase();
+        if (cosmetic) data.addCosmeticCase();
+        else data.addPrefixCase();
         savePrefix(data);
         Player online = Bukkit.getPlayer(data.owner);
         if (online != null && online.isOnline()) {
-            online.sendMessage(ProfileItems.text("Вы получили кейс префиксов!", NamedTextColor.GREEN)
-                    .append(ProfileItems.text(" Откройте его в /profile!", NamedTextColor.WHITE)));
+            online.sendMessage(ProfileItems.text("Вы получили кейс " + what + "!", NamedTextColor.GREEN)
+                    .append(ProfileItems.text(" Откройте его в /profile → «Настроить косметику»!", NamedTextColor.WHITE)));
             online.playSound(online.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
         }
         if (!(sender instanceof Player player) || !player.getUniqueId().equals(data.owner)) {
-            sender.sendMessage("§7Кейс префиксов выдан: " + data.name());
+            sender.sendMessage("§7Кейс " + what + " выдан: " + data.name());
+        }
+    }
+
+    /**
+     * Перечитать основной каталог и заново обнаружить дополнительные файлы.
+     * Снапшот каталога меняется только после успешного разбора всех файлов,
+     * поэтому опечатка в новом YAML не снимает косметику с игроков.
+     * Этим методом пользуются и /profile cosmetic reload, и /f8 reload.
+     */
+    public String reloadCosmetics() {
+        CosmeticCatalog previous = cosmetics;
+        CosmeticPackCatalog nextPacks;
+        CosmeticCatalog next;
+        try {
+            // Наборы читаются раньше каталога: косметика наборов входит в общий список,
+            // иначе выигранную из набора вещь некуда надеть.
+            CosmeticCatalog base = CosmeticCatalog.load(cosmeticConfig);
+            nextPacks = CosmeticPackCatalog.load(cosmeticPackFolder, base,
+                    message -> plugin.getLogger().warning(message));
+            next = base.withPacks(nextPacks);
+        } catch (Exception ex) {
+            plugin.getLogger().log(java.util.logging.Level.WARNING,
+                    "Не перечитана косметика: прежний каталог сохранён (" + ex.getMessage() + ")", ex);
+            return "Косметика не перечитана: ошибка в YAML (причина в журнале сервера)."
+                    + " По-прежнему доступно " + previous.size() + ".";
+        }
+
+        int added = 0;
+        for (CosmeticCatalog.Cosmetic cosmetic : next.list()) {
+            if (previous.get(cosmetic.id()) == null) added++;
+        }
+        cosmetics = next;
+        cosmeticPacks = nextPacks;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            try {
+                ProfileData data = profile(player);
+                // Если запись удалили, не оставляем надетый предмет-призрак.
+                // При ошибке сохранения возвращаем выбор в ProfileData.
+                String equipped = data.equippedCosmetic();
+                if (equipped != null && next.get(equipped) == null && data.equipCosmetic(null)) {
+                    try {
+                        savePrefix(data);
+                    } catch (RuntimeException ex) {
+                        data.equipCosmetic(equipped);
+                        throw ex;
+                    }
+                }
+                applyCosmetic(player, data);
+            } catch (RuntimeException ex) {
+                plugin.getLogger().log(java.util.logging.Level.WARNING,
+                        "Не применена косметика после reload: " + player.getName(), ex);
+            }
+        }
+        for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
+        return "Косметика перезагружена: " + next.size() + " (№" + next.numbersText() + "), новых: " + added
+                + ", наборов " + nextPacks.size()
+                + ". Файл: " + cosmeticConfig + ", наборы: " + cosmeticPackFolder + "/*.yml";
+    }
+
+    /**
+     * /profile cosmetic give|take <игрок или UUID> <номер|all>,
+     * /profile cosmetic list <игрок>, /profile cosmetic reload.
+     * Устройство ровно как у /profile prefix.
+     */
+    private void cosmeticCommand(CommandSender sender, String[] args) throws Exception {
+        if (args.length == 1) { help(sender); return; }
+        if (args.length == 2 && args[1].equalsIgnoreCase("reload")) {
+            String result = reloadCosmetics();
+            sender.sendMessage(ProfileItems.text(result,
+                    result.startsWith("Косметика не") ? NamedTextColor.RED : NamedTextColor.GREEN));
+            return;
+        }
+        if (args.length == 2 && args[1].equalsIgnoreCase("test")) {
+            if (!(sender instanceof Player self)) { sender.sendMessage("§cТолько из игры."); return; }
+            for (String line : headCosmetics.diagnose(
+                    self, cosmetics.get(equippedCosmetics.get(self.getUniqueId())))) {
+                self.sendMessage(line);
+            }
+            return;
+        }
+        if (args.length == 2 && args[1].equalsIgnoreCase("status")) {
+            Player target = sender instanceof Player self ? self : null;
+            if (target == null) {
+                sender.sendMessage(ProfileItems.text("Из консоли нужен игрок: /profile cosmetic status <ник>", NamedTextColor.RED));
+                return;
+            }
+            CosmeticCatalog.Cosmetic cosmetic = cosmetics.get(equippedCosmetics.get(target.getUniqueId()));
+            sender.sendMessage(ProfileItems.text("Косметика " + target.getName() + ": "
+                    + (cosmetic == null
+                        ? "не выбрана — показывать нечего (профиль → Настроить → Косметика)"
+                        : "надета «" + cosmetic.name() + "», модель f8resurs:" + cosmetic.file())
+                    + "; " + headCosmetics.status(target), NamedTextColor.YELLOW));
+            return;
+        }
+        if (args.length < 3) throw new IllegalArgumentException("Использование: /profile cosmetic give|take|list <игрок или UUID> [номер|all]");
+        String action = args[1].toLowerCase(java.util.Locale.ROOT);
+        if (!action.equals("give") && !action.equals("take") && !action.equals("list")) {
+            throw new IllegalArgumentException("Действие: give, take или list");
+        }
+        Target target = medalTarget(args[2]);
+        ProfileData data = profile(target.id(), target.name());
+        if (action.equals("list")) {
+            sender.sendMessage(ProfileItems.text("Косметика «" + data.name() + "»:", NamedTextColor.GOLD));
+            for (CosmeticCatalog.Cosmetic cosmetic : cosmetics.list()) {
+                boolean owned = data.ownsCosmetic(cosmetic.id());
+                boolean equipped = cosmetic.id().equals(data.equippedCosmetic());
+                String mark = !owned ? " — нет" : equipped ? " — надета" : "";
+                sender.sendMessage(ProfileItems.text("№" + cosmetic.number() + " ", NamedTextColor.DARK_GRAY)
+                        .append(ProfileItems.text(cosmetic.name(), owned ? cosmetic.color() : NamedTextColor.DARK_GRAY))
+                        .append(ProfileItems.text(mark, equipped ? NamedTextColor.GREEN : NamedTextColor.GRAY)));
+            }
+            return;
+        }
+        if (args.length != 4) throw new IllegalArgumentException("Нужен номер косметики из файла или all: /profile cosmetic " + action + " <игрок> <номер|all>");
+        if (args[3].equalsIgnoreCase("all")) {
+            giveTakeAllCosmetics(sender, data, action);
+            return;
+        }
+        int number;
+        try { number = Integer.parseInt(args[3]); }
+        catch (NumberFormatException ex) { throw new IllegalArgumentException("Номер косметики — целое число или all (см. " + cosmeticConfig + ")"); }
+        CosmeticCatalog.Cosmetic cosmetic = cosmetics.byNumber(number);
+        if (cosmetic == null) throw new IllegalArgumentException("Косметика №" + number + " не найдена: доступны номера №1–" + cosmetics.size());
+        if (action.equals("give")) {
+            if (!data.addCosmetic(cosmetic.id())) {
+                sender.sendMessage(ProfileItems.text("У игрока «" + data.name() + "» уже есть косметика №" + number + " (", NamedTextColor.GRAY)
+                        .append(ProfileItems.text(cosmetic.name(), cosmetic.color())).append(ProfileItems.text(")", NamedTextColor.GRAY)));
+                return;
+            }
+        } else {
+            if (!data.revokeCosmetic(cosmetic.id())) {
+                sender.sendMessage(ProfileItems.text("У игрока «" + data.name() + "» нет косметики №" + number + " (", NamedTextColor.GRAY)
+                        .append(ProfileItems.text(cosmetic.name(), cosmetic.color())).append(ProfileItems.text(")", NamedTextColor.GRAY)));
+                return;
+            }
+        }
+        savePrefix(data);
+        Player online = Bukkit.getPlayer(data.owner);
+        if (online != null) {
+            applyCosmetic(online, data); // Снять/надеть надетую косметику, если затронута именно она.
+            if (action.equals("give")) {
+                online.sendMessage(ProfileItems.text("Вам выдана косметика №" + number + " ", NamedTextColor.GREEN)
+                        .append(ProfileItems.text(cosmetic.name(), cosmetic.color()))
+                        .append(ProfileItems.text(". Наденьте её в /profile → «Настроить косметику».", NamedTextColor.WHITE)));
+            } else {
+                online.sendMessage(ProfileItems.text("У вас забрали косметику №" + number + " ", NamedTextColor.RED)
+                        .append(ProfileItems.text(cosmetic.name(), cosmetic.color())));
+            }
+        }
+        refresh(data.owner);
+        if (!(sender instanceof Player player) || !player.getUniqueId().equals(data.owner)) {
+            sender.sendMessage(ProfileItems.text("Косметика №" + number + " (", NamedTextColor.GRAY)
+                    .append(ProfileItems.text(cosmetic.name(), cosmetic.color()))
+                    .append(ProfileItems.text(action.equals("give") ? ") выдана: " : ") изъята у: ", NamedTextColor.GRAY))
+                    .append(ProfileItems.text(data.name(), NamedTextColor.GREEN)));
+        }
+    }
+
+    /** Выдать или забрать сразу всю косметику (/profile cosmetic give|take <игрок> all). */
+    private void giveTakeAllCosmetics(CommandSender sender, ProfileData data, String action) throws Exception {
+        String name = data.name();
+        if (action.equals("give")) {
+            int added = 0;
+            for (CosmeticCatalog.Cosmetic each : cosmetics.list()) if (data.addCosmetic(each.id())) added++;
+            if (added == 0) {
+                sender.sendMessage(ProfileItems.text("У игрока «" + name + "» уже есть вся косметика.", NamedTextColor.GRAY));
+                return;
+            }
+            savePrefix(data);
+            Player online = Bukkit.getPlayer(data.owner);
+            if (online != null) {
+                online.sendMessage(ProfileItems.text("Вам выдана вся косметика (" + added + "). Выберите в /profile → «Настроить косметику».", NamedTextColor.GREEN));
+            }
+            refresh(data.owner);
+            if (!(sender instanceof Player player) || !player.getUniqueId().equals(data.owner)) {
+                sender.sendMessage(ProfileItems.text("Выдана вся косметика (" + added + "): ", NamedTextColor.GRAY)
+                        .append(ProfileItems.text(name, NamedTextColor.GREEN)));
+            }
+            return;
+        }
+        if (!data.clearCosmetics()) {
+            sender.sendMessage(ProfileItems.text("У игрока «" + name + "» нет косметики.", NamedTextColor.GRAY));
+            return;
+        }
+        savePrefix(data);
+        Player online = Bukkit.getPlayer(data.owner);
+        if (online != null) {
+            applyCosmetic(online, data); // Надетая косметика снята — убираем её и с головы.
+            online.sendMessage(ProfileItems.text("У вас забрали всю косметику.", NamedTextColor.RED));
+        }
+        refresh(data.owner);
+        if (!(sender instanceof Player player) || !player.getUniqueId().equals(data.owner)) {
+            sender.sendMessage(ProfileItems.text("У «" + name + "» изъята вся косметика.", NamedTextColor.GRAY));
         }
     }
 
     private record Target(UUID id, String name) { }
+
+    /** Настройки медалей — для /f8 drinks и проверок. */
+    MedalSettings medalSettings() {
+        return medalSettings;
+    }
+
+    /**
+     * Кривые медали за напитки: одна такая медаль пропускается, остальные работают.
+     * Пишем и в консоль, и админу — иначе опечатка в when: остаётся незамеченной.
+     */
+    private void reportMedalProblems(CommandSender sender) {
+        for (String problem : medalSettings.problems()) {
+            plugin.getLogger().warning("medals.yml: " + problem);
+            if (sender != null) medalMessage(sender, "error", "", "", 0, problem);
+        }
+    }
 
     private Target medalTarget(String argument) {
         OfflinePlayer player = Bukkit.getPlayerExact(argument);
@@ -1143,6 +2607,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             cards.refresh();
             for (Player player : Bukkit.getOnlinePlayers()) profile(player);
             for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
+            reportMedalProblems(sender);
             medalMessage(sender, "reloaded", "", "", 0, "");
             return;
         }
@@ -1212,12 +2677,22 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             sender.sendMessage("§7/profile medal take <игрок> <номер|UUID|all> — забрать медаль");
             sender.sendMessage("§7/profile medal reload — применить файлы и сообщения без перезапуска");
             sender.sendMessage("§6/profile case prefix give <игрок> — выдать кейс префиксов");
+            sender.sendMessage("§6/profile case cosmetic give <игрок> — выдать кейс косметики");
             sender.sendMessage("§6/profile prefix give|take <игрок> <номер|all> — выдать/забрать префикс по номеру или все сразу");
             sender.sendMessage("§7/profile prefix test [игрок] — проверить глифы ресурспака (картинки, а не квадраты)");
             sender.sendMessage("§6/profile prefix list <игрок> — какие префиксы есть у игрока");
-            sender.sendMessage("§6/profile prefix reload — перечитать prefixes.yml");
-            sender.sendMessage("§7Префиксы: /profile → «Настроить префикс». Файл: §e" + prefixConfig);
-            sender.sendMessage("§7Номер префикса — это порядок записей в prefixes.yml (№1 — первая запись).");
+            sender.sendMessage("§6/profile prefix reload — перечитать prefixes.yml и паки");
+            sender.sendMessage("§6/profile case pack give|take <ник> <пак> [число] — кейсы пака префиксов");
+            sender.sendMessage("§6/profile case pack list <ник> — сколько кейсов паков у игрока");
+            sender.sendMessage("§6/profile case cpack give|take <ник> <набор> [число] — кейсы набора косметики");
+            sender.sendMessage("§6/profile case cpack list <ник> — сколько кейсов наборов у игрока");
+            sender.sendMessage("§6/profile cosmetic give|take <игрок> <номер|all> — выдать/забрать косметику по номеру или всю сразу");
+            sender.sendMessage("§6/profile cosmetic list <игрок> — какая косметика есть у игрока");
+            sender.sendMessage("§6/profile cosmetic reload — перечитать settings/cosmetics.yml");
+            sender.sendMessage("§7Префикс и косметика: /profile → «Настроить косметику». Файлы: §e" + prefixConfig + "§7, §e" + cosmeticConfig);
+            sender.sendMessage("§7Номер префикса/косметики — это цифры в имени картинки/модели: pref1 — №1, kosmetika3 — №3.");
+            sender.sendMessage("§7Анимация префикса: animation.frames и animation.interval-hundredths (сотые секунды) в "
+                    + "settings/prefixes.yml.");
             sender.sendMessage("§7Имя ищется только в локальном кэше сервера; если игрок не найден, укажите UUID.");
         }
     }
@@ -1225,16 +2700,37 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         List<String> options = List.of();
-        if (args.length == 1) options = admin(sender) ? List.of("medal", "case", "prefix", "clone", "voice") : List.of();
+        if (args.length == 1) options = admin(sender) ? List.of("medal", "case", "prefix", "cosmetic", "clone", "voice") : List.of();
         else if (admin(sender) && args.length == 2 && args[0].equalsIgnoreCase("voice")) options = List.of("reload");
         else if (admin(sender) && args.length == 2 && args[0].equalsIgnoreCase("clone")) options = List.of("remove");
         else if (admin(sender) && args[0].equalsIgnoreCase("case")) {
-            if (args.length == 2) options = List.of("prefix");
-            else if (args.length == 3 && args[1].equalsIgnoreCase("prefix")) options = List.of("give");
-            else if (args.length == 4 && args[1].equalsIgnoreCase("prefix") && args[2].equalsIgnoreCase("give"))
+            boolean any = args.length >= 2 && (args[1].equalsIgnoreCase("prefix") || args[1].equalsIgnoreCase("cosmetic"));
+            boolean cosmeticPack = args.length >= 2 && (args[1].equalsIgnoreCase("cpack")
+                    || args[1].equalsIgnoreCase("cosmeticpack"));
+            boolean packAction = cosmeticPack || (args.length >= 2 && args[1].equalsIgnoreCase("pack"));
+            if (args.length == 2) options = List.of("prefix", "cosmetic", "pack", "cpack");
+            else if (args.length == 3 && any) options = List.of("give");
+            else if (args.length == 3 && packAction) options = List.of("give", "take", "list");
+            else if (args.length >= 5 && packAction && !args[2].equalsIgnoreCase("list")) {
+                options = cosmeticPack
+                        ? cosmeticPacks.packs().stream().map(CosmeticPackCatalog.Pack::id).toList()
+                        : packs.packs().stream().map(PrefixPackCatalog.Pack::id).toList();
+            }
+            else if (args.length == 4 && any && args[2].equalsIgnoreCase("give"))
                 options = Bukkit.getOnlinePlayers().stream()
                         .filter(player -> !(sender instanceof Player viewer) || viewer.canSee(player))
                         .map(Player::getName).toList();
+        } else if (admin(sender) && args[0].equalsIgnoreCase("cosmetic")) {
+            if (args.length == 2) options = List.of("give", "take", "list", "reload");
+            else if (args.length == 3 && !args[1].equalsIgnoreCase("reload")) options = Bukkit.getOnlinePlayers().stream()
+                    .filter(player -> !(sender instanceof Player viewer) || viewer.canSee(player))
+                    .map(Player::getName).toList();
+            else if (args.length == 4 && (args[1].equalsIgnoreCase("give") || args[1].equalsIgnoreCase("take"))) {
+                List<String> numbers = new ArrayList<>();
+                for (int n = 1; n <= cosmetics.size(); n++) numbers.add(Integer.toString(n));
+                numbers.add("all");
+                options = numbers;
+            }
         } else if (admin(sender) && args[0].equalsIgnoreCase("medal")) {
             if (args.length == 2) options = List.of("give", "take", "list", "reload");
             else if (args.length == 3 && !args[1].equalsIgnoreCase("reload")) options = Bukkit.getOnlinePlayers().stream()
@@ -1264,6 +2760,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     public void disable() {
         stopping = true;
         maintenance.cancel(); cards.disable(); subjects.disable(); voice.disable();
+        medalAnimation.disable();
         for (UUID id : editing.keySet()) {
             Player player = Bukkit.getPlayer(id);
             if (player != null) player.sendMessage("§7Редактирование описания отменено: плагин выключается.");
@@ -1280,12 +2777,14 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             if (winner != null) {
                 try {
                     ProfileData data = profile(run.owner, run.owner.toString());
-                    if (data.addPrefix(winner)) storage.changed(run.owner);
+                    if (addWon(run.cosmetic, data, winner)) storage.changed(run.owner);
                 } catch (RuntimeException ignored) { }
             }
         }
-        caseRuns.clear(); pendingPrefixGrants.clear();
+        caseRuns.clear(); pendingPrefixGrants.clear(); pendingCosmeticGrants.clear();
+        prefixAnimation.cancel();
         menus.clear(); queued.clear(); cardClicks.clear(); rightClicks.clear(); storage.shutdown();
         if (tags != null) tags.disable();
+        headCosmetics.disable();
     }
 }

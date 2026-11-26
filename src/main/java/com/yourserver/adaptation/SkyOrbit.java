@@ -15,9 +15,27 @@ final class SkyOrbit {
         return new Vector3f(world).rotateY((float) -radians).div(depthScale);
     }
 
-    static float depthScale(double farthestGeometry, int clientChunks, int serverChunks, double multiplier) {
+    /**
+     * Насколько отодвинуть сферу: чем дальше, тем правдоподобнее «небо» — звезду
+     * перекрывают и деревья, и облака, потому что она дальше них. {@code fill}
+     * задаёт долю видимой клиентом дальности, которую занимает сфера (0.5..1.0).
+     *
+     * <p>Множитель бывает и меньше единицы. Это не ошибка: если радиус сферы
+     * ({@code render-distance}) больше, чем клиент вообще рисует, сферу
+     * прижимает к границе видимости, а не выбрасывает за неё. Звёзды от этого
+     * не приближаются — они и так стоят на границе дальности, — зато
+     * {@code render-distance} становится честной ручкой «какого размера звёзды»:
+     * угловой размер считается как {@code star-scale / render-distance} и от
+     * множителя не зависит.
+     */
+    static float depthScale(double farthestGeometry, int clientChunks, int serverChunks, double multiplier, double fill) {
         int chunks = Math.max(2, Math.min(clientChunks > 0 ? clientChunks : serverChunks, serverChunks));
-        double safeDistance = chunks * 16.0 * 0.70;
-        return (float) Math.clamp(safeDistance / Math.max(1, farthestGeometry), 1.0, Math.max(1.0, multiplier));
+        double safeDistance = chunks * 16.0 * Math.clamp(fill, 0.5, 1.0);
+        double geometry = Math.max(1, farthestGeometry);
+        double upper = Math.max(1.0, multiplier);
+        // Ниже 0.2 сфера не сжимается: иначе опечатка в render-distance
+        // превратила бы звёзды в точку над головой.
+        double lower = Math.min(upper, 0.2);
+        return (float) Math.clamp(safeDistance / geometry, lower, upper);
     }
 }

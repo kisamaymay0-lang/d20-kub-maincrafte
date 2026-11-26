@@ -1,0 +1,13 @@
+{
+  "variants": {
+    "type=bottom": {
+      "model": "f8resurs:block/ancient_jug"
+    },
+    "type=double": {
+      "model": "minecraft:block/oak_planks"
+    },
+    "type=top": {
+      "model": "f8resurs:block/ancient_jug_filled"
+    }
+  }
+}

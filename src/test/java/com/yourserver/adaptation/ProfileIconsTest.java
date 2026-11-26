@@ -40,7 +40,8 @@ class ProfileIconsTest {
         // Ник не меняется: префикс добавляет только иконку, имя остаётся белым обычным шрифтом.
         // (Если ник унаследует шрифт иконки, клиент покажет его буквы пустыми квадратами.)
         var row = ProfileIcons.prefixedName(prefix, "Steve");
-        assertEquals("\uE106Steve", PlainTextComponentSerializer.plainText().serialize(row));
+        // Между иконкой префикса и ником — пробел: (префикс) Ник, а не слипшись.
+        assertEquals("\uE106 Steve", PlainTextComponentSerializer.plainText().serialize(row));
         assertEquals(NamedTextColor.WHITE, leafColor(row, "Steve"));
         assertEquals(Key.key("minecraft", "default"), leafFont(row, "Steve"));
         assertEquals(ProfileIcons.FONT, leafFont(row, "\uE106"));
@@ -77,7 +78,38 @@ class ProfileIconsTest {
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("empty_cod", "empty_salmon", "red_caviar", "black_caviar",
                 "caviar_sandwich_red", "caviar_sandwich_black", "water_flask", "poison_flask")));
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("icy_rime", "rime", "depleted_rime", "ice_caviar", "ice_caviar_sandwich")));
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of(
+                "rime_potion", "rime_potion_splash", "rime_potion_lingering")));
         assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("ancient_jug")));
-        assertEquals(14, F8Command.ITEM_CATALOG.stream().distinct().count());
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("crab_claw")));
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("shaker")));
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("hot_water")));
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of("pirate_rum")));
+        assertTrue(F8Command.ITEM_CATALOG.containsAll(List.of(
+                "cigarette", "cigarette_lit",
+                "cigarette_small", "cigarette_small_lit",
+                "cigarette_regular", "cigarette_regular_lit")),
+                "В каталоге есть холодная и горящая модель каждой сигареты");
+        assertEquals(27, F8Command.ITEM_CATALOG.stream().distinct().count());
+    }
+
+    @Test
+    void drinkMenuListsEveryDrink() {
+        assertEquals(List.of("drink_mead", "drink_matcha_tea", "drink_daiquiri",
+                        "drink_iced_latte", "drink_murk", "drink_pirate_rum"),
+                F8Command.DRINK_CATALOG, "в меню напитков ровно все напитки плагина");
+        // Идентификаторы меню повторяют id рецептов шейкера — так проще сверять.
+        assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_MEAD));
+        assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_MATCHA_TEA));
+        assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_DAIQUIRI));
+        assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_ICED_LATTE));
+        assertTrue(F8Command.DRINK_CATALOG.contains("drink_" + Shaker.RECIPE_MURK));
+        // Напиток, добавленный в settings/recipe-poilo.yml, попадает в меню сам.
+        for (String id : F8Command.DRINK_CATALOG) {
+            assertTrue(F8Command.drinkCatalog().contains(id), id);
+        }
+        for (DrinkRecipes.Drink drink : DrinkRecipes.current().list()) {
+            assertTrue(F8Command.drinkCatalog().contains("drink_" + drink.id()), drink.id());
+        }
     }
 }

@@ -42,7 +42,7 @@
     },
     {
       "when": { "note": "24", "instrument": "harp|basedrum|snare|hat|bass|bell|guitar|chime|xylophone|iron_xylophone|cow_bell|didgeridoo|bit|pling" },
-      "apply": { "model": "f8resurs:block/copper_note_block" }
+      "apply": { "model": "minecraft:block/note_block" }
     },
     {
       "when": { "note": "24", "instrument": "flute" },
