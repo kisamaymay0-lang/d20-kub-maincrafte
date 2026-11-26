@@ -603,6 +603,11 @@ public class BambooBarrel implements Listener {
                 int years = (int) (state.ageTicks / Math.max(1L, ticksPerYear));
                 int transfers = state.transfers + 1;
                 ItemStack bottle = createBarrelDrink(state.drink, years, transfers, 3);
+                // Медали за напитки: у бутылочки своя ступень качества на момент залива.
+                if (plugin instanceof AdaptationPlugin adaptation && adaptation.profileManager() != null) {
+                    int tier = BarrelDrinks.current().of(state.drink).tierAfterTransfers(years, transfers);
+                    adaptation.profileManager().drinkMade(player, state.drink, tier);
+                }
 
                 if (held.getAmount() > 1) {
                     held.setAmount(held.getAmount() - 1);

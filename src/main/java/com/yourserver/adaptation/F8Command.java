@@ -781,6 +781,28 @@ public class F8Command implements CommandExecutor, Listener {
                         + "значит и напитка в игре нет" + (similar.isEmpty() ? "" : ". Похожие id: " + similar));
             }
         }
+        // Медали за напитки: что прочитано из settings/medals.yml и почему медаль молчит.
+        ProfileManager profiles = plugin.profileManager();
+        if (profiles != null) {
+            MedalSettings medals = profiles.medalSettings();
+            lines.add("§8— медали за напитки (§fsettings/medals.yml§8) —");
+            if (medals.drinkMedals().isEmpty()) {
+                lines.add("§7раздела napitki: (или drinks:) нет — медали за напитки не выдаются");
+            }
+            for (MedalSettings.DrinkSpec spec : medals.drinkMedals().values()) {
+                StringBuilder line = new StringBuilder("§e" + spec.source().replace("drink_medal_", ""))
+                        .append(" §8· §fwhen: ").append(spec.trigger());
+                if ("drink-made".equals(spec.trigger())) {
+                    line.append(" §8· напиток: §f").append(spec.drink())
+                            .append(spec.alcoholOnly() ? " §8(нужен алкоголь)" : " §8(любой)");
+                }
+                if (!spec.filled()) line.append(" §c— выключена: пустые title/reasons");
+                lines.add(line.toString());
+            }
+            for (String problem : medals.problems()) lines.add("§c" + problem);
+            lines.add("§7Сделал напиток — шейкер сразу, бочка при наборе бутылочки (качество у бутылочки).");
+        }
+
         if (recipes.barrelDrinks().isEmpty()) {
             notes.add("§cбочковых напитков нет вообще: в recipe-poilo.yml ни у кого нет method: barrel");
         }

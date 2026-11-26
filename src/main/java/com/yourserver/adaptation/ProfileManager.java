@@ -202,7 +202,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         medalConfig = Layout.settings(plugin, "medals.yml");
         if (!Files.exists(medalConfig)) plugin.saveResource("settings/medals.yml", false);
         medalSettings = MedalSettings.defaults();
-        try { medalSettings = MedalSettings.load(medalConfig); }
+        try { medalSettings = MedalSettings.load(medalConfig); reportMedalProblems(null); }
         catch (Exception ex) { plugin.getLogger().log(java.util.logging.Level.WARNING, "Ошибка настройки медалей; временно используются стандартные значения", ex); }
         prefixConfig = Layout.settings(plugin, "prefixes.yml");
         if (!Files.exists(prefixConfig)) {
@@ -405,6 +405,103 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     private static ProfileMedal medal(MedalSettings.SandwichSpec spec, String source) {
         return new ProfileMedal(UUID.randomUUID(), spec.metal(), spec.title(), spec.reasons(), System.currentTimeMillis(), source);
+    }
+
+    // ===================== Медали за напитки =====================
+    //
+    // Условия живут в settings/medals.yml (блок napitki:, он же drinks:). Java ничего не
+    // знает про конкретные медали — только про пять условий, которые вызывают эти методы.
+
+    /**
+     * Игрок изготовил напиток: шейкер — ступень 0, бутылочка из бочки — 1..5.
+     * Безупречное качество = 5-я ступень.
+     */
+    void drinkMade(Player player, String drinkId, int tier) {
+        if (player == null || drinkId == null) return;
+        Map<String, MedalSettings.DrinkSpec> specs = medalSettings.drinkMedals();
+        if (specs.isEmpty()) return;
+        boolean alcoholic = DrinkMedalRules.isAlcoholic(drinkId);
+        boolean flawless = tier >= 5;
+        try {
+            ProfileData data = profile(player);
+            UUID owner = player.getUniqueId();
+            storage.prepareMedalChange(owner);
+            boolean changed = false;
+            if (flawless && DrinkMedalRules.isWine(drinkId)) {
+                // «Сделал безупречное вино» запоминается навсегда: по этим маркерам
+                // и выдаётся медаль за все виды вин.
+                changed |= data.markClaimed(DrinkMedalRules.flawlessWineMarker(drinkId));
+            }
+            for (MedalSettings.DrinkSpec spec : specs.values()) {
+                if (!spec.filled() || data.ownsReward(spec.source())) continue;
+                boolean match = switch (spec.trigger()) {
+                    case "drink-made" -> (!spec.alcoholOnly() || alcoholic)
+                            && DrinkMedalRules.drinkIncludes(spec.drink(), drinkId);
+                    case "flawless-alcohol" -> flawless && alcoholic;
+                    case "all-flawless-wines" -> flawless && DrinkMedalRules.allWinesFlawless(data);
+                    default -> false;
+                };
+                if (match) changed |= data.award(drinkMedal(spec));
+            }
+            commitDrinkAwards(player, data, owner, changed);
+        } catch (RuntimeException ex) {
+            medalMessage(player, "pending-error", player.getName(), "", 0, ex.getMessage());
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Не выдана медаль за напиток игроку " + player.getName(), ex);
+        }
+    }
+
+    /** Игрок выпил напиток: пиратский ром в океане засчитывается здесь. */
+    void drinkConsumed(Player player, String drinkId) {
+        if (player == null || drinkId == null) return;
+        if (medalSettings.drinkMedals().isEmpty()) return;
+        if (!inOcean(player)) return;
+        awardDrinkMedals(player, "ром в океане", spec -> "rum-in-ocean".equals(spec.trigger())
+                && (DrinkMedalRules.sameDrink(spec.drink(), drinkId) || DrinkMedalRules.isRum(drinkId)));
+    }
+
+    /** Шкала опьянения дошла до предела. */
+    void drunkMax(Player player) {
+        if (player == null || medalSettings.drinkMedals().isEmpty()) return;
+        awardDrinkMedals(player, "предел опьянения", spec -> "drunk-max".equals(spec.trigger()));
+    }
+
+    private void awardDrinkMedals(Player player, String reason, java.util.function.Predicate<MedalSettings.DrinkSpec> test) {
+        try {
+            ProfileData data = profile(player);
+            UUID owner = player.getUniqueId();
+            storage.prepareMedalChange(owner);
+            boolean changed = false;
+            for (MedalSettings.DrinkSpec spec : medalSettings.drinkMedals().values()) {
+                if (!spec.filled() || data.ownsReward(spec.source())) continue;
+                if (!test.test(spec)) continue;
+                changed |= data.award(drinkMedal(spec));
+            }
+            commitDrinkAwards(player, data, owner, changed);
+        } catch (RuntimeException ex) {
+            medalMessage(player, "pending-error", player.getName(), "", 0, ex.getMessage());
+            plugin.getLogger().log(java.util.logging.Level.WARNING, "Не выдана медаль за напиток (" + reason + ") игроку " + player.getName(), ex);
+        }
+    }
+
+    private void commitDrinkAwards(Player player, ProfileData data, UUID owner, boolean changed) {
+        if (!changed) return;
+        storage.changed(owner);
+        if (!storage.flushBlocking(owner)) throw new IllegalStateException("Медали не записаны; проверьте файл и примените /profile medal reload");
+        announcePending(player, data);
+        refresh(owner);
+    }
+
+    private static ProfileMedal drinkMedal(MedalSettings.DrinkSpec spec) {
+        return new ProfileMedal(UUID.randomUUID(), spec.metal(), spec.title(), spec.reasons(), System.currentTimeMillis(), spec.source());
+    }
+
+    /** Океан — любой биом океана. Проверка спрятана в try/catch: в тестах Bukkit нет. */
+    private static boolean inOcean(Player player) {
+        try {
+            return player.getWorld().getBiome(player.getLocation()).getKey().getKey().contains("ocean");
+        } catch (RuntimeException ex) {
+            return false;
+        }
     }
 
     // ===================== Префиксы и кейсы =====================
@@ -2454,6 +2551,22 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
 
     private record Target(UUID id, String name) { }
 
+    /** Настройки медалей — для /f8 drinks и проверок. */
+    MedalSettings medalSettings() {
+        return medalSettings;
+    }
+
+    /**
+     * Кривые медали за напитки: одна такая медаль пропускается, остальные работают.
+     * Пишем и в консоль, и админу — иначе опечатка в when: остаётся незамеченной.
+     */
+    private void reportMedalProblems(CommandSender sender) {
+        for (String problem : medalSettings.problems()) {
+            plugin.getLogger().warning("medals.yml: " + problem);
+            if (sender != null) medalMessage(sender, "error", "", "", 0, problem);
+        }
+    }
+
     private Target medalTarget(String argument) {
         OfflinePlayer player = Bukkit.getPlayerExact(argument);
         if (player == null) player = Bukkit.getOfflinePlayerIfCached(argument);
@@ -2474,6 +2587,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             cards.refresh();
             for (Player player : Bukkit.getOnlinePlayers()) profile(player);
             for (UUID owner : menus.values().stream().map(menu -> menu.owner).distinct().toList()) refresh(owner);
+            reportMedalProblems(sender);
             medalMessage(sender, "reloaded", "", "", 0, "");
             return;
         }

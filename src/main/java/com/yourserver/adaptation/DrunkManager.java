@@ -323,6 +323,9 @@ final class DrunkManager implements Listener {
         }
         if (next >= scale && previous < scale) {
             startHold(player);
+            // Предел шкалы достигнут: медаль «всему нужно знать меру» и подобные.
+            ProfileManager profiles = plugin.profileManager();
+            if (profiles != null) profiles.drunkMax(player);
         }
         if (next == 0) {
             decayProgress.remove(id);
@@ -905,6 +908,8 @@ final class DrunkManager implements Listener {
         if (BambooBarrel.isBarrelDrink(item)) {
             int units = unitsOf(item);
             if (units > 0) add(player, units);
+            ProfileManager profiles = plugin.profileManager();
+            if (profiles != null) profiles.drinkConsumed(player, BambooBarrel.getBarrelDrinkId(item));
             return;
         }
         // Напиток из шейкера: крепость задаётся строкой alcohol в recipe-poilo.yml.
@@ -912,6 +917,8 @@ final class DrunkManager implements Listener {
         if (shakerDrink != null) {
             int units = DrinkRecipes.current().alcoholOf(shakerDrink);
             if (units > 0) add(player, units);
+            ProfileManager profiles = plugin.profileManager();
+            if (profiles != null) profiles.drinkConsumed(player, shakerDrink);
             return;
         }
         if (item.getType() == Material.MILK_BUCKET) {

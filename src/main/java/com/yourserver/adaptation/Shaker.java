@@ -1480,6 +1480,10 @@ public class Shaker implements Listener {
 
         RecipeMatch match = matchRecipeAndAdditives(contents);
         ItemStack drinkItem = createDrinkItem(match.recipe(), match.additives());
+        // Медали за напитки: шейкер всегда даёт верхнюю ступень качества.
+        if (plugin instanceof AdaptationPlugin adaptation && adaptation.profileManager() != null) {
+            adaptation.profileManager().drinkMade(player, match.recipe(), 0);
+        }
 
         contents.clear();
         contents.add(drinkItem);

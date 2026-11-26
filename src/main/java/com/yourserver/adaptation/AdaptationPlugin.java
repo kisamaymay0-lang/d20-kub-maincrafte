@@ -296,6 +296,11 @@ public void onEnable() {
     );
 }
     
+    /** Медали профиля; до создания (ранние события) — null, вызывающие это учитывают. */
+    ProfileManager profileManager() {
+        return profileManager;
+    }
+
     @Override
     public void onDisable() {
         cleanupAll();
