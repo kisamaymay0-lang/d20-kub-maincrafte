@@ -170,6 +170,8 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private volatile PrefixPackCatalog packs;
     private MedalSettings medalSettings;
     private final ProfileItems items;
+    /** «Тотем медали»: при получении медали перед глазами игрока всплывает её картинка. */
+    private final MedalAnimation medalAnimation;
     private final ProfileCards cards;
     private final ProfileVoice voice;
     private final ProfileSubjects subjects;
@@ -244,6 +246,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         voice = new ProfileVoice(plugin, this::saveVoice);
         items = new ProfileItems(zone, medalSettings);
+        medalAnimation = new MedalAnimation(plugin);
         subjects = new ProfileSubjects(plugin, this::profile);
         cards = new ProfileCards(plugin, subject -> profile(subject.profile(), subject.name()), items, subjects, voice, prefixes);
         // Тег префикса над головой — чисто визуальное. По умолчанию выключен
@@ -352,10 +355,13 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
         }
         for (ProfileMedal medal : pending) {
             String rarity = medalSettings.style(medal.metal()).rarity();
-            Component broadcast = medalSettings.message("public", data.name(), rarity, medal.title(), 1, "", items.publicMedal(medal).asHoverEvent());
+            ItemStack picture = items.publicMedal(medal);
+            Component broadcast = medalSettings.message("public", data.name(), rarity, medal.title(), 1, "", picture.asHoverEvent());
             Component personal = medalSettings.message("personal", data.name(), rarity, medal.title(), 1, "");
             MedalDelivery.send(broadcast, personal, Bukkit::broadcast, player::sendMessage,
                     () -> player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f));
+            // Вместо тотема — изображение полученной медали (её модель из ресурспака).
+            medalAnimation.play(player, picture);
         }
     }
 
@@ -2740,6 +2746,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     public void disable() {
         stopping = true;
         maintenance.cancel(); cards.disable(); subjects.disable(); voice.disable();
+        medalAnimation.disable();
         for (UUID id : editing.keySet()) {
             Player player = Bukkit.getPlayer(id);
             if (player != null) player.sendMessage("§7Редактирование описания отменено: плагин выключается.");

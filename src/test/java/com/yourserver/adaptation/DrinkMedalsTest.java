@@ -159,27 +159,31 @@ class DrinkMedalsTest {
     }
 
     @Test
-    void недостающиеУсловияДописываютсяВФайлВладельца() throws Exception {
-        // У владельца медали уже есть, а строк when:/drink: нет — их дописывает ConfigSync.
-        String shipped = ShippedSettings.read("settings/medals.yml");
-        StringBuilder owner = new StringBuilder();
-        for (String line : shipped.split("\n", -1)) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith("when:") || trimmed.startsWith("drink:") || trimmed.startsWith("alcohol:")) {
-                continue;
-            }
-            owner.append(line).append('\n');
-        }
-        String defaults = ShippedSettings.read("settings/medals.yml");
-        List<String> missing = ConfigSync.missing(ConfigSync.parse(defaults), ConfigSync.parse(owner.toString()));
-        assertFalse(missing.isEmpty(), "условия медалей должны попасть в список недостающих ключей");
-        MedalSettings settings = load(ConfigSync.topUp(owner.toString(), defaults, missing));
+    void медалиИРецептыНапитковНеДописываются() {
+        // Владелец ведёт эти два файла сам: после перезапуска в них не должно появляться
+        // строк из комплекта. Остальные файлы настроек дополняются как раньше.
+        assertTrue(ConfigSync.NO_TOP_UP.contains("settings/medals.yml"));
+        assertTrue(ConfigSync.NO_TOP_UP.contains("settings/recipe-poilo.yml"));
+        assertFalse(ConfigSync.NO_TOP_UP.contains("settings/drunk.yml"));
+        assertFalse(ConfigSync.NO_TOP_UP.contains("settings/drinks.yml"));
+    }
 
-        assertEquals("flawless-alcohol", settings.drinkMedals().get("bezuprek").trigger());
-        assertEquals("drunk-max", settings.drinkMedals().get("buxlo").trigger());
-        assertTrue(settings.problems().isEmpty(), () -> "проблемы: " + settings.problems());
-        assertEquals("Без упрёков.", settings.drinkMedals().get("bezuprek").title(), "текст владельца не меняется");
-        assertEquals("true_mead", settings.drinkMedals().get("mead").drink(), "drink дописан из комплекта");
+    @Test
+    void безWhenМедальСчитаетсяЗаНапитокСЕёКлючом() throws Exception {
+        // Минимум, который нужен в файле: блок с названием, заслугами и drink.
+        MedalSettings settings = load(config("""
+                napitki:
+                  true_mead:
+                    drink: true_mead
+                    title: 'Истинная медовуха.'
+                    reasons:
+                      - 'Сделайте алкогольную медовуху.'
+                """));
+        MedalSettings.DrinkSpec spec = settings.drinkMedals().get("true_mead");
+        assertEquals("drink-made", spec.trigger(), "без when медаль ждёт изготовления напитка");
+        assertEquals("true_mead", spec.drink());
+        assertTrue(spec.filled());
+        assertTrue(settings.problems().isEmpty());
     }
 
     @Test

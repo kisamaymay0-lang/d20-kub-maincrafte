@@ -56,6 +56,15 @@ final class ConfigSync {
     /** Отметка перед дописанным куском, чтобы владелец видел, что появилось при обновлении. */
     static final String MARKER = "# f8-plugin: дописано при запуске — этих ключей не было в вашем файле";
 
+    /**
+     * Файлы, которые плагин НЕ дополняет: их владелец правит сам и не хочет, чтобы
+     * после перезапуска в них появлялись строки из комплекта. Если файла нет, он
+     * по-прежнему создаётся из комплекта; существующий — не трогается вовсе.
+     */
+    static final java.util.Set<String> NO_TOP_UP = java.util.Set.of(
+            Layout.SETTINGS + "/medals.yml",
+            Layout.SETTINGS + "/recipe-poilo.yml");
+
     private ConfigSync() { }
 
     /** Привести все файлы настроек к полному виду (вызывается при запуске и на /f8 reload). */
@@ -72,6 +81,8 @@ final class ConfigSync {
             plugin.getLogger().info("Создан " + name + " — полный файл настроек из комплекта.");
             return;
         }
+        // Медали и рецепты напитков владелец ведёт сам: дописывание строк ему мешает.
+        if (NO_TOP_UP.contains(name)) return;
         String actual = read(file);
         YamlConfiguration parsed = parse(actual);
         if (parsed == null) {                               // файл не читается: сохраняем как есть и пишем новый
