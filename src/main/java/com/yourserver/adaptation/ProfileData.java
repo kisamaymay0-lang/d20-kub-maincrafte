@@ -400,6 +400,19 @@ final class ProfileData {
         return true;
     }
 
+    /**
+     * Переписать текст уже выданной медали (id и дата остаются): названия и заслуги
+     * берутся из файла настроек, поэтому их правки видны без выдачи медали заново.
+     */
+    boolean refresh(ProfileMedal medal) {
+        ProfileMedal existing = medals.get(medal.id());
+        if (existing == null || existing.equals(medal)) return false;
+        medals.put(medal.id(), medal);
+        medalRevision++;
+        revision++;
+        return true;
+    }
+
     boolean hasReward(String source) {
         return rewards.contains(source);
     }

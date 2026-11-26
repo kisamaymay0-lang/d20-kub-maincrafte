@@ -87,6 +87,60 @@ final class DrunkSettingsTest {
     }
 
     @Test
+    void поведениеЧитаетсяИзФайла() {
+        DrunkSettings standard = DrunkSettings.parse(null);
+        assertEquals(60, standard.blackoutHoldSeconds());
+        assertEquals(16, standard.blackoutLieMinSeconds());
+        assertEquals(28, standard.blackoutLieMaxSeconds());
+        assertEquals(50, standard.blackoutWakePercent());
+        assertEquals(60, standard.hangoverSeconds());
+        assertEquals(1, standard.foodUnits());
+        assertEquals(1, standard.milkUnits());
+        assertEquals(3, standard.waterUnits());
+
+        DrunkSettings custom = DrunkSettings.parse(section("""
+                drunk:
+                  blackout-hold-seconds: 5
+                  blackout-lie-min-seconds: 3
+                  blackout-lie-max-seconds: 9
+                  blackout-wake-percent: 25
+                  hangover-seconds: 10
+                  food-units: 0
+                  milk-units: 2
+                  water-units: 5
+                """));
+        assertEquals(5, custom.blackoutHoldSeconds());
+        assertEquals(3, custom.blackoutLieMinSeconds());
+        assertEquals(9, custom.blackoutLieMaxSeconds());
+        assertEquals(25, custom.blackoutWakePercent());
+        assertEquals(10, custom.hangoverSeconds());
+        assertEquals(0, custom.foodUnits(), "0 — еда не снимает опьянение");
+        assertEquals(2, custom.milkUnits());
+        assertEquals(5, custom.waterUnits());
+    }
+
+    @Test
+    void кривыеЧислаПоведенияПодрезаются() {
+        DrunkSettings broken = DrunkSettings.parse(section("""
+                drunk:
+                  blackout-hold-seconds: -5
+                  blackout-lie-min-seconds: 0
+                  blackout-lie-max-seconds: 9999
+                  blackout-wake-percent: 300
+                  hangover-seconds: 0
+                  food-units: -3
+                  water-units: 999
+                """));
+        assertEquals(0, broken.blackoutHoldSeconds(), "отрицательная пауза — сразу падение");
+        assertEquals(1, broken.blackoutLieMinSeconds());
+        assertEquals(300, broken.blackoutLieMaxSeconds());
+        assertEquals(100, broken.blackoutWakePercent(), "просыпается с полной шкалой — не с пустой");
+        assertEquals(1, broken.hangoverSeconds());
+        assertEquals(0, broken.foodUnits());
+        assertEquals(50, broken.waterUnits());
+    }
+
+    @Test
     void своиЧислаЧитаютсяАКривыеПодрезаются() {
         DrunkSettings settings = DrunkSettings.parse(section("""
                 drunk:

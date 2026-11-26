@@ -82,16 +82,8 @@ final class DrunkManager implements Listener {
     /** Файл с показателями: {@code data/drunk.yml}. */
     static final String FILE = "drunk.yml";
 
-    /**
-     * Отключка в две фазы: сначала целую минуту игрок ещё на ногах, но шкалу нельзя
-     * сбить ничем, а потом он ложится и не встаёт 16–28 секунд.
-     */
-    private static final int BLACKOUT_HOLD_SECONDS = 60;
-    private static final int BLACKOUT_MIN_SECONDS = 16;
-    private static final int BLACKOUT_MAX_SECONDS = 28;
-    /** «Просто прилёг» на высоких стадиях: 2–4 секунды, встать нельзя. */
-    private static final int LIE_MIN_TICKS = 40;
-    private static final int LIE_MAX_TICKS = 80;
+    // Длительности отключки и похмелья живут в settings/drunk.yml
+    // (blackout-*, hangover-seconds), см. {@link DrunkSettings}.
     /** Баффы, которые выдаём мы сами, — их же и снимаем при смене стадии. */
     private static final PotionEffectType[] BOONS = {
             PotionEffectType.ABSORPTION,
@@ -103,8 +95,10 @@ final class DrunkManager implements Listener {
             PotionEffectType.HASTE,
             PotionEffectType.JUMP_BOOST
     };
-    /** Через сколько тиков после сна наступает похмелье. */
-    private static final int HANGOVER_TICKS = 60 * 20;
+    /** Похмелье: длина берётся из settings/drunk.yml (hangover-seconds). */
+    private int hangoverTicks() {
+        return Math.max(1, settings.hangoverSeconds()) * 20;
+    }
     /** Как часто освежаем зелья: раз в секунду, длительность — с запасом. */
     private static final int EFFECT_TICKS = 80;
     /** Прошлый менеджер — чтобы {@link #current()} пережил перезагрузку настроек. */
@@ -422,7 +416,7 @@ final class DrunkManager implements Listener {
         }
         hold.remove(id);
         decayProgress.remove(id);
-        int ticks = randomBetween(BLACKOUT_MIN_SECONDS, BLACKOUT_MAX_SECONDS) * 20;
+        int ticks = randomBetween(settings.blackoutLieMinSeconds(), settings.blackoutLieMaxSeconds()) * 20;
         startLie(player, ticks, true);
     }
 
@@ -460,7 +454,7 @@ final class DrunkManager implements Listener {
         Lie current = lie.get(id);
         if (current != null && current.blackout) return;
 
-        hold.put(id, BLACKOUT_HOLD_SECONDS * 20);
+        hold.put(id, Math.max(0, settings.blackoutHoldSeconds()) * 20);
         points.put(id, settings.scale());
         dropBoons(player, Set.of());
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_PLAYER_BURP,
@@ -470,9 +464,9 @@ final class DrunkManager implements Listener {
 
     private void finishBlackout(Player player) {
         UUID id = player.getUniqueId();
-        points.put(id, Math.max(1, settings.scale() / 2));
+        points.put(id, Math.max(1, settings.scale() * settings.blackoutWakePercent() / 100));
         decayProgress.remove(id);
-        startHangover(player, HANGOVER_TICKS);
+        startHangover(player, hangoverTicks());
         vomit.burst(player, settings, false);
     }
 
@@ -923,17 +917,17 @@ final class DrunkManager implements Listener {
         }
         if (item.getType() == Material.MILK_BUCKET) {
             hangover.remove(player.getUniqueId());
-            add(player, -1);
+            add(player, -settings.milkUnits());
             return;
         }
         if (WaterBottle.isWaterBottle(item)) {
             Integer left = hangover.get(player.getUniqueId());
-            if (left != null) hangover.put(player.getUniqueId(), Math.max(0, left - HANGOVER_TICKS / 2));
-            add(player, -3);
+            if (left != null) hangover.put(player.getUniqueId(), Math.max(0, left - hangoverTicks() / 2));
+            add(player, -settings.waterUnits());
             return;
         }
         if (item.getType().isEdible()) {
-            add(player, -1);
+            add(player, -settings.foodUnits());
         }
     }
 
@@ -994,7 +988,7 @@ final class DrunkManager implements Listener {
         if (value <= 0) return;
         clear(player);
         if (value * DrunkStage.MAX_POINTS >= settings.scale() * 25) {
-            startHangover(player, HANGOVER_TICKS);
+            startHangover(player, hangoverTicks());
         }
     }
 

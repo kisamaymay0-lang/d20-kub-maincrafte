@@ -52,6 +52,8 @@ final class MedalSettings {
     final SandwichSpec sandwichAllKinds;
     final SandwichSpec sandwichIceCaviar;
     private final Map<String, DrinkSpec> drinkMedals;
+    /** Тексты медалей из файла: по source — то, что должно быть написано у игрока. */
+    private final Map<String, Text> medalTexts;
     private final List<String> problems;
 
     private MedalSettings(Map<ProfileMedal.Metal, Style> styles, Map<String, String> messages, String title, List<String> reasons,
@@ -63,6 +65,50 @@ final class MedalSettings {
         // Порядок из файла важен: медали выдаются в том же порядке, что в medals.yml.
         this.drinkMedals = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(drinkMedals));
         this.problems = List.copyOf(problems);
+        // Названия и заслуги всегда берутся из файла, а не запоминаются в профиле:
+        // правка medals.yml должна быть видна в игре сразу.
+        Map<String, Text> texts = new HashMap<>();
+        if (sandwichAllKinds.filled()) {
+            texts.put(ProfileMedal.SANDWICH_ALL_KINDS,
+                    new Text(sandwichAllKinds.metal(), sandwichAllKinds.title(), sandwichAllKinds.reasons()));
+        }
+        if (sandwichIceCaviar.filled()) {
+            texts.put(ProfileMedal.SANDWICH_ICE_CAVIAR,
+                    new Text(sandwichIceCaviar.metal(), sandwichIceCaviar.title(), sandwichIceCaviar.reasons()));
+        }
+        texts.put(ProfileMedal.FIRST_CONSTELLATION, new Text(ProfileMedal.Metal.COPPER, title, List.copyOf(reasons)));
+        for (DrinkSpec spec : drinkMedals.values()) {
+            if (spec.filled()) texts.put(spec.source(), new Text(spec.metal(), spec.title(), spec.reasons()));
+        }
+        this.medalTexts = Map.copyOf(texts);
+    }
+
+    /** Название, заслуги и металл медали с этим источником — как в файле. */
+    private record Text(ProfileMedal.Metal metal, String title, List<String> reasons) { }
+
+    /**
+     * Медали игрока с текстом из файла: возвращает те, что надо переписать.
+     * Пустой список — всё уже совпадает.
+     */
+    List<ProfileMedal> refreshAll(ProfileData data) {
+        List<ProfileMedal> updated = new java.util.ArrayList<>();
+        if (data == null) return updated;
+        for (ProfileMedal medal : data.medals().values()) {
+            ProfileMedal next = refresh(medal);
+            if (next != null) updated.add(next);
+        }
+        return updated;
+    }
+
+    /** Тот же id и дата, но название, заслуги и металл — из файла. */
+    ProfileMedal refresh(ProfileMedal medal) {
+        if (medal == null || medal.source() == null || medal.source().isEmpty()) return null;
+        Text text = medalTexts.get(medal.source());
+        if (text == null) return null;
+        if (text.metal() == medal.metal() && text.title().equals(medal.title()) && text.reasons().equals(medal.reasons())) {
+            return null;
+        }
+        return new ProfileMedal(medal.id(), text.metal(), text.title(), text.reasons(), medal.awardedAt(), medal.source());
     }
 
     /** Проблемы отдельных медалей за напитки: одна кривая медаль не отменяет остальные. */

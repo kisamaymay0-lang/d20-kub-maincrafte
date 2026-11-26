@@ -324,6 +324,20 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
     private ProfileData profile(UUID owner, String name) {
         if (subjects != null && subjects.preview(owner)) return subjects.profile(owner);
         ProfileData data = storage.get(owner, name);
+        // Название и заслуги медалей — из medals.yml: правка файла видна в игре сразу,
+        // даже если медаль уже была выдана (id и дата остаются прежними).
+        List<ProfileMedal> renamed = medalSettings.refreshAll(data);
+        if (!renamed.isEmpty()) {
+            storage.prepareMedalChange(owner);
+            boolean changed = false;
+            for (ProfileMedal medal : renamed) changed |= data.refresh(medal);
+            if (changed) {
+                storage.changed(owner);
+                if (!storage.flushBlocking(owner)) {
+                    throw new IllegalStateException("Медали не записаны; проверьте файл и примените /profile medal reload");
+                }
+            }
+        }
         Player online = Bukkit.getPlayer(owner);
         if (online != null && data.rename(online.getName())) storage.changed(owner);
         long earnedAt = constellationMilestone.applyAsLong(owner);
@@ -361,7 +375,7 @@ public final class ProfileManager implements Listener, CommandExecutor, TabCompl
             MedalDelivery.send(broadcast, personal, Bukkit::broadcast, player::sendMessage,
                     () -> player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f));
             // Вместо тотема — изображение полученной медали (её модель из ресурспака).
-            medalAnimation.play(player, picture);
+            medalAnimation.play(player);
         }
     }
 

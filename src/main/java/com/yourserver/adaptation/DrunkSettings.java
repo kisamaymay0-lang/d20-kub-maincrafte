@@ -30,7 +30,15 @@ record DrunkSettings(int scale,
                      Set<Material> naturalFloor,
                      boolean ignoreCreative,
                      double pukeRate,
-                     int phantomMax) {
+                     int phantomMax,
+                     int blackoutHoldSeconds,
+                     int blackoutLieMinSeconds,
+                     int blackoutLieMaxSeconds,
+                     int blackoutWakePercent,
+                     int hangoverSeconds,
+                     int foodUnits,
+                     int milkUnits,
+                     int waterUnits) {
 
     /** Что стоит, если файла нет или в нём ничего не написано. */
     static DrunkSettings defaults() {
@@ -52,7 +60,15 @@ record DrunkSettings(int scale,
                         Material.TUFF, Material.SNOW_BLOCK, Material.PACKED_MUD),
                 true,
                 1.0,
-                16);
+                16,
+                60,
+                16,
+                28,
+                50,
+                60,
+                1,
+                1,
+                3);
     }
 
     /**
@@ -90,7 +106,15 @@ record DrunkSettings(int scale,
                 EnumSet.copyOf(floors),
                 section.getBoolean("ignore-creative", base.ignoreCreative()),
                 pukeRate,
-                phantomMax);
+                phantomMax,
+                (int) clamp(section.getInt("blackout-hold-seconds", base.blackoutHoldSeconds()), 0, 600),
+                (int) clamp(section.getInt("blackout-lie-min-seconds", base.blackoutLieMinSeconds()), 1, 300),
+                (int) clamp(section.getInt("blackout-lie-max-seconds", base.blackoutLieMaxSeconds()), 1, 300),
+                (int) clamp(section.getInt("blackout-wake-percent", base.blackoutWakePercent()), 1, 100),
+                (int) clamp(section.getInt("hangover-seconds", base.hangoverSeconds()), 1, 3600),
+                (int) clamp(section.getInt("food-units", base.foodUnits()), 0, 50),
+                (int) clamp(section.getInt("milk-units", base.milkUnits()), 0, 50),
+                (int) clamp(section.getInt("water-units", base.waterUnits()), 0, 50));
     }
 
     /**
